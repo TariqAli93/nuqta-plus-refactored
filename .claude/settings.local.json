@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(wc -l /d/dev_projects/nuqta-plus-lagecy/backend/src/services/*.js)"
+      "Bash(wc -l /d/dev_projects/nuqta-plus-lagecy/backend/src/services/*.js)",
+      "Bash(cat /d/dev_projects/nuqta-plus-refactored/frontend/src/utils/*.js)",
+      "Bash(node:*)",
+      "Bash(/d/dev_projects/nuqta-plus-refactored/backend/bin/node.exe --version)",
+      "Bash(cmd //c '\"D:\\\\dev_projects\\\\nuqta-plus-refactored\\\\backend\\\\bin\\\\node.exe\" --version')",
+      "Bash(\"backend/bin/node.exe\" -p \"process.version + ' arch=' + process.arch\")",
+      "Bash(./backend/bin/node.exe -p \"process.version\")"
     ]
   }
 }

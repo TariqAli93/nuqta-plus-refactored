@@ -20,7 +20,9 @@ if (isProduction && !process.env.JWT_SECRET) {
 
 const config = {
   server: {
-    port: process.env.PORT || 3050,
+    // Default port 41731 — matches packages/shared BACKEND_PORT.
+    // Override via PORT env variable.
+    port: parseInt(process.env.PORT || '41731', 10),
     host: process.env.HOST || '127.0.0.1',
     env: NODE_ENV,
   },

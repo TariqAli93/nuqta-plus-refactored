@@ -85,7 +85,7 @@
       {
         "provider": "github",
         "owner": "TariqAli93",
-        "repo": "nuqta-plus-legacy",
+        "repo": "nuqta-plus-refactored",
         "releaseType": "release"
       }
     ],

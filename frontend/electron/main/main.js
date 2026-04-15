@@ -13,6 +13,22 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { promises as fs } from 'fs-extra';
 import logger from '../scripts/logger.js';
 import BackendManager from '../scripts/backendManager.js';
+import { ensureBackendRunning, checkVersion } from '../scripts/backendChecker.js';
+import {
+  resolveActiveBackend,
+  readPointer,
+  listStagedVersions,
+  pruneOldVersions,
+} from '../scripts/versionManager.js';
+import {
+  applyBackendUpdate,
+  rollbackBackend,
+} from '../scripts/backendUpdater.js';
+import {
+  ensureDownloadRoot,
+  trustedRoots,
+  sanitizePath,
+} from '../scripts/security.js';
 import { setupAutoUpdater, checkForUpdates, startDownload } from '../scripts/autoUpdater.js';
 import { autoUpdater } from 'electron-updater';
 import { createLockFile } from '../scripts/firstRun.js';
@@ -28,7 +44,101 @@ let isQuitting = false;
 let backendReady = false;
 let splashTimeout = null;
 
+/** Lifecycle state reported to the Vue frontend via window.api.backend.status() */
+let backendStatus = 'starting'; // 'starting' | 'ready' | 'error'
+
 const backendManager = new BackendManager();
+
+// ── Backend lifecycle event wiring ──────────────────────────────────────────
+// The manager emits crash / restart / failure events. We translate them into
+// backendStatus transitions and push live updates to the renderer via
+// 'backend:statusChanged' so BackendGate can react without polling.
+
+function broadcastBackendStatus(extra = {}) {
+  const payload = { status: backendStatus, ...extra };
+  const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  if (target) {
+    try {
+      target.webContents.send('backend:statusChanged', payload);
+    } catch (err) {
+      logger.warn(`broadcastBackendStatus failed: ${err.message}`);
+    }
+  }
+}
+
+backendManager.on('started', ({ pid }) => {
+  logger.info(`[bm] backend started pid=${pid}`);
+});
+
+backendManager.on('crash', ({ code, signal }) => {
+  logger.warn(`[bm] backend crash code=${code} signal=${signal} — entering 'starting'`);
+  backendStatus = 'starting';
+  broadcastBackendStatus({ reason: 'crash', code, signal });
+});
+
+backendManager.on('restart-scheduled', ({ attempt, cooldownMs }) => {
+  logger.info(`[bm] restart scheduled attempt=${attempt} in ${cooldownMs}ms`);
+});
+
+backendManager.on('restart-success', async ({ attempt }) => {
+  logger.info(`[bm] restart-success attempt=${attempt} — re-verifying health`);
+  // The child is spawned, but we still need /health to pass before we can
+  // mark ready. ensureBackendRunning handles both the poll and version check.
+  try {
+    const { status, error } = await ensureBackendRunning(backendManager, logger);
+    backendStatus = status;
+    broadcastBackendStatus({ reason: 'restart-complete', attempt, error });
+  } catch (err) {
+    logger.error(err, { phase: 'post-restart-verify' });
+    backendStatus = 'error';
+    broadcastBackendStatus({ reason: 'restart-verify-failed', error: err.message });
+  }
+});
+
+backendManager.on('permanent-failure', async ({ attempts }) => {
+  logger.error(`[bm] permanent-failure after ${attempts} attempts`);
+
+  // Auto-rollback: if the crashing backend was a staged userData version,
+  // revert to the previous version and try one more time. We only attempt
+  // this once — if the rollback also fails we stay in permanent error.
+  const active = resolveActiveBackend();
+  const pointer = readPointer();
+  const canRollback =
+    active.source === 'userData' &&
+    pointer &&
+    (pointer.previousVersion || pointer.previousSource === 'baseline');
+
+  if (canRollback) {
+    logger.warn(`[rollback] auto-rollback from v${active.version} (crash loop)`);
+    backendStatus = 'starting';
+    broadcastBackendStatus({ reason: 'auto-rollback-begin', from: active.version });
+
+    const rb = rollbackBackend('crash-loop');
+    backendManager.resetRestartPolicy();
+
+    const result = await ensureBackendRunning(backendManager, logger);
+    backendStatus = result.status;
+    broadcastBackendStatus({
+      reason: 'auto-rollback-complete',
+      rolledBackTo: rb.to,
+      status: result.status,
+      error: result.error,
+    });
+
+    if (result.status === 'ready') {
+      logger.warn(`[rollback] recovered on v${result.version}`);
+      return;
+    }
+    logger.error(`[rollback] post-rollback still unhealthy: ${result.error}`);
+  }
+
+  backendStatus = 'error';
+  broadcastBackendStatus({ reason: 'permanent-failure', attempts });
+});
+
+backendManager.on('error', (err) => {
+  logger.error(err, { phase: 'backendManager-error' });
+});
 
 // --- منع تشغيل أكثر من نسخة ---
 const gotTheLock = app.requestSingleInstanceLock();
@@ -681,13 +791,20 @@ function tryToShowMainWindowAfterSplash() {
 async function startNormalApp() {
   createSplashWindow();
   createWindow();
-  try {
-    await backendManager.StartBackend();
-    backendReady = true;
-  } catch (error) {
-    logger.error('Failed to start backend, but continuing with UI:', error);
-    backendReady = true;
+
+  // Run ensureBackendRunning: spawn → poll /health → verify /version
+  const result = await ensureBackendRunning(backendManager, logger);
+  backendStatus = result.status;
+  broadcastBackendStatus({ reason: 'startup', version: result.version, error: result.error });
+
+  if (result.status === 'ready') {
+    logger.info(`Backend ready — version: ${result.version}`);
+  } else {
+    logger.error(`Backend failed to start: ${result.error}`);
+    // Still set backendReady so the main window appears and shows the error state
   }
+
+  backendReady = true;
   tryToShowMainWindowAfterSplash();
 }
 
@@ -801,6 +918,9 @@ app.whenReady().then(async () => {
 // --- عند إغلاق جميع النوافذ ---
 app.on('window-all-closed', async () => {
   isQuitting = true;
+  // Mark intentional + drop crash listeners so no zombie restart fires during quit.
+  backendManager.removeAllListeners('crash');
+  backendManager.removeAllListeners('restart-scheduled');
   await backendManager.CleanupBackendProcess();
   app.quit();
 });
@@ -817,6 +937,8 @@ app.on('before-quit', async (event) => {
     splashTimeout = null;
   }
 
+  backendManager.removeAllListeners('crash');
+  backendManager.removeAllListeners('restart-scheduled');
   await backendManager.CleanupBackendProcess();
   app.quit();
 });
@@ -850,6 +972,22 @@ ipcMain.handle('file:readFile', async (_e, filePath) => {
   return await fs.readFile(filePath);
 });
 
+// --- حالة الـ backend (للـ preload window.api) ---
+
+/** Returns current lifecycle status: 'starting' | 'ready' | 'error' */
+ipcMain.handle('backend:getStatus', () => backendStatus);
+
+/** Fetch /version from the running backend and return the version string */
+ipcMain.handle('backend:getVersion', async () => {
+  try {
+    const version = await checkVersion();
+    return version || 'unknown';
+  } catch (err) {
+    logger.warn(`backend:getVersion failed: ${err.message}`);
+    return 'unknown';
+  }
+});
+
 // --- التحكم في backend (يدوي فقط) ---
 ipcMain.handle('backend:start', async () => {
   await backendManager.StartBackend();
@@ -862,9 +1000,99 @@ ipcMain.handle('backend:stop', async () => {
 });
 
 ipcMain.handle('backend:restart', async () => {
+  backendStatus = 'starting';
+  broadcastBackendStatus({ reason: 'manual-restart-begin' });
   await backendManager.CleanupBackendProcess();
-  await backendManager.StartBackend();
-  return { ok: true };
+  // Manual restart is a user-initiated recovery — clear the crash budget so
+  // the next spawn isn't blocked by a prior permanent-failure state.
+  backendManager.resetRestartPolicy();
+  const result = await ensureBackendRunning(backendManager, logger);
+  backendStatus = result.status;
+  broadcastBackendStatus({ reason: 'manual-restart-complete', error: result.error });
+  return { ok: result.status === 'ready', status: backendStatus, error: result.error };
+});
+
+// ── Backend version management IPC ──────────────────────────────────────────
+
+/** Returns { active: {...}, pointer, staged: [...] } for diagnostics/admin UIs. */
+ipcMain.handle('backend:getVersionInfo', () => {
+  return {
+    active: resolveActiveBackend(),
+    pointer: readPointer(),
+    staged: listStagedVersions(),
+  };
+});
+
+/**
+ * Where trusted download archives must be placed before calling applyUpdate.
+ * Anything outside this directory is rejected by the updater's origin check.
+ */
+ipcMain.handle('backend:getDownloadRoot', () => {
+  try {
+    return { ok: true, path: sanitizePath(ensureDownloadRoot()) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * Apply a backend-only update. Caller is responsible for having downloaded
+ * and extracted the new bundle INTO <userData>/backend-downloads/<sub>/ —
+ * any other sourceDir is rejected by the updater's security checks.
+ */
+ipcMain.handle(
+  'backend:applyUpdate',
+  async (_e, { sourceDir, version, expectedHash } = {}) => {
+    if (!sourceDir || !version) {
+      return { ok: false, error: 'sourceDir and version are required' };
+    }
+    logger.info(`[ipc] backend:applyUpdate v${version}`);
+    backendStatus = 'starting';
+    broadcastBackendStatus({ reason: 'update-begin', version });
+
+    const result = await applyBackendUpdate({
+      sourceDir,
+      version,
+      expectedHash,
+      backendManager,
+    });
+
+    backendStatus = result.ok ? 'ready' : result.rolledBack ? 'ready' : 'error';
+    broadcastBackendStatus({
+      reason: result.ok ? 'update-success' : 'update-failed',
+      version,
+      rolledBack: !!result.rolledBack,
+      error: result.error,
+    });
+    return result;
+  }
+);
+
+/** Manual rollback trigger (admin / recovery). */
+ipcMain.handle('backend:rollback', async () => {
+  logger.warn('[ipc] backend:rollback requested');
+  await backendManager.CleanupBackendProcess();
+  backendManager.resetRestartPolicy();
+  const rb = rollbackBackend('manual');
+  const result = await ensureBackendRunning(backendManager, logger);
+  backendStatus = result.status;
+  broadcastBackendStatus({
+    reason: 'manual-rollback-complete',
+    rolledBackTo: rb.to,
+    error: result.error,
+  });
+  return { ok: result.status === 'ready', rolledBackTo: rb.to, error: result.error };
+});
+
+/** Prune old staged versions (keeps current + previous by default). */
+ipcMain.handle('backend:pruneVersions', () => {
+  try {
+    pruneOldVersions();
+    return { ok: true, staged: listStagedVersions() };
+  } catch (err) {
+    logger.error(err, { phase: 'prune' });
+    return { ok: false, error: err.message };
+  }
 });
 
 // --- استعادة النسخة الاحتياطية ---

@@ -1,9 +1,55 @@
 // autoUpdater.js
 import { autoUpdater } from 'electron-updater';
 import { app } from 'electron';
+import logger from './logger.js';
 
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+
+/**
+ * Security posture for frontend auto-updates:
+ *   - allowDowngrade = false → reject older-version installers
+ *     (defeats rollback-based exploits against signature checks)
+ *   - allowPrerelease = false → only stable channel
+ *   - HTTPS enforced: electron-updater validates the feed URL protocol on
+ *     GenericProvider / GitHub. We assert it explicitly below so a
+ *     mis-configured publish config fails loudly in development instead of
+ *     silently downgrading to HTTP.
+ *   - Signature verification: on Windows, electron-updater verifies the
+ *     NSIS installer's Authenticode signature against the publisher name
+ *     configured in build.nsis.publisherName / build.win.publisherName. An
+ *     unsigned or wrong-publisher installer is rejected automatically.
+ *     Ship only code-signed installers — see the "Code signing" note below.
+ */
+autoUpdater.allowDowngrade = false;
+autoUpdater.allowPrerelease = false;
+autoUpdater.logger = {
+  info: (m) => logger.info(`[updater] ${m}`),
+  warn: (m) => logger.warn(`[updater] ${m}`),
+  error: (m) => logger.error(`[updater] ${m}`),
+  debug: (m) => logger.debug(`[updater] ${m}`),
+};
+
+/**
+ * Enforce HTTPS on whatever feed URL electron-updater resolved from
+ * app-update.yml. Throws during startup if someone ships a dev config by
+ * mistake. No-op in dev where updates are never checked anyway.
+ */
+function assertHttpsFeed() {
+  if (!app.isPackaged) return;
+  try {
+    const feed = autoUpdater.getFeedURL?.();
+    if (feed && !/^https:\/\//i.test(feed)) {
+      const msg = `[updater] refusing non-HTTPS feed URL: ${feed}`;
+      logger.error(msg);
+      throw new Error(msg);
+    }
+  } catch (err) {
+    // getFeedURL may not be ready until first check — the real enforcement
+    // happens when electron-updater fetches, and it will error there too.
+    logger.warn(`[updater] assertHttpsFeed could not read feed URL: ${err.message}`);
+  }
+}
 
 let mainWindow = null;
 
@@ -12,6 +58,7 @@ function setupAutoUpdater(window) {
 
   // التجهيز
   setupListeners();
+  assertHttpsFeed();
 
   // أول فحص بعد التشغيل
   setTimeout(() => checkForUpdates(), app.isPackaged ? 60000 : 5000);

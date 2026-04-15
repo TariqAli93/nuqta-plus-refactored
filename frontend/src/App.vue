@@ -4,17 +4,20 @@
     <UpdateNotification />
     <LoadingProgressBar />
 
-    <main id="main-content" role="main" aria-label="المحتوى الرئيسي">
-      <router-view />
-    </main>
-    <AppSnackbar />
-    <AppErrorDialog />
+    <!-- Backend lifecycle gate — transparent pass-through when backend is ready -->
+    <BackendGate>
+      <main id="main-content" role="main" aria-label="المحتوى الرئيسي">
+        <router-view />
+      </main>
+      <AppSnackbar />
+      <AppErrorDialog />
 
-    <!-- مكون التحميل المركزي -->
-    <LoadingSpinner />
+      <!-- مكون التحميل المركزي -->
+      <LoadingSpinner />
 
-    <!-- مكون الإعداد الأولي — لا يعمل في نافذة التفعيل -->
-    <CreateFirstUser v-if="route.name !== 'Activation'" />
+      <!-- مكون الإعداد الأولي — لا يعمل في نافذة التفعيل -->
+      <CreateFirstUser v-if="route.name !== 'Activation'" />
+    </BackendGate>
   </v-app>
 </template>
 <script setup>
@@ -27,6 +30,7 @@ import LoadingSpinner from '@/components/LoadingSpinner.vue';
 import LoadingProgressBar from '@/components/LoadingProgressBar.vue';
 import UpdateNotification from '@/components/UpdateNotification.vue';
 import CreateFirstUser from '@/components/CreateFirstUser.vue';
+import BackendGate from '@/components/BackendGate.vue';
 
 const authStore = useAuthStore();
 const route = useRoute();

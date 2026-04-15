@@ -81,6 +81,11 @@ const start = async () => {
       };
     });
 
+    // Infrastructure route: version compatibility check used by Electron
+    fastify.get('/version', async () => {
+      return { version };
+    });
+
     // Register API routes
     await fastify.register(authRoutes, { prefix: '/api/auth' });
     await fastify.register(customerRoutes, { prefix: '/api/customers' });

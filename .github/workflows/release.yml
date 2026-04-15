@@ -1,0 +1,169 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Release — build, sign, smoke, publish
+#
+# Trigger: push of a tag matching v*.*.* (e.g. v1.0.13)
+#
+# Steps:
+#   1. Verify the tag matches root/frontend/backend/shared package.json
+#   2. Build the backend bundle and generate its SHA-256 manifest
+#   3. Build + sign the electron-builder NSIS installer
+#   4. Smoke test the packaged backend from release/win-unpacked
+#   5. Zip the backend bundle for standalone backend-only updates
+#   6. Create the GitHub Release and upload:
+#        - NuqtaPlus-Setup-<v>.exe                  (signed NSIS installer)
+#        - NuqtaPlus-Setup-<v>.exe.blockmap         (electron-updater)
+#        - latest.yml                               (electron-updater feed)
+#        - nuqtaplus-backend-<v>.zip                (backend-only update)
+#        - backend-manifest.json                    (SHA-256 manifest)
+#        - backend-manifest.txt                     (plaintext manifest)
+#
+# Secrets expected:
+#   CSC_LINK              — base64 of the .pfx code-signing cert (or URL)
+#   CSC_KEY_PASSWORD      — cert password
+#   GH_TOKEN              — GitHub token with contents:write scope (auto
+#                           for GitHub-hosted runners; custom PAT for orgs)
+# Optional:
+#   WIN_TIMESTAMP_SERVER  — RFC 3161 server, defaults to Sectigo
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    env:
+      WIN_TIMESTAMP_SERVER: ${{ vars.WIN_TIMESTAMP_SERVER || 'http://timestamp.sectigo.com' }}
+      # electron-builder reads these to locate and unlock the signing cert
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      # electron-builder publishes via this token
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)$') {
+            Write-Error "Tag '$tag' does not match vX.Y.Z"
+            exit 1
+          }
+          $version = $Matches[1]
+          Write-Host "version=$version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Assert tag matches package.json versions
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ steps.tag.outputs.version }}"
+          $root = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $fe   = (Get-Content frontend/package.json -Raw | ConvertFrom-Json).version
+          $be   = (Get-Content backend/package.json -Raw | ConvertFrom-Json).version
+          $sh   = (Get-Content packages/shared/package.json -Raw | ConvertFrom-Json).version
+          Write-Host "tag=$tagVersion root=$root fe=$fe be=$be shared=$sh"
+          if ($root -ne $tagVersion -or $fe -ne $tagVersion -or $be -ne $tagVersion -or $sh -ne $tagVersion) {
+            Write-Error "Version drift — tag $tagVersion does not match all package.json versions"
+            exit 1
+          }
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install root deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install backend deps
+        working-directory: backend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build backend bundle
+        run: node build-backend.js
+
+      - name: Generate backend SHA-256 manifest
+        run: node scripts/generate-backend-manifest.js
+
+      - name: Build + sign + publish electron installer
+        working-directory: frontend
+        run: pnpm run publish:frontend
+
+      - name: Verify packaged backend
+        run: node scripts/verify-packaged-backend.js
+
+      - name: Smoke test packaged backend
+        run: node scripts/smoke-test-packaged.js
+
+      - name: Zip backend bundle for standalone update channel
+        shell: pwsh
+        run: |
+          $version = "${{ steps.tag.outputs.version }}"
+          $zipName = "nuqtaplus-backend-$version.zip"
+          $out = Join-Path "dist-backend-manifest" $zipName
+          if (-not (Test-Path "dist-backend-manifest")) { New-Item -ItemType Directory "dist-backend-manifest" | Out-Null }
+          Compress-Archive -Path "dist-backend/*" -DestinationPath $out -Force
+          Write-Host "Wrote $out"
+
+      - name: Attach backend bundle + manifest to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.tag.outputs.version }}"
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $files = @(
+            "dist-backend-manifest/nuqtaplus-backend-$version.zip",
+            "dist-backend-manifest/backend-manifest.json",
+            "dist-backend-manifest/backend-manifest.txt"
+          )
+          foreach ($f in $files) {
+            if (-not (Test-Path $f)) {
+              Write-Error "Missing release asset: $f"
+              exit 1
+            }
+          }
+          gh release upload $tag $files --clobber
+
+      - name: Upload CI artifacts (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.tag.outputs.version }}
+          path: |
+            frontend/release/*.exe
+            frontend/release/*.blockmap
+            frontend/release/latest.yml
+            dist-backend-manifest/**
+          if-no-files-found: warn
+          retention-days: 30

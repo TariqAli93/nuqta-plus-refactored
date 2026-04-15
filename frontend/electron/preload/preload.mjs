@@ -84,6 +84,37 @@ contextBridge.exposeInMainWorld('splashAPI', {
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
 });
 
+/**
+ * window.api — backend lifecycle API consumed by the Vue frontend.
+ *
+ * status()  → Promise<'starting' | 'ready' | 'error'>
+ * version() → Promise<string>   e.g. "1.0.12"
+ */
+contextBridge.exposeInMainWorld('api', {
+  backend: {
+    status: () => ipcRenderer.invoke('backend:getStatus'),
+    version: () => ipcRenderer.invoke('backend:getVersion'),
+    /**
+     * Subscribe to live lifecycle transitions pushed from main.
+     * Payload shape: { status: 'starting'|'ready'|'error', reason?, ...extra }
+     * Returns an unsubscribe function.
+     */
+    onStatusChanged: (callback) => {
+      const handler = (_event, payload) => {
+        try {
+          callback(payload);
+        } catch (err) {
+          // Never let a renderer-side handler error propagate back into main.
+          // eslint-disable-next-line no-console
+          console.error('[backend:statusChanged] handler threw:', err);
+        }
+      };
+      ipcRenderer.on('backend:statusChanged', handler);
+      return () => ipcRenderer.removeListener('backend:statusChanged', handler);
+    },
+  },
+});
+
 // License activation API (safe — no crypto/fs/machineId exposed)
 contextBridge.exposeInMainWorld('licenseAPI', {
   activate: (input) => ipcRenderer.invoke('activate-license', input),

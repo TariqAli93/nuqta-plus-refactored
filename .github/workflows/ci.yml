@@ -1,0 +1,108 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI — lint, build, verify, smoke
+#
+# Runs on every push to main and every PR. Mirrors everything release.yml
+# does EXCEPT publishing. If CI is green, tagging is safe.
+#
+# Windows-only: the backend bundle embeds a Windows node.exe and rebuilds
+# better-sqlite3 against its ABI. Cross-platform CI is not useful here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: pnpm store cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml', '**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install root deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install backend deps
+        working-directory: backend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+        continue-on-error: false
+
+      - name: Version sync check
+        shell: pwsh
+        run: |
+          $root = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $fe   = (Get-Content frontend/package.json -Raw | ConvertFrom-Json).version
+          $be   = (Get-Content backend/package.json -Raw | ConvertFrom-Json).version
+          $sh   = (Get-Content packages/shared/package.json -Raw | ConvertFrom-Json).version
+          Write-Host "root=$root fe=$fe be=$be shared=$sh"
+          if ($root -ne $fe -or $root -ne $be -or $root -ne $sh) {
+            Write-Error "Version drift: root=$root fe=$fe be=$be shared=$sh"
+            exit 1
+          }
+
+      - name: Build backend bundle
+        run: node build-backend.js
+
+      - name: Generate backend SHA-256 manifest
+        run: node scripts/generate-backend-manifest.js
+
+      - name: Build frontend (electron-builder, no publish)
+        working-directory: frontend
+        env:
+          # electron-builder publish=never by default unless --publish always
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm run build:win
+
+      - name: Verify packaged backend
+        run: node scripts/verify-packaged-backend.js
+
+      - name: Smoke test packaged backend
+        run: node scripts/smoke-test-packaged.js
+
+      - name: Upload CI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-artifacts-${{ github.sha }}
+          path: |
+            frontend/release/*.exe
+            dist-backend-manifest/backend-manifest.json
+            dist-backend-manifest/backend-manifest.txt
+          if-no-files-found: warn
+          retention-days: 7

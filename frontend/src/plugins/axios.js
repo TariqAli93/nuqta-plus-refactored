@@ -30,8 +30,9 @@ const getHelpLinkForError = (error) => {
   return null;
 };
 
+// Port 41731 mirrors packages/shared BACKEND_PORT — keep in sync.
 const api = axios.create({
-  baseURL: 'http://127.0.0.1:3050/api',
+  baseURL: 'http://127.0.0.1:41731/api',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
