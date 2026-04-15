@@ -1,0 +1,328 @@
+// ============================================
+// Utility Classes - فئات الأدوات المساعدة
+// ============================================
+
+@use '../abstracts' as *;
+
+// Spacing Utilities
+$spacing-values: (
+  '0': $spacing-0,
+  '1': $spacing-1,
+  '2': $spacing-2,
+  '3': $spacing-3,
+  '4': $spacing-4,
+  '5': $spacing-5,
+  '6': $spacing-6,
+  '8': $spacing-8,
+  '10': $spacing-10,
+  '12': $spacing-12,
+  '16': $spacing-16,
+  '20': $spacing-20,
+  '24': $spacing-24,
+);
+
+// Margin utilities
+@each $name, $value in $spacing-values {
+  .m-#{$name} {
+    margin: $value !important;
+  }
+  .mt-#{$name} {
+    margin-top: $value !important;
+  }
+  .mr-#{$name} {
+    margin-right: $value !important;
+  }
+  .mb-#{$name} {
+    margin-bottom: $value !important;
+  }
+  .ml-#{$name} {
+    margin-left: $value !important;
+  }
+  .mx-#{$name} {
+    @include margin-x($value);
+  }
+  .my-#{$name} {
+    @include margin-y($value);
+  }
+}
+
+// Padding utilities
+@each $name, $value in $spacing-values {
+  .p-#{$name} {
+    padding: $value !important;
+  }
+  .pt-#{$name} {
+    padding-top: $value !important;
+  }
+  .pr-#{$name} {
+    padding-right: $value !important;
+  }
+  .pb-#{$name} {
+    padding-bottom: $value !important;
+  }
+  .pl-#{$name} {
+    padding-left: $value !important;
+  }
+  .px-#{$name} {
+    @include padding-x($value);
+  }
+  .py-#{$name} {
+    @include padding-y($value);
+  }
+}
+
+// Display utilities
+.d-none {
+  display: none !important;
+}
+.d-block {
+  display: block !important;
+}
+.d-inline {
+  display: inline !important;
+}
+.d-inline-block {
+  display: inline-block !important;
+}
+.d-flex {
+  display: flex !important;
+}
+.d-inline-flex {
+  display: inline-flex !important;
+}
+.d-grid {
+  display: grid !important;
+}
+
+// Flexbox utilities
+.flex-row {
+  flex-direction: row !important;
+}
+.flex-column {
+  flex-direction: column !important;
+}
+.flex-wrap {
+  flex-wrap: wrap !important;
+}
+.flex-nowrap {
+  flex-wrap: nowrap !important;
+}
+.flex-center {
+  @include flex-center;
+}
+.flex-between {
+  @include flex-between;
+}
+.justify-start {
+  justify-content: flex-start !important;
+}
+.justify-center {
+  justify-content: center !important;
+}
+.justify-end {
+  justify-content: flex-end !important;
+}
+.justify-between {
+  justify-content: space-between !important;
+}
+.justify-around {
+  justify-content: space-around !important;
+}
+.align-start {
+  align-items: flex-start !important;
+}
+.align-center {
+  align-items: center !important;
+}
+.align-end {
+  align-items: flex-end !important;
+}
+.align-stretch {
+  align-items: stretch !important;
+}
+
+// Width & Height
+.w-full {
+  width: 100% !important;
+}
+.h-full {
+  height: 100% !important;
+}
+.w-auto {
+  width: auto !important;
+}
+.h-auto {
+  height: auto !important;
+}
+.w-screen {
+  width: 100vw !important;
+}
+.h-screen {
+  height: 100vh !important;
+}
+
+// Position utilities
+.position-relative {
+  position: relative !important;
+}
+.position-absolute {
+  position: absolute !important;
+}
+.position-fixed {
+  position: fixed !important;
+}
+.position-sticky {
+  position: sticky !important;
+}
+
+// Border Radius utilities
+.rounded-none {
+  border-radius: $border-radius-none !important;
+}
+.rounded-sm {
+  border-radius: $border-radius-sm !important;
+}
+.rounded {
+  border-radius: $border-radius-base !important;
+}
+.rounded-md {
+  border-radius: $border-radius-md !important;
+}
+.rounded-lg {
+  border-radius: $border-radius-lg !important;
+}
+.rounded-xl {
+  border-radius: $border-radius-xl !important;
+}
+.rounded-2xl {
+  border-radius: $border-radius-2xl !important;
+}
+.rounded-full {
+  border-radius: $border-radius-full !important;
+}
+
+// Shadow utilities
+.shadow-none {
+  box-shadow: none !important;
+}
+.shadow-sm {
+  @include elevation-1;
+}
+.shadow {
+  @include elevation-2;
+}
+.shadow-md {
+  @include elevation-3;
+}
+.shadow-lg {
+  @include elevation-4;
+}
+.shadow-xl {
+  @include elevation-5;
+}
+
+// Overflow utilities
+.overflow-auto {
+  overflow: auto !important;
+}
+.overflow-hidden {
+  overflow: hidden !important;
+}
+.overflow-visible {
+  overflow: visible !important;
+}
+.overflow-scroll {
+  overflow: scroll !important;
+}
+.overflow-x-auto {
+  overflow-x: auto !important;
+}
+.overflow-y-auto {
+  overflow-y: auto !important;
+}
+
+// Cursor utilities
+.cursor-pointer {
+  cursor: pointer !important;
+}
+.cursor-default {
+  cursor: default !important;
+}
+.cursor-not-allowed {
+  cursor: not-allowed !important;
+}
+.cursor-move {
+  cursor: move !important;
+}
+
+// User Select
+.select-none {
+  user-select: none !important;
+}
+.select-text {
+  user-select: text !important;
+}
+.select-all {
+  user-select: all !important;
+}
+
+// Opacity utilities
+.opacity-0 {
+  opacity: 0 !important;
+}
+.opacity-25 {
+  opacity: 0.25 !important;
+}
+.opacity-50 {
+  opacity: 0.5 !important;
+}
+.opacity-75 {
+  opacity: 0.75 !important;
+}
+.opacity-100 {
+  opacity: 1 !important;
+}
+
+// Visibility
+.visible {
+  visibility: visible !important;
+}
+.invisible {
+  visibility: hidden !important;
+}
+
+// Gap utilities (for flex & grid)
+@each $name, $value in $spacing-values {
+  .gap-#{$name} {
+    gap: $value !important;
+  }
+  .gap-x-#{$name} {
+    column-gap: $value !important;
+  }
+  .gap-y-#{$name} {
+    row-gap: $value !important;
+  }
+}
+
+// Z-Index utilities
+.z-0 {
+  z-index: 0 !important;
+}
+.z-10 {
+  z-index: 10 !important;
+}
+.z-20 {
+  z-index: 20 !important;
+}
+.z-30 {
+  z-index: 30 !important;
+}
+.z-40 {
+  z-index: 40 !important;
+}
+.z-50 {
+  z-index: 50 !important;
+}
+.z-auto {
+  z-index: auto !important;
+}

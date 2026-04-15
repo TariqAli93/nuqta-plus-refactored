@@ -1,0 +1,192 @@
+// ============================================
+// Main Layout Styles - أنماط التخطيط الرئيسي
+// ============================================
+
+@use '../abstracts' as *;
+
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--v-theme-background);
+
+  &__sidebar {
+    width: $sidebar-width;
+    background-color: var(--v-theme-surface);
+    @include elevation-2;
+    @include transition(width, transform);
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: $z-index-fixed;
+    overflow-y: auto;
+    @include custom-scrollbar;
+
+    @include rtl {
+      right: 0;
+      left: auto;
+    }
+
+    @include ltr {
+      left: 0;
+      right: auto;
+    }
+
+    &--collapsed {
+      width: $sidebar-width-collapsed;
+    }
+
+    @include mobile {
+      transform: translateX(100%);
+
+      @include ltr {
+        transform: translateX(-100%);
+      }
+
+      &--open {
+        transform: translateX(0);
+      }
+    }
+  }
+
+  &__main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin-right: $sidebar-width;
+    @include transition(margin);
+
+    @include rtl {
+      margin-right: $sidebar-width;
+      margin-left: 0;
+    }
+
+    @include ltr {
+      margin-left: $sidebar-width;
+      margin-right: 0;
+    }
+
+    &--collapsed {
+      @include rtl {
+        margin-right: $sidebar-width-collapsed;
+      }
+
+      @include ltr {
+        margin-left: $sidebar-width-collapsed;
+      }
+    }
+
+    @include mobile {
+      margin: 0 !important;
+    }
+  }
+
+  &__navbar {
+    height: $navbar-height;
+    background-color: var(--v-theme-surface);
+    @include elevation-2;
+    @include flex-between;
+    padding: 0 $spacing-4;
+    position: sticky;
+    top: 0;
+    z-index: $z-index-sticky;
+  }
+
+  &__content {
+    flex: 1;
+    padding: $spacing-6;
+
+    @include mobile {
+      padding: $spacing-4;
+    }
+  }
+
+  &__footer {
+    padding: $spacing-4;
+    text-align: center;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+
+    @include dark-theme {
+      border-top-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+}
+
+// Container
+.container {
+  width: 100%;
+  max-width: $container-max-width-xl;
+  margin: 0 auto;
+  padding: 0 $spacing-4;
+
+  &--sm {
+    max-width: $container-max-width-sm;
+  }
+
+  &--md {
+    max-width: $container-max-width-md;
+  }
+
+  &--lg {
+    max-width: $container-max-width-lg;
+  }
+
+  &--xl {
+    max-width: $container-max-width-xl;
+  }
+
+  &--xxl {
+    max-width: $container-max-width-xxl;
+  }
+
+  &--fluid {
+    max-width: 100%;
+  }
+}
+
+// Grid System
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0 (-$spacing-2);
+
+  &--no-gutters {
+    margin: 0;
+
+    > .col {
+      padding: 0;
+    }
+  }
+}
+
+.col {
+  flex: 1;
+  padding: 0 $spacing-2;
+}
+
+@for $i from 1 through 12 {
+  .col-#{$i} {
+    flex: 0 0 percentage($i, 12);
+    max-width: percentage($i, 12);
+    padding: 0 $spacing-2;
+  }
+}
+
+// Responsive Columns
+@include tablet {
+  @for $i from 1 through 12 {
+    .col-md-#{$i} {
+      flex: 0 0 percentage($i, 12);
+      max-width: percentage($i, 12);
+    }
+  }
+}
+
+@include desktop {
+  @for $i from 1 through 12 {
+    .col-lg-#{$i} {
+      flex: 0 0 percentage($i, 12);
+      max-width: percentage($i, 12);
+    }
+  }
+}

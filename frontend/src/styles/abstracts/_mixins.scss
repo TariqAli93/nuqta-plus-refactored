@@ -1,0 +1,480 @@
+// ============================================
+// SASS Mixins - الدوال المساعدة
+// ============================================
+// هذا الملف يحتوي على Mixins قابلة لإعادة الاستخدام
+
+@use 'variables' as *;
+
+// ============================================
+// 1. Responsive Mixins - دوال التصميم المتجاوب
+// ============================================
+
+// Breakpoint Mixin
+@mixin respond-to($breakpoint) {
+  @if $breakpoint == 'xs' {
+    @media (max-width: #{$breakpoint-sm - 1}) {
+      @content;
+    }
+  } @else if $breakpoint == 'sm' {
+    @media (min-width: #{$breakpoint-sm}) {
+      @content;
+    }
+  } @else if $breakpoint == 'md' {
+    @media (min-width: #{$breakpoint-md}) {
+      @content;
+    }
+  } @else if $breakpoint == 'lg' {
+    @media (min-width: #{$breakpoint-lg}) {
+      @content;
+    }
+  } @else if $breakpoint == 'xl' {
+    @media (min-width: #{$breakpoint-xl}) {
+      @content;
+    }
+  } @else if $breakpoint == 'xxl' {
+    @media (min-width: #{$breakpoint-xxl}) {
+      @content;
+    }
+  }
+}
+
+// Between Breakpoints
+@mixin respond-between($min, $max) {
+  @media (min-width: #{$min}) and (max-width: #{$max - 1}) {
+    @content;
+  }
+}
+
+// Mobile First
+@mixin mobile {
+  @media (max-width: #{$breakpoint-sm - 1}) {
+    @content;
+  }
+}
+
+// Tablet
+@mixin tablet {
+  @media (min-width: #{$breakpoint-sm}) and (max-width: #{$breakpoint-md - 1}) {
+    @content;
+  }
+}
+
+// Desktop
+@mixin desktop {
+  @media (min-width: #{$breakpoint-md}) {
+    @content;
+  }
+}
+
+// ============================================
+// 2. Flexbox Mixins - دوال Flexbox
+// ============================================
+
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@mixin flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+@mixin flex-column-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin flex-wrap {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+// ============================================
+// 3. Positioning Mixins - دوال التموضع
+// ============================================
+
+@mixin absolute-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@mixin absolute-full {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+@mixin fixed-full {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+// ============================================
+// 4. Typography Mixins - دوال الطباعة
+// ============================================
+
+@mixin font-size($size, $weight: $font-weight-regular, $line-height: $line-height-normal) {
+  font-size: $size;
+  font-weight: $weight;
+  line-height: $line-height;
+}
+
+@mixin heading-1 {
+  @include font-size($font-size-4xl, $font-weight-bold, $line-height-tight);
+}
+
+@mixin heading-2 {
+  @include font-size($font-size-3xl, $font-weight-bold, $line-height-tight);
+}
+
+@mixin heading-3 {
+  @include font-size($font-size-2xl, $font-weight-semibold, $line-height-tight);
+}
+
+@mixin heading-4 {
+  @include font-size($font-size-xl, $font-weight-semibold, $line-height-normal);
+}
+
+@mixin heading-5 {
+  @include font-size($font-size-lg, $font-weight-medium, $line-height-normal);
+}
+
+@mixin heading-6 {
+  @include font-size($font-size-base, $font-weight-medium, $line-height-normal);
+}
+
+@mixin text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@mixin text-truncate-lines($lines: 2) {
+  display: -webkit-box;
+  -webkit-line-clamp: $lines;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// ============================================
+// 5. Shadow Mixins - دوال الظلال
+// ============================================
+
+@mixin box-shadow($shadow: $shadow-base) {
+  box-shadow: $shadow;
+}
+
+@mixin elevation-1 {
+  box-shadow: $shadow-sm;
+}
+
+@mixin elevation-2 {
+  box-shadow: $shadow-base;
+}
+
+@mixin elevation-3 {
+  box-shadow: $shadow-md;
+}
+
+@mixin elevation-4 {
+  box-shadow: $shadow-lg;
+}
+
+@mixin elevation-5 {
+  box-shadow: $shadow-xl;
+}
+
+// ============================================
+// 6. Border Mixins - دوال الحدود
+// ============================================
+
+@mixin border($width: 1px, $style: solid, $color: #e0e0e0) {
+  border: $width $style $color;
+}
+
+@mixin border-radius($radius: $border-radius-base) {
+  border-radius: $radius;
+}
+
+@mixin rounded {
+  border-radius: $border-radius-full;
+}
+
+// ============================================
+// 7. Spacing Mixins - دوال المسافات
+// ============================================
+
+@mixin padding($top: null, $right: null, $bottom: null, $left: null) {
+  @if $top != null and $right == null and $bottom == null and $left == null {
+    padding: $top;
+  } @else {
+    padding: $top $right $bottom $left;
+  }
+}
+
+@mixin margin($top: null, $right: null, $bottom: null, $left: null) {
+  @if $top != null and $right == null and $bottom == null and $left == null {
+    margin: $top;
+  } @else {
+    margin: $top $right $bottom $left;
+  }
+}
+
+@mixin padding-x($value) {
+  padding-left: $value;
+  padding-right: $value;
+}
+
+@mixin padding-y($value) {
+  padding-top: $value;
+  padding-bottom: $value;
+}
+
+@mixin margin-x($value) {
+  margin-left: $value;
+  margin-right: $value;
+}
+
+@mixin margin-y($value) {
+  margin-top: $value;
+  margin-bottom: $value;
+}
+
+// ============================================
+// 8. Transition Mixins - دوال الانتقالات
+// ============================================
+
+@mixin transition($properties...) {
+  $transitions: ();
+  @each $prop in $properties {
+    $transitions: append(
+      $transitions,
+      $prop $transition-duration-base $transition-timing-ease,
+      comma
+    );
+  }
+  transition: $transitions;
+}
+
+@mixin transition-fast($properties...) {
+  $transitions: ();
+  @each $prop in $properties {
+    $transitions: append(
+      $transitions,
+      $prop $transition-duration-fast $transition-timing-ease,
+      comma
+    );
+  }
+  transition: $transitions;
+}
+
+@mixin transition-slow($properties...) {
+  $transitions: ();
+  @each $prop in $properties {
+    $transitions: append(
+      $transitions,
+      $prop $transition-duration-slow $transition-timing-ease,
+      comma
+    );
+  }
+  transition: $transitions;
+}
+
+// ============================================
+// 9. Animation Mixins - دوال الرسوم المتحركة
+// ============================================
+
+@mixin animate($name, $duration: $transition-duration-base, $timing: $transition-timing-ease) {
+  animation: $name $duration $timing;
+}
+
+@mixin keyframes($name) {
+  @keyframes #{$name} {
+    @content;
+  }
+}
+
+// ============================================
+// 10. Card Mixins - دوال البطاقات
+// ============================================
+
+@mixin card {
+  background: var(--v-theme-surface);
+  border-radius: $card-border-radius;
+  padding: $card-padding;
+  @include elevation-2;
+}
+
+@mixin card-hover {
+  @include transition(box-shadow, transform);
+
+  &:hover {
+    @include elevation-4;
+    transform: translateY(-2px);
+  }
+}
+
+// ============================================
+// 11. Button Mixins - دوال الأزرار
+// ============================================
+
+@mixin button-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: $button-height;
+  padding: $button-padding-y $button-padding-x;
+  border-radius: $button-border-radius;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  user-select: none;
+  @include transition(background-color, box-shadow, transform);
+
+  &:hover {
+    transform: translateY(-1px);
+    @include elevation-2;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+
+// ============================================
+// 12. Scrollbar Mixins - دوال شريط التمرير
+// ============================================
+
+@mixin custom-scrollbar($width: 8px, $track-color: transparent, $thumb-color: rgba(0, 0, 0, 0.2)) {
+  &::-webkit-scrollbar {
+    width: $width;
+    height: $width;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: $track-color;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: $thumb-color;
+    border-radius: $border-radius-full;
+
+    &:hover {
+      background: darken($thumb-color, 10%);
+    }
+  }
+}
+
+// ============================================
+// 13. RTL Support Mixins - دعم اللغة العربية
+// ============================================
+
+@mixin rtl {
+  [dir='rtl'] & {
+    @content;
+  }
+}
+
+@mixin ltr {
+  [dir='ltr'] & {
+    @content;
+  }
+}
+
+@mixin margin-start($value) {
+  @include rtl {
+    margin-right: $value;
+  }
+  @include ltr {
+    margin-left: $value;
+  }
+}
+
+@mixin margin-end($value) {
+  @include rtl {
+    margin-left: $value;
+  }
+  @include ltr {
+    margin-right: $value;
+  }
+}
+
+@mixin padding-start($value) {
+  @include rtl {
+    padding-right: $value;
+  }
+  @include ltr {
+    padding-left: $value;
+  }
+}
+
+@mixin padding-end($value) {
+  @include rtl {
+    padding-left: $value;
+  }
+  @include ltr {
+    padding-right: $value;
+  }
+}
+
+// ============================================
+// 14. Theme Mixins - دوال الثيمات
+// ============================================
+
+@mixin light-theme {
+  .v-theme--light & {
+    @content;
+  }
+}
+
+@mixin dark-theme {
+  .v-theme--dark & {
+    @content;
+  }
+}
+
+// ============================================
+// 15. Grid Mixins - دوال الشبكة
+// ============================================
+
+@mixin grid($columns: 12, $gap: $spacing-4) {
+  display: grid;
+  grid-template-columns: repeat($columns, 1fr);
+  gap: $gap;
+}
+
+@mixin grid-responsive($mobile: 1, $tablet: 2, $desktop: 3) {
+  display: grid;
+  gap: $spacing-4;
+  grid-template-columns: repeat($mobile, 1fr);
+
+  @include tablet {
+    grid-template-columns: repeat($tablet, 1fr);
+  }
+
+  @include desktop {
+    grid-template-columns: repeat($desktop, 1fr);
+  }
+}

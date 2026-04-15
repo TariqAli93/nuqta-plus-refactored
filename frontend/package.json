@@ -1,0 +1,113 @@
+{
+  "name": "@nuqtaplus/frontend",
+  "version": "1.0.12",
+  "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
+  "main": "./dist-electron/main/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "cross-env VITE_TARGET=electron vite",
+    "dev:web": "cross-env VITE_TARGET=web vite",
+    "build": "cross-env NODE_ENV=production VITE_TARGET=electron vite build",
+    "build:win": "cross-env NODE_ENV=production VITE_TARGET=electron vite build && electron-builder --win",
+    "publish:win": "cross-env VITE_TARGET=electron NODE_ENV=production vite build && electron-builder --win --publish always",
+    "lint": "eslint src",
+    "format": "prettier --write src"
+  },
+  "dependencies": {
+    "@mdi/font": "^7.4.47",
+    "@plick/electron-pos-printer": "^1.3.0",
+    "apexcharts": "^5.3.6",
+    "axios": "^1.7.9",
+    "electron-updater": "^6.6.2",
+    "pinia": "^2.2.8",
+    "semver": "^7.3.8",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "vue-to-print": "^1.5.1",
+    "vue3-apexcharts": "^1.10.0",
+    "vuetify": "^3.11.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.1.2",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "electron-devtools-installer": "^4.0.0",
+    "postcss": "^8.4.47",
+    "postcss-import": "^16.1.0",
+    "sass": "^1.93.2",
+    "tailwindcss": "^3.3.0",
+    "vite": "^6.4.1",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-vue-devtools": "^8.0.5",
+    "vite-plugin-vuetify": "^2.1.2",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.nuqtaplus.app",
+    "productName": "نقطة بلس",
+    "asar": true,
+    "files": [
+      "package.json",
+      "dist-electron/**/*",
+      "!**/*.map",
+      "!**/.env*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-electron",
+        "to": "dist-electron",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "./splash.html",
+        "to": "dist-electron/dist/splash.html"
+      },
+      {
+        "from": "./activation.html",
+        "to": "dist-electron/dist/activation.html"
+      },
+      {
+        "from": "./electron/scripts",
+        "to": "dist-electron/scripts"
+      }
+    ],
+    "afterPack": "../scripts/afterPack.cjs",
+    "directories": {
+      "buildResources": "build",
+      "output": "../release"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "TariqAli93",
+        "repo": "nuqta-plus-legacy",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "NuqtaPlus-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "نقطة بلس",
+      "installerHeader": "build/installer-header.bmp",
+      "installerSidebar": "build/installer-sidebar.bmp",
+      "uninstallerIcon": "build/icon.ico",
+      "uninstallDisplayName": "نقطة بلس",
+      "license": "build/license.md",
+      "unicode": true
+    }
+  }
+}

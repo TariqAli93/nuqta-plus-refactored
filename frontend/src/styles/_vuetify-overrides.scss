@@ -1,0 +1,351 @@
+// ============================================
+// Vuetify Overrides - تخصيص أنماط Vuetify
+// ============================================
+// هذا الملف يحتوي على تخصيصات لمكونات Vuetify الافتراضية
+
+@use 'abstracts' as *;
+
+// ============================================
+// 0. Base Tweaks
+// ============================================
+
+// تجنّب التأثير على كل العناصر بـ `*`
+// نخلي الأساس على التطبيق الرئيسي فقط
+.v-application {
+  font-size: $font-size-sm;
+}
+
+// ============================================
+// 1. v-card Overrides
+// ============================================
+
+.v-card {
+  &.custom-elevation {
+    @include elevation-3;
+  }
+
+  &.hover-lift {
+    @include transition(transform, box-shadow);
+
+    &:hover {
+      transform: translateY(-4px);
+      @include elevation-4;
+    }
+  }
+}
+
+.v-card-title {
+  font-weight: $font-weight-semibold !important;
+}
+
+// ============================================
+// 2. v-data-table Overrides
+// ============================================
+
+$v-data-table-header-bg-light: rgba(0, 0, 0, 0.02);
+$v-data-table-header-bg-dark: rgba(255, 255, 255, 0.02);
+
+.v-data-table {
+  .v-data-table__th {
+    font-weight: $font-weight-semibold !important;
+    background-color: $v-data-table-header-bg-light !important;
+
+    @include dark-theme {
+      background-color: $v-data-table-header-bg-dark !important;
+    }
+  }
+
+  .v-data-table__tr {
+    @include transition(background-color);
+
+    &:hover {
+      background-color: $v-data-table-header-bg-light !important;
+
+      @include dark-theme {
+        background-color: $v-data-table-header-bg-dark !important;
+      }
+    }
+  }
+}
+
+// ============================================
+// 3. v-text-field Overrides
+// ============================================
+
+.v-text-field {
+  .v-field__input {
+    padding: $spacing-2 $spacing-3 !important;
+  }
+}
+
+// ============================================
+// 4. v-navigation-drawer Overrides
+// ============================================
+
+.v-navigation-drawer {
+  @include custom-scrollbar(6px, transparent, rgba(0, 0, 0, 0.2));
+
+  @include dark-theme {
+    @include custom-scrollbar(6px, transparent, rgba(255, 255, 255, 0.2));
+  }
+
+  .v-list {
+    // تخصيص عناصر القائمة
+    .v-list-item {
+      font-size: $font-size-xs !important;
+      opacity: 0.9 !important;
+
+      .v-list-item-icon {
+        position: relative;
+        background: transparent;
+        width: 42px;
+        height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: $border-radius-md;
+        font-size: $font-size-sm !important;
+        @include transition(all);
+
+        &::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(var(--v-theme-primary), 0);
+          visibility: hidden;
+          opacity: 0;
+          transform: scale(0.85);
+          border-radius: $border-radius-md;
+          @include transition(all);
+        }
+      }
+
+      &.active-nav-item {
+        color: rgba(var(--v-theme-primary), 1);
+
+        .v-list-item-icon {
+          &::before {
+            background-color: rgba(var(--v-theme-primary), 0.1);
+            visibility: visible;
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+
+        @include dark-theme {
+          .v-list-item-icon {
+            color: rgba(var(--v-theme-primary), 1);
+
+            &::before {
+              background-color: rgba(var(--v-theme-primary), 0.1);
+            }
+          }
+        }
+      }
+    }
+
+    // تخصيص مجموعات القوائم
+    .v-list-group {
+      &.custom-group {
+        border-radius: $border-radius-base !important;
+
+        .v-list-item {
+          display: block !important;
+        }
+
+        .v-list-group__items {
+          .v-list-item {
+            padding-inline: $spacing-0 !important;
+            font-weight: $font-weight-light !important;
+          }
+        }
+
+        .v-list-item__append {
+          display: none !important;
+        }
+
+        .in-group-title {
+          .v-list-item-title {
+            font-size: $font-size-xs !important;
+          }
+        }
+      }
+
+      &--open {
+        // darken sureface on open
+        background-color: rgba(var(--v-theme-background), 0.88);
+        @include dark-theme {
+          background-color: rgba(var(--v-theme-background), 0.67);
+        }
+      }
+    }
+  }
+}
+
+// ============================================
+// 5. v-dialog Overrides
+// ============================================
+
+.v-dialog {
+  .v-card {
+    @include elevation-5;
+  }
+}
+
+// ============================================
+// 6. v-app-bar Overrides
+// ============================================
+
+.v-app-bar {
+  @include elevation-2;
+}
+
+// ============================================
+// 7. v-chip Overrides
+// ============================================
+
+.v-chip {
+  font-weight: $font-weight-medium !important;
+
+  &.rounded-pill {
+    border-radius: $border-radius-full !important;
+  }
+}
+
+// ============================================
+// 8. v-list Overrides
+// ============================================
+
+.v-list {
+  .v-list-item {
+    border-radius: $border-radius-base;
+    margin: $spacing-1 0;
+    @include transition(background-color, transform, padding-right, padding-left);
+
+    &--active {
+      color: rgba(var(--v-theme-primary), 1);
+
+      &::before {
+        opacity: 0;
+      }
+    }
+  }
+}
+
+// ============================================
+// 9. v-snackbar Overrides
+// ============================================
+
+.v-snackbar {
+  @include elevation-4;
+
+  .v-snackbar__content {
+    font-weight: $font-weight-medium;
+  }
+}
+
+// ============================================
+// 10. v-tooltip Overrides
+// ============================================
+
+.v-tooltip {
+  .v-overlay__content {
+    background-color: rgba(0, 0, 0, 0.9) !important;
+    font-size: $font-size-sm !important;
+    padding: $spacing-2 $spacing-3 !important;
+    border-radius: $border-radius-base !important;
+
+    @include dark-theme {
+      background-color: rgba(255, 255, 255, 0.9) !important;
+      color: #000 !important;
+    }
+  }
+}
+
+// ============================================
+// 11. v-menu Overrides
+// ============================================
+
+.v-menu {
+  .v-list {
+    @include elevation-3;
+  }
+}
+
+// ============================================
+// 12. v-tabs Overrides
+// ============================================
+
+.v-tabs {
+  .v-tab {
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    font-weight: $font-weight-medium !important;
+  }
+}
+
+// ============================================
+// 13. v-expansion-panels Overrides
+// ============================================
+
+.v-expansion-panels {
+  .v-expansion-panel {
+    @include elevation-1;
+    margin-bottom: $spacing-2;
+    border-radius: $border-radius-md !important;
+
+    &--active {
+      @include elevation-2;
+    }
+  }
+
+  .v-expansion-panel-title {
+    font-weight: $font-weight-semibold !important;
+  }
+}
+
+// ============================================
+// 14. v-progress-linear Overrides
+// ============================================
+
+.v-progress-linear {
+  border-radius: $border-radius-full !important;
+}
+
+// ============================================
+// 15. v-badge Overrides
+// ============================================
+
+.v-badge {
+  .v-badge__badge {
+    font-weight: $font-weight-bold !important;
+    font-size: $font-size-xs !important;
+  }
+}
+
+// ============================================
+// 16. v-alert Overrides
+// ============================================
+
+.v-alert {
+  border-radius: $border-radius-md !important;
+  @include elevation-1;
+
+  .v-alert__content {
+    font-weight: $font-weight-medium;
+  }
+}
+
+// ============================================
+// 17. Custom Theme Variables
+// ============================================
+
+:root {
+  --custom-sidebar-width: #{$sidebar-width};
+  --custom-navbar-height: #{$navbar-height};
+  --custom-spacing-base: #{$spacing-base};
+  --custom-border-radius: #{$border-radius-base};
+  --custom-transition-duration: #{$transition-duration-base};
+}

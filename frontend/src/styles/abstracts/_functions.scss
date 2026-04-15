@@ -1,0 +1,217 @@
+// ============================================
+// SASS Functions - الدوال المساعدة
+// ============================================
+
+@use 'variables' as *;
+@use 'sass:math';
+@use 'sass:color';
+
+// ============================================
+// 1. Color Functions - دوال الألوان
+// ============================================
+
+// Lighten color
+@function lighten-color($color, $percentage) {
+  @return color.adjust($color, $lightness: $percentage);
+}
+
+// Darken color
+@function darken-color($color, $percentage) {
+  @return color.adjust($color, $lightness: -$percentage);
+}
+
+// Add opacity to color
+@function rgba-color($color, $opacity) {
+  @return rgba($color, $opacity);
+}
+
+// Mix two colors
+@function mix-colors($color1, $color2, $weight: 50%) {
+  @return color.mix($color1, $color2, $weight);
+}
+
+// Get contrast color (black or white)
+@function contrast-color($color) {
+  $lightness: color.lightness($color);
+  @if $lightness > 50% {
+    @return #000000;
+  } @else {
+    @return #ffffff;
+  }
+}
+
+// ============================================
+// 2. Spacing Functions - دوال المسافات
+// ============================================
+
+// Get spacing value
+@function spacing($multiplier) {
+  @return $spacing-base * $multiplier;
+}
+
+// Convert px to rem
+@function px-to-rem($px, $base: 16) {
+  @return math.div($px, $base) * 1rem;
+}
+
+// Convert rem to px
+@function rem-to-px($rem, $base: 16) {
+  @return $rem * $base;
+}
+
+// ============================================
+// 3. Typography Functions - دوال الطباعة
+// ============================================
+
+// Fluid typography
+@function fluid-font-size($min-size, $max-size, $min-vw: 320px, $max-vw: 1920px) {
+  $min-size-rem: math.div($min-size, 16) * 1rem;
+  $max-size-rem: math.div($max-size, 16) * 1rem;
+  $min-vw-rem: math.div($min-vw, 16) * 1rem;
+  $max-vw-rem: math.div($max-vw, 16) * 1rem;
+
+  @return clamp(
+    $min-size-rem,
+    calc(
+      #{$min-size-rem} + (#{$max-size} - #{$min-size}) *
+        ((100vw - #{$min-vw-rem}) / (#{$max-vw} - #{$min-vw}))
+    ),
+    $max-size-rem
+  );
+}
+
+// ============================================
+// 4. Grid Functions - دوال الشبكة
+// ============================================
+
+// Calculate grid column width
+@function grid-width($columns, $total-columns: 12, $gutter: $spacing-4) {
+  $width: math.div($columns, $total-columns) * 100%;
+  @return calc(#{$width} - #{$gutter});
+}
+
+// ============================================
+// 5. Z-Index Functions - دوال ترتيب الطبقات
+// ============================================
+
+// Get z-index value
+@function z-index($layer) {
+  $z-indexes: (
+    'dropdown': $z-index-dropdown,
+    'sticky': $z-index-sticky,
+    'fixed': $z-index-fixed,
+    'modal-backdrop': $z-index-modal-backdrop,
+    'modal': $z-index-modal,
+    'popover': $z-index-popover,
+    'tooltip': $z-index-tooltip,
+    'notification': $z-index-notification,
+  );
+
+  @return map-get($z-indexes, $layer);
+}
+
+// ============================================
+// 6. String Functions - دوال النصوص
+// ============================================
+
+// Replace string
+@function str-replace($string, $search, $replace: '') {
+  $index: str-index($string, $search);
+  @if $index {
+    @return str-slice($string, 1, $index - 1) + $replace +
+      str-replace(str-slice($string, $index + str-length($search)), $search, $replace);
+  }
+  @return $string;
+}
+
+// ============================================
+// 7. Map Functions - دوال الخرائط
+// ============================================
+
+// Deep get from nested map
+@function map-deep-get($map, $keys...) {
+  @each $key in $keys {
+    $map: map-get($map, $key);
+  }
+  @return $map;
+}
+
+// ============================================
+// 8. Math Functions - الدوال الرياضية
+// ============================================
+
+// Power function
+@function pow($number, $exponent) {
+  $result: 1;
+  @if $exponent > 0 {
+    @for $i from 1 through $exponent {
+      $result: $result * $number;
+    }
+  }
+  @return $result;
+}
+
+// Calculate percentage
+@function percentage($value, $total) {
+  @return math.div($value, $total) * 100%;
+}
+
+// Clamp value between min and max
+@function clamp-value($value, $min, $max) {
+  @return max($min, min($value, $max));
+}
+
+// ============================================
+// 9. Easing Functions - دوال التسهيل
+// ============================================
+
+// Get easing function
+@function easing($type) {
+  $easings: (
+    'ease': ease,
+    'ease-in': ease-in,
+    'ease-out': ease-out,
+    'ease-in-out': ease-in-out,
+    'linear': linear,
+    'bounce': $animation-bounce,
+    'smooth': $animation-smooth,
+    'swift': $animation-swift,
+  );
+
+  @return map-get($easings, $type);
+}
+
+// ============================================
+// 10. Theme Functions - دوال الثيمات
+// ============================================
+
+// Get theme color
+@function theme-color($color-name, $theme: 'light') {
+  $light-colors: (
+    'primary': $primary-color,
+    'secondary': $secondary-color,
+    'success': $success-color,
+    'error': $error-color,
+    'warning': $warning-color,
+    'info': $info-color,
+    'background': $bg-light,
+    'surface': $surface-light,
+  );
+
+  $dark-colors: (
+    'primary': $primary-light,
+    'secondary': $secondary-light,
+    'success': $success-color,
+    'error': $error-color,
+    'warning': $warning-color,
+    'info': $info-color,
+    'background': $bg-dark,
+    'surface': $surface-dark,
+  );
+
+  @if $theme == 'light' {
+    @return map-get($light-colors, $color-name);
+  } @else {
+    @return map-get($dark-colors, $color-name);
+  }
+}

@@ -1,0 +1,58 @@
+// ============================================
+// Auth Layout Styles - أنماط صفحات المصادقة
+// ============================================
+
+@use '../abstracts' as *;
+
+.auth-layout {
+  @include flex-center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--v-theme-primary) 0%, var(--v-theme-secondary) 100%);
+  padding: $spacing-4;
+
+  &__card {
+    width: 100%;
+    max-width: 450px;
+    @include card;
+    @include elevation-4;
+
+    @include mobile {
+      max-width: 100%;
+    }
+  }
+
+  &__logo {
+    text-align: center;
+    margin-bottom: $spacing-6;
+
+    img {
+      max-width: 120px;
+      margin: 0 auto;
+    }
+  }
+
+  &__title {
+    @include heading-2;
+    text-align: center;
+    margin-bottom: $spacing-2;
+  }
+
+  &__subtitle {
+    text-align: center;
+    color: var(--v-theme-on-surface-variant);
+    margin-bottom: $spacing-6;
+  }
+
+  &__form {
+    .form-group {
+      margin-bottom: $spacing-5;
+    }
+  }
+
+  &__footer {
+    margin-top: $spacing-6;
+    text-align: center;
+    font-size: $font-size-sm;
+    color: var(--v-theme-on-surface-variant);
+  }
+}

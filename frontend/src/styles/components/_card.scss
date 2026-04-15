@@ -1,0 +1,50 @@
+// ============================================
+// Card Component Styles - أنماط البطاقات
+// ============================================
+
+@use '../abstracts' as *;
+
+.custom-card {
+  @include card;
+
+  &--hover {
+    @include card-hover;
+  }
+
+  &--flat {
+    box-shadow: none;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+
+    @include dark-theme {
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+  }
+
+  &--outlined {
+    background: transparent;
+    box-shadow: none;
+    border: 2px solid var(--v-theme-primary);
+  }
+
+  &__header {
+    padding: $spacing-4;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+
+    @include dark-theme {
+      border-bottom-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  &__body {
+    padding: $spacing-4;
+  }
+
+  &__footer {
+    padding: $spacing-4;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+
+    @include dark-theme {
+      border-top-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+}

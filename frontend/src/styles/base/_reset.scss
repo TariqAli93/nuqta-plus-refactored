@@ -1,0 +1,157 @@
+// ============================================
+// Base Styles - الأنماط الأساسية
+// ============================================
+
+@use '../abstracts' as *;
+
+// Reset & Normalize
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: $font-family-base;
+  font-size: $font-size-base;
+  font-weight: $font-weight-regular;
+  line-height: $line-height-normal;
+  color: var(--v-theme-on-surface);
+  background-color: var(--v-theme-background);
+  direction: rtl;
+  @include transition(background-color, color);
+}
+
+// Typography Base
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-family: $font-family-base;
+  font-weight: $font-weight-bold;
+  line-height: $line-height-tight;
+}
+
+h1 {
+  @include heading-1;
+}
+h2 {
+  @include heading-2;
+}
+h3 {
+  @include heading-3;
+}
+h4 {
+  @include heading-4;
+}
+h5 {
+  @include heading-5;
+}
+h6 {
+  @include heading-6;
+}
+
+p {
+  margin: 0 0 $spacing-4 0;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+a {
+  color: var(--v-theme-primary);
+  text-decoration: none;
+  @include transition(color);
+
+  &:hover {
+    color: var(--v-theme-primary-darken-1);
+  }
+}
+
+// Lists
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+// Images
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+// Buttons
+button {
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+
+  &:focus {
+    outline: none;
+  }
+}
+
+// Inputs
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+
+  &:focus {
+    outline: none;
+  }
+}
+
+// Selection
+::selection {
+  background-color: rgba($primary-color, 0.2);
+  color: inherit;
+}
+
+// Scrollbar
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: $border-radius-full;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+}
+
+.v-theme--dark {
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  }
+}

@@ -1,0 +1,152 @@
+// ============================================
+// Responsive Design Utilities
+// ============================================
+
+// Mobile-first breakpoints
+$breakpoint-xs: 0;
+$breakpoint-sm: 600px;
+$breakpoint-md: 960px;
+$breakpoint-lg: 1280px;
+$breakpoint-xl: 1920px;
+
+// Responsive mixins
+@mixin mobile-only {
+  @media (max-width: #{$breakpoint-sm - 1px}) {
+    @content;
+  }
+}
+
+@mixin tablet-up {
+  @media (min-width: $breakpoint-sm) {
+    @content;
+  }
+}
+
+@mixin desktop-up {
+  @media (min-width: $breakpoint-md) {
+    @content;
+  }
+}
+
+@mixin large-desktop-up {
+  @media (min-width: $breakpoint-lg) {
+    @content;
+  }
+}
+
+// Touch target sizes (minimum 44x44px for accessibility)
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// Responsive tables - convert to cards on mobile
+.responsive-table {
+  @include mobile-only {
+    .v-data-table {
+      :deep(.v-data-table__wrapper) {
+        overflow-x: visible;
+      }
+
+      :deep(table) {
+        display: none;
+      }
+
+      :deep(.v-data-table__mobile) {
+        display: block;
+      }
+    }
+  }
+}
+
+// Responsive cards
+.responsive-card {
+  @include mobile-only {
+    padding: 1rem;
+  }
+}
+
+// Responsive spacing
+.responsive-spacing {
+  @include mobile-only {
+    padding: 1rem;
+  }
+
+  @include tablet-up {
+    padding: 1.5rem;
+  }
+
+  @include desktop-up {
+    padding: 2rem;
+  }
+}
+
+// Responsive text
+.responsive-text {
+  @include mobile-only {
+    font-size: 0.875rem;
+  }
+
+  @include tablet-up {
+    font-size: 1rem;
+  }
+}
+
+// Responsive grid
+.responsive-grid {
+  display: grid;
+  gap: 1rem;
+
+  @include mobile-only {
+    grid-template-columns: 1fr;
+  }
+
+  @include tablet-up {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @include desktop-up {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  @include large-desktop-up {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+// Hide on mobile
+.hide-mobile {
+  @include mobile-only {
+    display: none !important;
+  }
+}
+
+// Show only on mobile
+.show-mobile-only {
+  display: none !important;
+
+  @include mobile-only {
+    display: block !important;
+  }
+}
+
+// Responsive container padding
+.responsive-container {
+  @include mobile-only {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  @include tablet-up {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+
+  @include desktop-up {
+    padding-left: 3rem;
+    padding-right: 3rem;
+  }
+}

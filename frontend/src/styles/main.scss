@@ -1,0 +1,255 @@
+// ============================================
+// Main SASS Entry Point
+// نقطة الدخول الرئيسية لـ SASS
+// ============================================
+// استيراد ملفات SASS بالترتيب الصحيح
+
+// 1. Vuetify Styles - أنماط Vuetify الأساسية
+@use 'vuetify/styles' as vuetify;
+
+// 2. Abstracts - المتغيرات والدوال (لا ينتج CSS)
+@use 'abstracts' as *;
+
+// 3. Base - الأنماط الأساسية
+@use 'base';
+
+// 4. Layouts - تخطيطات الصفحات
+@use 'layouts';
+
+// 5. Components - مكونات قابلة لإعادة الاستخدام
+@use 'components';
+
+// 6. Vuetify Overrides - تخصيص أنماط Vuetify
+@use 'vuetify-overrides';
+
+// ============================================
+// Global Styles - أنماط عامة
+// ============================================
+
+#app {
+  min-height: 100vh;
+  @include transition(background-color);
+}
+
+// Loading State
+.app-loading {
+  @include flex-center;
+  min-height: 100vh;
+
+  &__spinner {
+    width: 50px;
+    height: 50px;
+    border: 3px solid rgba($primary-color, 0.1);
+    border-top-color: $primary-color;
+    border-radius: $border-radius-full;
+    animation: spin 1s linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// Print Styles
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .app-layout__sidebar,
+  .app-layout__navbar {
+    display: none !important;
+  }
+
+  .app-layout__main {
+    margin: 0 !important;
+  }
+}
+
+// ============================================
+// Accessibility - إمكانية الوصول
+// ============================================
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+// Skip link for keyboard navigation
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: rgb(var(--v-theme-primary));
+  color: white;
+  padding: 8px 16px;
+  text-decoration: none;
+  z-index: 10000;
+  border-radius: 4px;
+  transition: top 0.2s;
+
+  &:focus {
+    top: 0;
+    outline: 2px solid rgb(var(--v-theme-primary));
+    outline-offset: 2px;
+  }
+}
+
+// Focus Styles
+*:focus-visible {
+  outline: 2px solid var(--v-theme-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+// Ensure minimum touch target size
+button,
+a,
+.v-btn,
+.v-list-item {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+// RTL Support
+[dir='rtl'] {
+  .v-data-table {
+    direction: rtl;
+  }
+
+  .v-list {
+    direction: rtl;
+  }
+
+  .v-menu {
+    direction: rtl;
+  }
+}
+
+// ============================================
+// Custom Animations - رسوم متحركة مخصصة
+// ============================================
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+// Animation Classes
+.fade-in {
+  animation: fadeIn $transition-duration-base $transition-timing-ease;
+}
+
+.fade-out {
+  animation: fadeOut $transition-duration-base $transition-timing-ease;
+}
+
+.slide-in-right {
+  animation: slideInRight $transition-duration-base $transition-timing-ease;
+}
+
+.slide-in-left {
+  animation: slideInLeft $transition-duration-base $transition-timing-ease;
+}
+
+.slide-in-up {
+  animation: slideInUp $transition-duration-base $transition-timing-ease;
+}
+
+.slide-in-down {
+  animation: slideInDown $transition-duration-base $transition-timing-ease;
+}
+
+.bounce {
+  animation: bounce $transition-duration-slow $transition-timing-ease infinite;
+}
+
+.pulse {
+  animation: pulse $transition-duration-slow $transition-timing-ease infinite;
+}

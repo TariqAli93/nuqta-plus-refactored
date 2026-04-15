@@ -1,0 +1,29 @@
+/* Color scheme support for light and dark modes */
+:root {
+  color-scheme: light dark;
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+/* Disable transitions on theme toggle button to avoid flicker */
+.v-btn {
+  transition: none;
+}
+
+/* Ensure proper contrast in both themes */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+  }
+}

@@ -1,0 +1,89 @@
+// ============================================
+// Button Component Styles - أنماط الأزرار
+// ============================================
+
+@use '../abstracts' as *;
+
+.custom-btn {
+  @include button-base;
+
+  &--primary {
+    background-color: var(--v-theme-primary);
+    color: white;
+
+    &:hover {
+      background-color: var(--v-theme-primary-darken-1);
+    }
+  }
+
+  &--secondary {
+    background-color: var(--v-theme-secondary);
+    color: white;
+
+    &:hover {
+      background-color: var(--v-theme-secondary-darken-1);
+    }
+  }
+
+  &--success {
+    background-color: var(--v-theme-success);
+    color: white;
+
+    &:hover {
+      background-color: var(--v-theme-success-darken-1);
+    }
+  }
+
+  &--error {
+    background-color: var(--v-theme-error);
+    color: white;
+
+    &:hover {
+      background-color: var(--v-theme-error-darken-1);
+    }
+  }
+
+  &--outlined {
+    background: transparent;
+    border: 2px solid currentColor;
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.04);
+
+      @include dark-theme {
+        background-color: rgba(255, 255, 255, 0.08);
+      }
+    }
+  }
+
+  &--text {
+    background: transparent;
+    box-shadow: none;
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.04);
+
+      @include dark-theme {
+        background-color: rgba(255, 255, 255, 0.08);
+      }
+    }
+  }
+
+  &--sm {
+    height: $button-height-sm;
+    font-size: $font-size-sm;
+  }
+
+  &--lg {
+    height: $button-height-lg;
+    font-size: $font-size-lg;
+  }
+
+  &--block {
+    width: 100%;
+  }
+
+  &--rounded {
+    @include rounded;
+  }
+}

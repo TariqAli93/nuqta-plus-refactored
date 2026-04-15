@@ -1,0 +1,587 @@
+/* ============================================
+   نظام الخطوط الاحترافي - Professional Fonts System
+   ============================================
+   
+   هذا الملف يحتوي على:
+   1. تحميل الخطوط من Google Fonts مع التحسين
+   2. تعريفات CSS للخطوط المحلية (للاستخدام المستقبلي)
+   3. قواعد الخطوط للغة العربية والإنجليزية
+   4. تحسينات الأداء وتقنيات التحميل الذكي
+   ============================================ */
+
+/* ============================================
+   1. تحميل الخطوط من Google Fonts
+   استخدام display=swap لتحسين الأداء
+   ============================================ */
+
+/* Roboto Font - للغة الإنجليزية والواجهات متعددة اللغات */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap');
+
+/* Cairo Font - خط عربي احترافي وواضح */
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@200;300;400;500;600;700;800;900;1000&display=swap');
+
+/* Tajawal Font - خط عربي بديل أنيق */
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@200;300;400;500;700;800;900&display=swap');
+
+/* ============================================
+   2. تعريفات الخطوط المحلية (Local Fonts)
+   يمكن استخدامها في المستقبل لتحسين الأداء
+   ============================================ */
+
+/*
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Cairo'), 
+       url('../assets/fonts/Cairo-Regular.woff2') format('woff2'),
+       url('../assets/fonts/Cairo-Regular.woff') format('woff');
+}
+*/
+
+/* ============================================
+   3. متغيرات CSS للخطوط
+   ============================================ */
+
+:root {
+  /* الخطوط الأساسية */
+  --font-sans: 'Roboto', 'Cairo', 'Tajawal', sans-serif;
+  --font-arabic: 'Cairo', 'Tajawal', sans-serif;
+  --font-english: 'Roboto', sans-serif;
+
+  /* أوزان الخطوط */
+  --font-weight-thin: 100;
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-weight-extrabold: 800;
+  --font-weight-black: 900;
+
+  /* أحجام الخطوط */
+  --font-size-xs: 0.75rem; /* 12px */
+  --font-size-sm: 0.875rem; /* 14px */
+  --font-size-base: 1rem; /* 16px */
+  --font-size-lg: 1.125rem; /* 18px */
+  --font-size-xl: 1.25rem; /* 20px */
+  --font-size-2xl: 1.5rem; /* 24px */
+  --font-size-3xl: 1.875rem; /* 30px */
+  --font-size-4xl: 2.25rem; /* 36px */
+  --font-size-5xl: 3rem; /* 48px */
+  --font-size-6xl: 3.75rem; /* 60px */
+
+  /* تباعد الأسطر */
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+  --line-height-loose: 2;
+
+  /* تباعد الأحرف */
+  --letter-spacing-tight: -0.025em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.025em;
+  --letter-spacing-wider: 0.05em;
+  --letter-spacing-widest: 0.1em;
+}
+
+/* ============================================
+   4. الأنماط الأساسية - Base Styles
+   ============================================ */
+
+html {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+}
+
+/* ============================================
+   5. قواعد اللغة العربية - Arabic Language Rules
+   ============================================ */
+
+/* استهداف العناصر العربية باستخدام الـ lang attribute */
+:lang(ar),
+[lang='ar'],
+[dir='rtl'] {
+  font-family: var(--font-arabic);
+  letter-spacing: var(--letter-spacing-normal);
+}
+
+/* تحسين النصوص العربية */
+:lang(ar) {
+  /* تحسين العرض للنصوص العربية */
+  font-feature-settings:
+    'liga' 1,
+    'calt' 1;
+  -webkit-font-feature-settings:
+    'liga' 1,
+    'calt' 1;
+  -moz-font-feature-settings:
+    'liga' 1,
+    'calt' 1;
+}
+
+/* قواعد RTL */
+[dir='rtl'] {
+  direction: rtl;
+  text-align: right;
+}
+
+[dir='rtl'] * {
+  direction: rtl;
+}
+
+/* ============================================
+   6. قواعد اللغة الإنجليزية - English Language Rules
+   ============================================ */
+
+:lang(en),
+[lang='en'],
+[dir='ltr'] {
+  font-family: var(--font-english);
+  letter-spacing: var(--letter-spacing-normal);
+}
+
+[dir='ltr'] {
+  direction: ltr;
+  text-align: left;
+}
+
+/* ============================================
+   7. فئات مساعدة للخطوط - Font Utility Classes
+   ============================================ */
+
+/* عائلات الخطوط */
+.font-sans {
+  font-family: var(--font-sans) !important;
+}
+.font-arabic {
+  font-family: var(--font-arabic) !important;
+}
+.font-english {
+  font-family: var(--font-english) !important;
+}
+
+/* أوزان الخطوط */
+.font-thin {
+  font-weight: var(--font-weight-thin) !important;
+}
+.font-light {
+  font-weight: var(--font-weight-light) !important;
+}
+.font-regular {
+  font-weight: var(--font-weight-regular) !important;
+}
+.font-medium {
+  font-weight: var(--font-weight-medium) !important;
+}
+.font-semibold {
+  font-weight: var(--font-weight-semibold) !important;
+}
+.font-bold {
+  font-weight: var(--font-weight-bold) !important;
+}
+.font-extrabold {
+  font-weight: var(--font-weight-extrabold) !important;
+}
+.font-black {
+  font-weight: var(--font-weight-black) !important;
+}
+
+/* أحجام الخطوط */
+.text-xs {
+  font-size: var(--font-size-xs) !important;
+}
+.text-sm {
+  font-size: var(--font-size-sm) !important;
+}
+.text-base {
+  font-size: var(--font-size-base) !important;
+}
+.text-lg {
+  font-size: var(--font-size-lg) !important;
+}
+.text-xl {
+  font-size: var(--font-size-xl) !important;
+}
+.text-2xl {
+  font-size: var(--font-size-2xl) !important;
+}
+.text-3xl {
+  font-size: var(--font-size-3xl) !important;
+}
+.text-4xl {
+  font-size: var(--font-size-4xl) !important;
+}
+.text-5xl {
+  font-size: var(--font-size-5xl) !important;
+}
+.text-6xl {
+  font-size: var(--font-size-6xl) !important;
+}
+
+/* تباعد الأسطر */
+.leading-tight {
+  line-height: var(--line-height-tight) !important;
+}
+.leading-normal {
+  line-height: var(--line-height-normal) !important;
+}
+.leading-relaxed {
+  line-height: var(--line-height-relaxed) !important;
+}
+.leading-loose {
+  line-height: var(--line-height-loose) !important;
+}
+
+/* تباعد الأحرف */
+.tracking-tight {
+  letter-spacing: var(--letter-spacing-tight) !important;
+}
+.tracking-normal {
+  letter-spacing: var(--letter-spacing-normal) !important;
+}
+.tracking-wide {
+  letter-spacing: var(--letter-spacing-wide) !important;
+}
+.tracking-wider {
+  letter-spacing: var(--letter-spacing-wider) !important;
+}
+.tracking-widest {
+  letter-spacing: var(--letter-spacing-widest) !important;
+}
+
+/* ============================================
+   8. تحسينات العناوين - Heading Optimizations
+   ============================================ */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.h1,
+.h2,
+.h3,
+.h4,
+.h5,
+.h6 {
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  margin: 0;
+  padding: 0;
+}
+
+/* العناوين العربية */
+:lang(ar) h1,
+:lang(ar) h2,
+:lang(ar) h3,
+:lang(ar) h4,
+:lang(ar) h5,
+:lang(ar) h6,
+[dir='rtl'] h1,
+[dir='rtl'] h2,
+[dir='rtl'] h3,
+[dir='rtl'] h4,
+[dir='rtl'] h5,
+[dir='rtl'] h6 {
+  font-family: var(--font-arabic);
+  font-weight: var(--font-weight-bold);
+}
+
+h1,
+.h1 {
+  font-size: var(--font-size-5xl);
+}
+h2,
+.h2 {
+  font-size: var(--font-size-4xl);
+}
+h3,
+.h3 {
+  font-size: var(--font-size-3xl);
+}
+h4,
+.h4 {
+  font-size: var(--font-size-2xl);
+}
+h5,
+.h5 {
+  font-size: var(--font-size-xl);
+}
+h6,
+.h6 {
+  font-size: var(--font-size-lg);
+}
+
+/* ============================================
+   9. تحسينات الفقرات - Paragraph Optimizations
+   ============================================ */
+
+p {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-relaxed);
+  margin: 0 0 1rem 0;
+}
+
+:lang(ar) p,
+[dir='rtl'] p {
+  font-family: var(--font-arabic);
+  line-height: var(--line-height-loose);
+}
+
+/* ============================================
+   10. تحسينات الأزرار والنماذج - Button & Form Optimizations
+   ============================================ */
+
+button,
+input,
+select,
+textarea,
+.v-btn,
+.v-input {
+  font-family: var(--font-sans);
+}
+
+:lang(ar) button,
+:lang(ar) input,
+:lang(ar) select,
+:lang(ar) textarea,
+[dir='rtl'] button,
+[dir='rtl'] input,
+[dir='rtl'] select,
+[dir='rtl'] textarea,
+[dir='rtl'] .v-btn,
+[dir='rtl'] .v-input {
+  font-family: var(--font-arabic);
+}
+
+/* ============================================
+   11. تحسينات الأداء - Performance Optimizations
+   ============================================ */
+
+/* استخدام font-display: swap لتحسين الأداء */
+@supports (font-display: swap) {
+  @font-face {
+    font-display: swap;
+  }
+}
+
+/* تفعيل تسريع GPU للنصوص */
+.gpu-accelerated-text {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
+}
+
+/* ============================================
+   12. Responsive Font Sizes - أحجام خطوط متجاوبة
+   ============================================ */
+
+/* أجهزة صغيرة (موبايل) */
+@media (max-width: 600px) {
+  html {
+    font-size: 14px;
+  }
+
+  h1,
+  .h1 {
+    font-size: var(--font-size-4xl);
+  }
+  h2,
+  .h2 {
+    font-size: var(--font-size-3xl);
+  }
+  h3,
+  .h3 {
+    font-size: var(--font-size-2xl);
+  }
+  h4,
+  .h4 {
+    font-size: var(--font-size-xl);
+  }
+  h5,
+  .h5 {
+    font-size: var(--font-size-lg);
+  }
+  h6,
+  .h6 {
+    font-size: var(--font-size-base);
+  }
+}
+
+/* أجهزة متوسطة (تابلت) */
+@media (min-width: 601px) and (max-width: 960px) {
+  html {
+    font-size: 15px;
+  }
+}
+
+/* أجهزة كبيرة (سطح المكتب) */
+@media (min-width: 1920px) {
+  html {
+    font-size: 18px;
+  }
+}
+
+/* ============================================
+   13. Dark Mode Font Adjustments - تعديلات الوضع الداكن
+   ============================================ */
+
+@media (prefers-color-scheme: dark) {
+  html,
+  body {
+    /* تحسين وضوح النصوص في الوضع الداكن */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-weight: var(--font-weight-regular);
+  }
+
+  /* تخفيف سماكة الخط قليلاً في الوضع الداكن */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: var(--font-weight-semibold);
+  }
+}
+
+.dark {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: light) {
+  html,
+  body {
+    /* تحسين وضوح النصوص في الوضع الفاتح */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-weight: var(--font-weight-regular);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: var(--font-weight-semibold);
+  }
+}
+
+.light {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================
+   14. Print Styles - أنماط الطباعة
+   ============================================ */
+
+@media print {
+  html,
+  body {
+    font-family: var(--font-sans);
+    font-size: 12pt;
+    line-height: var(--line-height-normal);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    page-break-after: avoid;
+  }
+
+  p {
+    orphans: 3;
+    widows: 3;
+  }
+}
+
+/* ============================================
+   15. فئات مساعدة للاتجاهات - Direction Utility Classes
+   ============================================ */
+
+.rtl {
+  direction: rtl;
+  text-align: right;
+  font-family: var(--font-arabic);
+}
+
+.ltr {
+  direction: ltr;
+  text-align: left;
+  font-family: var(--font-english);
+}
+
+.text-start {
+  text-align: start;
+}
+
+.text-end {
+  text-align: end;
+}
+
+.text-center {
+  text-align: center;
+}
+
+/* ============================================
+   16. Accessibility - إمكانية الوصول
+   ============================================ */
+
+/* تحسين التباين للنصوص */
+@media (prefers-contrast: high) {
+  body {
+    font-weight: var(--font-weight-medium);
+  }
+}
+
+/* ============================================
+   17. Font Loading Strategy - استراتيجية تحميل الخطوط
+   ============================================ */
+
+/* Font Loading Classes */
+.fonts-loading {
+  /* عرض خط احتياطي أثناء التحميل */
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+.fonts-loaded {
+  /* عرض الخطوط المخصصة بعد التحميل */
+  font-family: var(--font-sans);
+}
+
+/* Fallback for Arabic */
+.fonts-loading:lang(ar),
+.fonts-loading[dir='rtl'] {
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+
+.fonts-loaded:lang(ar),
+.fonts-loaded[dir='rtl'] {
+  font-family: var(--font-arabic);
+}

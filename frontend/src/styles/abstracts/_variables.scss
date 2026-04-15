@@ -1,0 +1,244 @@
+// ============================================
+// Vuetify Variables Customization
+// ============================================
+// هذا الملف يحتوي على جميع المتغيرات المخصصة لـ Vuetify
+// يمكن تعديل هذه المتغيرات لتخصيص الثيم بشكل شامل
+
+// ============================================
+// 1. Colors - الألوان
+// ============================================
+
+// Primary Colors - الألوان الأساسية
+$primary-color: #1976d2;
+$primary-light: #42a5f5;
+$primary-dark: #1565c0;
+
+// Secondary Colors - الألوان الثانوية
+$secondary-color: #424242;
+$secondary-light: #616161;
+$secondary-dark: #212121;
+
+// Accent Colors - ألوان التمييز
+$accent-color: #82b1ff;
+$accent-light: #b3e5fc;
+$accent-dark: #448aff;
+
+// Status Colors - ألوان الحالة
+$success-color: #4caf50;
+$success-light: #81c784;
+$success-dark: #388e3c;
+
+$error-color: #ff5252;
+$error-light: #ff8a80;
+$error-dark: #d32f2f;
+
+$warning-color: #ffc107;
+$warning-light: #ffd54f;
+$warning-dark: #f57c00;
+
+$info-color: #2196f3;
+$info-light: #64b5f6;
+$info-dark: #1976d2;
+
+// Background Colors - ألوان الخلفيات
+$bg-light: #f5f5f5;
+$bg-dark: #121212;
+
+$surface-light: #ffffff;
+$surface-dark: #1e1e1e;
+
+$card-light: #ffffff;
+$card-dark: #2c2c2c;
+
+// Text Colors - ألوان النصوص
+$text-primary-light: rgba(0, 0, 0, 0.87);
+$text-secondary-light: rgba(0, 0, 0, 0.6);
+$text-disabled-light: rgba(0, 0, 0, 0.38);
+
+$text-primary-dark: rgba(255, 255, 255, 0.87);
+$text-secondary-dark: rgba(255, 255, 255, 0.6);
+$text-disabled-dark: rgba(255, 255, 255, 0.38);
+
+// ============================================
+// 2. Typography - الطباعة
+// ============================================
+
+// Font Families - عائلات الخطوط
+$font-family-base: 'Roboto', 'Cairo', 'Tajawal', sans-serif;
+$font-family-monospace: 'Roboto Mono', 'Courier New', monospace;
+$font-family-arabic: 'Cairo', 'Tajawal', sans-serif;
+
+// Font Sizes - أحجام الخطوط
+$font-size-xs: 0.625rem; // 10px
+$font-size-sm: 0.75rem; // 12px
+$font-size-base: 0.875rem; // 14px
+$font-size-md: 1rem; // 16px
+$font-size-lg: 1.125rem; // 18px
+$font-size-xl: 1.25rem; // 20px
+$font-size-2xl: 1.5rem; // 24px
+$font-size-3xl: 1.875rem; // 30px
+$font-size-4xl: 2.25rem; // 36px
+$font-size-5xl: 3rem; // 48px
+
+// Font Weights - أوزان الخطوط
+$font-weight-thin: 100;
+$font-weight-light: 300;
+$font-weight-regular: 400;
+$font-weight-medium: 500;
+$font-weight-semibold: 600;
+$font-weight-bold: 700;
+$font-weight-black: 900;
+
+// Line Heights - ارتفاعات الأسطر
+$line-height-tight: 1.2;
+$line-height-normal: 1.5;
+$line-height-relaxed: 1.75;
+$line-height-loose: 2;
+
+// ============================================
+// 3. Spacing - المسافات
+// ============================================
+
+$spacing-base: 8px;
+
+$spacing-0: 0;
+$spacing-1: $spacing-base * 0.5; // 4px
+$spacing-2: $spacing-base; // 8px
+$spacing-3: $spacing-base * 1.5; // 12px
+$spacing-4: $spacing-base * 2; // 16px
+$spacing-5: $spacing-base * 2.5; // 20px
+$spacing-6: $spacing-base * 3; // 24px
+$spacing-8: $spacing-base * 4; // 32px
+$spacing-10: $spacing-base * 5; // 40px
+$spacing-12: $spacing-base * 6; // 48px
+$spacing-16: $spacing-base * 8; // 64px
+$spacing-20: $spacing-base * 10; // 80px
+$spacing-24: $spacing-base * 12; // 96px
+
+// ============================================
+// 4. Border Radius - تقويس الحواف
+// ============================================
+
+$border-radius-none: 0;
+$border-radius-sm: 4px;
+$border-radius-base: 8px;
+$border-radius-md: 12px;
+$border-radius-lg: 16px;
+$border-radius-xl: 20px;
+$border-radius-2xl: 24px;
+$border-radius-full: 9999px;
+
+// ============================================
+// 5. Shadows - الظلال
+// ============================================
+
+$shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+$shadow-base:
+  0 1px 3px 0 rgba(0, 0, 0, 0.1),
+  0 1px 2px 0 rgba(0, 0, 0, 0.06);
+$shadow-md:
+  0 4px 6px -1px rgba(0, 0, 0, 0.1),
+  0 2px 4px -1px rgba(0, 0, 0, 0.06);
+$shadow-lg:
+  0 10px 15px -3px rgba(0, 0, 0, 0.1),
+  0 4px 6px -2px rgba(0, 0, 0, 0.05);
+$shadow-xl:
+  0 20px 25px -5px rgba(0, 0, 0, 0.1),
+  0 10px 10px -5px rgba(0, 0, 0, 0.04);
+$shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+
+// ============================================
+// 6. Transitions - الانتقالات
+// ============================================
+
+$transition-duration-fast: 150ms;
+$transition-duration-base: 300ms;
+$transition-duration-slow: 500ms;
+
+$transition-timing-ease: ease;
+$transition-timing-ease-in: ease-in;
+$transition-timing-ease-out: ease-out;
+$transition-timing-ease-in-out: ease-in-out;
+
+// ============================================
+// 7. Z-Index - ترتيب الطبقات
+// ============================================
+
+$z-index-dropdown: 1000;
+$z-index-sticky: 1020;
+$z-index-fixed: 1030;
+$z-index-modal-backdrop: 1040;
+$z-index-modal: 1050;
+$z-index-popover: 1060;
+$z-index-tooltip: 1070;
+$z-index-notification: 1080;
+
+// ============================================
+// 8. Breakpoints - نقاط التوقف
+// ============================================
+
+$breakpoint-xs: 0;
+$breakpoint-sm: 600px;
+$breakpoint-md: 960px;
+$breakpoint-lg: 1280px;
+$breakpoint-xl: 1920px;
+$breakpoint-xxl: 2560px;
+
+// ============================================
+// 9. Container Widths - عروض الحاويات
+// ============================================
+
+$container-max-width-sm: 640px;
+$container-max-width-md: 768px;
+$container-max-width-lg: 1024px;
+$container-max-width-xl: 1280px;
+$container-max-width-xxl: 1536px;
+
+// ============================================
+// 10. Custom App Variables - متغيرات التطبيق المخصصة
+// ============================================
+
+// Sidebar
+$sidebar-width: 260px;
+$sidebar-width-collapsed: 60px;
+$sidebar-bg-light: $surface-light;
+$sidebar-bg-dark: $surface-dark;
+
+// Navbar
+$navbar-height: 64px;
+$navbar-bg-light: $surface-light;
+$navbar-bg-dark: $surface-dark;
+
+// Card
+$card-padding: $spacing-4;
+$card-border-radius: $border-radius-md;
+
+// Input
+$input-height: 40px;
+$input-border-radius: $border-radius-base;
+$input-padding-x: $spacing-3;
+$input-padding-y: $spacing-2;
+
+// Button
+$button-height: 40px;
+$button-height-sm: 32px;
+$button-height-lg: 48px;
+$button-border-radius: $border-radius-base;
+$button-padding-x: $spacing-4;
+$button-padding-y: $spacing-2;
+
+// Table
+$table-row-height: 48px;
+$table-header-height: 56px;
+$table-border-color-light: #e0e0e0;
+$table-border-color-dark: #424242;
+$table-hover-bg-light: #f5f5f5;
+$table-hover-bg-dark: #2c2c2c;
+
+// ============================================
+// 11. Animation Variables - متغيرات الرسوم المتحركة
+// ============================================
+
+$animation-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+$animation-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+$animation-swift: cubic-bezier(0.4, 0, 0.6, 1);

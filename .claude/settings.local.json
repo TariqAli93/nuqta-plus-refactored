@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /d/dev_projects/nuqta-plus-lagecy/backend/src/services/*.js)"
+    ]
+  }
+}

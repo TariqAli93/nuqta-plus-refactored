@@ -1,0 +1,86 @@
+// ============================================
+// Table Component Styles - أنماط الجداول
+// ============================================
+
+@use '../abstracts' as *;
+
+.custom-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  &__header {
+    height: $table-header-height;
+    background-color: rgba(0, 0, 0, 0.02);
+
+    @include dark-theme {
+      background-color: rgba(255, 255, 255, 0.02);
+    }
+
+    th {
+      padding: $spacing-3 $spacing-4;
+      text-align: start;
+      font-weight: $font-weight-semibold;
+      font-size: $font-size-sm;
+      border-bottom: 1px solid $table-border-color-light;
+
+      @include dark-theme {
+        border-bottom-color: $table-border-color-dark;
+      }
+    }
+  }
+
+  &__body {
+    tr {
+      height: $table-row-height;
+      @include transition(background-color);
+
+      &:hover {
+        background-color: $table-hover-bg-light;
+
+        @include dark-theme {
+          background-color: $table-hover-bg-dark;
+        }
+      }
+
+      &:not(:last-child) {
+        border-bottom: 1px solid $table-border-color-light;
+
+        @include dark-theme {
+          border-bottom-color: $table-border-color-dark;
+        }
+      }
+    }
+
+    td {
+      padding: $spacing-3 $spacing-4;
+      font-size: $font-size-base;
+    }
+  }
+
+  &--striped {
+    tbody tr:nth-child(even) {
+      background-color: rgba(0, 0, 0, 0.02);
+
+      @include dark-theme {
+        background-color: rgba(255, 255, 255, 0.02);
+      }
+    }
+  }
+
+  &--bordered {
+    border: 1px solid $table-border-color-light;
+
+    @include dark-theme {
+      border-color: $table-border-color-dark;
+    }
+
+    th,
+    td {
+      border: 1px solid $table-border-color-light;
+
+      @include dark-theme {
+        border-color: $table-border-color-dark;
+      }
+    }
+  }
+}
