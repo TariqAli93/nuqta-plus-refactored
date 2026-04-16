@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WinSW service descriptor for NuqtaPlus Backend.
+
+  This file is a template. build-backend.js substitutes ${BACKEND_VERSION}
+  and writes the result as NuqtaPlusBackend.xml next to NuqtaPlusBackend.exe.
+
+  %BASE% is a WinSW built-in variable that resolves to the directory
+  containing the wrapper executable. Everything is relative to that
+  directory so the bundle is fully relocatable.
+-->
+<service>
+  <id>NuqtaPlusBackend</id>
+  <name>NuqtaPlus Backend</name>
+  <description>NuqtaPlus POS - Local backend service (HTTP on 127.0.0.1:41731). Version ${BACKEND_VERSION}.</description>
+
+  <executable>%BASE%\bin\node.exe</executable>
+  <arguments>src\server.js</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <env name="NODE_ENV" value="production" />
+  <env name="BACKEND_HOST" value="127.0.0.1" />
+  <env name="BACKEND_PORT" value="41731" />
+  <env name="NUQTA_RUN_MODE" value="service" />
+
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <logpath>%BASE%\logs</logpath>
+
+  <onfailure action="restart" delay="5 sec" />
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="none" />
+
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>10 sec</stoptimeout>
+  <priority>normal</priority>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+</service>

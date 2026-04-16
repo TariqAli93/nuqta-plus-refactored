@@ -32,7 +32,7 @@
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.1.2",
     "cross-env": "^10.1.0",
-    "electron": "^39.2.7",
+    "electron": "^41.2.1",
     "electron-builder": "^26.0.12",
     "electron-devtools-installer": "^4.0.0",
     "postcss": "^8.4.47",
@@ -98,6 +98,7 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
@@ -107,7 +108,8 @@
       "uninstallerIcon": "build/icon.ico",
       "uninstallDisplayName": "نقطة بلس",
       "license": "build/license.md",
-      "unicode": true
+      "unicode": true,
+      "include": "../scripts/installer-include.nsh"
     }
   }
 }

@@ -79,7 +79,9 @@ export default defineConfig({
     vue(),
     vuetify({ autoImport: true }),
 
-    ...(isDev ? [VueDevTools()] : []),
+    ...(isDev ? [VueDevTools({
+      launchEditor: process.env.EDITOR || 'cursor'
+    })] : []),
 
     // Copy assets only when building electron target
     ...(isElectronTarget ? [copyStaticAssets()] : []),

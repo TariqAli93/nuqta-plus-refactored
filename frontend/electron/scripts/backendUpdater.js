@@ -24,6 +24,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import { app } from 'electron';
 import logger from './logger.js';
 import {
   readPointer,
@@ -38,6 +39,23 @@ import {
   readBaselineVersion,
 } from './versionManager.js';
 import { ensureBackendRunning } from './backendChecker.js';
+
+const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
+const isServiceMode = !isDev;
+
+/**
+ * Top-level entries inside <resources>/backend that belong to the SERVICE
+ * HOST and must NEVER be touched by an in-place backend update. The only
+ * way to upgrade these is via a full Electron-builder app update which
+ * ships a new resources/backend folder atomically.
+ */
+const SERVICE_HOST_ENTRIES = new Set([
+  'bin',                       // bundled node.exe runtime (ABI tied to electron build)
+  'NuqtaPlusBackend.exe',      // WinSW wrapper
+  'NuqtaPlusBackend.xml',      // service descriptor
+  'service',                   // .cmd helpers
+  'logs',                      // service log directory
+]);
 import {
   trustedRoots,
   ensureDownloadRoot,
@@ -328,10 +346,280 @@ export async function applyBackendUpdate({ sourceDir, version, expectedHash, bac
   }
 
   try {
+    if (isServiceMode) {
+      return await _applyBackendUpdateLockedService({
+        sourceDir,
+        version,
+        expectedHash,
+        backendManager,
+      });
+    }
     return await _applyBackendUpdateLocked({ sourceDir, version, expectedHash, backendManager });
   } finally {
     releaseUpdateLock();
   }
+}
+
+// ── Service-mode in-place update ────────────────────────────────────────────
+
+/**
+ * Tag used when renaming the previous payload aside before swapping in the
+ * new one. Includes a per-update timestamp so concurrent attempts can never
+ * collide with each other (the update lock already prevents that, but
+ * defence in depth is cheap).
+ */
+function makeBackupTag() {
+  return `.bak-${Date.now()}`;
+}
+
+/**
+ * List the payload entries inside a staged bundle. Anything in
+ * SERVICE_HOST_ENTRIES is silently ignored — staged bundles must never
+ * contain wrapper files anyway, but we filter defensively.
+ */
+function listPayloadEntries(stagedDir) {
+  return fs
+    .readdirSync(stagedDir, { withFileTypes: true })
+    .map((d) => d.name)
+    .filter((name) => !SERVICE_HOST_ENTRIES.has(name));
+}
+
+/**
+ * Move every payload entry currently in `baselineDir` aside (by appending
+ * the backup tag) so the new payload can be moved into place. Returns the
+ * list of entries that were renamed so rollback can find them.
+ *
+ * Atomic-per-entry: if any rename fails midway, the function reverses
+ * the renames it already performed and re-throws.
+ */
+function moveCurrentPayloadAside(baselineDir, payloadNames, tag) {
+  const moved = [];
+  try {
+    for (const name of payloadNames) {
+      const live = path.join(baselineDir, name);
+      if (!fs.existsSync(live)) continue;
+      const aside = path.join(baselineDir, `${name}${tag}`);
+      fs.renameSync(live, aside);
+      moved.push({ name, aside });
+    }
+  } catch (err) {
+    // Roll back any renames we already did before re-throwing.
+    for (const m of moved.reverse()) {
+      try {
+        fs.renameSync(m.aside, path.join(baselineDir, m.name));
+      } catch (e2) {
+        logger.error(`rollback of moveCurrentPayloadAside failed: ${e2.message}`);
+      }
+    }
+    throw err;
+  }
+  return moved;
+}
+
+/** Recursively copy `src` → `dst` (file or directory). Symlinks rejected. */
+function copyEntry(src, dst) {
+  const stat = fs.lstatSync(src);
+  if (stat.isSymbolicLink()) {
+    throw new SecurityError(`refuse to copy symlink: ${src}`);
+  }
+  if (stat.isDirectory()) {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      copyEntry(path.join(src, entry.name), path.join(dst, entry.name));
+    }
+  } else if (stat.isFile()) {
+    fs.copyFileSync(src, dst);
+  }
+}
+
+/** Restore previously-backed-up entries, removing whatever was swapped in. */
+function restoreBackupAside(baselineDir, moved) {
+  for (const m of moved) {
+    const live = path.join(baselineDir, m.name);
+    try {
+      if (fs.existsSync(live)) fs.rmSync(live, { recursive: true, force: true });
+      if (fs.existsSync(m.aside)) fs.renameSync(m.aside, live);
+    } catch (err) {
+      logger.error(`restoreBackupAside(${m.name}) failed: ${err.message}`);
+    }
+  }
+}
+
+/** Delete previously-backed-up entries after a successful update. */
+function discardBackupAside(baselineDir, moved) {
+  for (const m of moved) {
+    try {
+      if (fs.existsSync(m.aside)) {
+        fs.rmSync(m.aside, { recursive: true, force: true });
+      }
+    } catch (err) {
+      logger.warn(`discardBackupAside(${m.name}) ignored: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Service-mode update flow. The Windows Service binary path is fixed at
+ * <resources>/backend, so we do an IN-PLACE swap of the payload entries
+ * (src/, node_modules/, package.json, ...) while the service is stopped,
+ * preserving the WinSW host and the bundled node.exe runtime.
+ *
+ * Steps:
+ *   1. Stage + verify (reuses existing security checks)
+ *   2. Stop the Windows Service
+ *   3. Snapshot current payload aside (rename in-place)
+ *   4. Mirror staged payload into baseline backend dir
+ *   5. Start the service
+ *   6. Validate /health + /version
+ *   7. On any failure: stop service, restore snapshot, restart service
+ *   8. Discard snapshots on success
+ */
+async function _applyBackendUpdateLockedService({
+  sourceDir,
+  version,
+  expectedHash,
+  backendManager,
+}) {
+  // 1 — stage + verify
+  let stagedDir;
+  try {
+    if (!fs.existsSync(stagedVersionDir(version))) {
+      stagedDir = stageBackendUpdate(sourceDir, version);
+    } else {
+      logger.info(`[updater/svc] v${version} already staged — skipping copy`);
+      stagedDir = stagedVersionDir(version);
+    }
+    verifyStagedVersion(version, expectedHash);
+  } catch (err) {
+    logger.error(err, { phase: 'svc-stage-or-verify', version });
+    return { ok: false, version, rolledBack: false, error: err.message };
+  }
+
+  const baselineDir = baselineBackendDir();
+  const payloadNames = listPayloadEntries(stagedDir);
+  if (payloadNames.length === 0) {
+    return {
+      ok: false,
+      version,
+      rolledBack: false,
+      error: 'staged bundle contains no payload entries — refusing to wipe baseline',
+    };
+  }
+
+  // 2 — stop service
+  logger.info('[updater/svc] stopping service before in-place swap');
+  try {
+    await backendManager.StopBackend();
+  } catch (err) {
+    logger.error(err, { phase: 'svc-stop' });
+    return { ok: false, version, rolledBack: false, error: `stop service failed: ${err.message}` };
+  }
+
+  // 3 — snapshot current payload aside
+  const tag = makeBackupTag();
+  let moved;
+  try {
+    moved = moveCurrentPayloadAside(baselineDir, payloadNames, tag);
+    logger.info(`[updater/svc] snapshotted ${moved.length} payload entries (tag=${tag})`);
+  } catch (err) {
+    logger.error(err, { phase: 'svc-snapshot' });
+    // Restart service (still running on the original payload — nothing was moved
+    // permanently; moveCurrentPayloadAside reversed itself before throwing).
+    try { await backendManager.StartBackend(); } catch (_) { /* surfaced below */ }
+    return { ok: false, version, rolledBack: false, error: `snapshot failed: ${err.message}` };
+  }
+
+  // 4 — mirror new payload into baseline
+  try {
+    for (const name of payloadNames) {
+      const src = path.join(stagedDir, name);
+      const dst = path.join(baselineDir, name);
+      copyEntry(src, dst);
+    }
+    logger.info(`[updater/svc] mirrored ${payloadNames.length} payload entries into baseline`);
+  } catch (err) {
+    logger.error(err, { phase: 'svc-mirror' });
+    // Roll back: remove half-copied entries and restore snapshot.
+    for (const name of payloadNames) {
+      const live = path.join(baselineDir, name);
+      try { if (fs.existsSync(live)) fs.rmSync(live, { recursive: true, force: true }); } catch (_) { /* noop */ }
+    }
+    restoreBackupAside(baselineDir, moved);
+    try { await backendManager.StartBackend(); } catch (_) { /* logged */ }
+    return { ok: false, version, rolledBack: true, error: `mirror failed: ${err.message}` };
+  }
+
+  // 5 — start service
+  // 6 — validate health + version
+  let postStart;
+  try {
+    postStart = await ensureBackendRunning(backendManager, logger);
+  } catch (err) {
+    postStart = { status: 'error', version: null, error: err.message };
+  }
+
+  if (postStart.status === 'ready') {
+    // Track history for diagnostics. The pointer's "active" path stays at
+    // baseline (because the service runs from baseline) but we record the
+    // version we just installed.
+    try {
+      writePointer({
+        activeVersion: version,
+        activeSource: 'baseline',
+        previousVersion: readPointer()?.activeVersion || readBaselineVersion(),
+        previousSource: 'baseline',
+      });
+    } catch (err) {
+      logger.warn(`[updater/svc] pointer write skipped: ${err.message}`);
+    }
+
+    discardBackupAside(baselineDir, moved);
+    pruneOldVersions();
+    logger.info(`[updater/svc] update to v${version} succeeded`);
+    return { ok: true, version };
+  }
+
+  // 7 — failure → rollback
+  logger.error(`[updater/svc] validation failed (${postStart.error}) — rolling back`);
+  try {
+    await backendManager.StopBackend();
+  } catch (err) {
+    logger.warn(`[updater/svc] stop-before-rollback failed: ${err.message}`);
+  }
+
+  // Remove the failed payload, restore snapshot.
+  for (const name of payloadNames) {
+    const live = path.join(baselineDir, name);
+    try { if (fs.existsSync(live)) fs.rmSync(live, { recursive: true, force: true }); } catch (_) { /* noop */ }
+  }
+  restoreBackupAside(baselineDir, moved);
+
+  // Restart the now-rolled-back service.
+  let postRollback;
+  try {
+    postRollback = await ensureBackendRunning(backendManager, logger);
+  } catch (err) {
+    postRollback = { status: 'error', version: null, error: err.message };
+  }
+
+  if (postRollback.status !== 'ready') {
+    logger.error(
+      `[updater/svc] post-rollback validation FAILED (${postRollback.error}) — service degraded`
+    );
+    return {
+      ok: false,
+      version,
+      rolledBack: true,
+      error: `Update to v${version} failed AND rollback validation failed: ${postRollback.error}`,
+    };
+  }
+
+  return {
+    ok: false,
+    version,
+    rolledBack: true,
+    error: `Update to v${version} failed: ${postStart.error}. Rolled back successfully.`,
+  };
 }
 
 async function _applyBackendUpdateLocked({ sourceDir, version, expectedHash, backendManager }) {

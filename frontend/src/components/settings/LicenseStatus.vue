@@ -131,6 +131,8 @@ async function loadStatus() {
       // still render what we have (error message etc.)
     }
     status.value = res;
+
+    console.log('License status loaded:', res);
   } catch (e) {
     loadError.value = e.message;
   } finally {
@@ -142,6 +144,7 @@ onMounted(loadStatus);
 
 function formatDate(dateStr) {
   if (!dateStr) return '—';
+  if (dateStr === 'never' || dateStr === 'lifetime') return 'مدى الحياة';
   try {
     return new Date(dateStr).toLocaleDateString('ar-IQ', {
       year: 'numeric',

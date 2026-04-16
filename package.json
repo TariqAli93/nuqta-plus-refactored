@@ -10,6 +10,7 @@
     "dev:backend": "cd backend && cross-env NODE_ENV=development pnpm dev",
     "dev:electron": "cd frontend && cross-env NODE_ENV=development pnpm dev",
     "clean": "node scripts/clean.js",
+    "fetch:winsw": "node scripts/fetch-winsw.js",
     "build:backend": "node build-backend.js",
     "build:frontend": "cd frontend && pnpm run build:win",
     "publish:frontend": "cd frontend && pnpm run publish:win",

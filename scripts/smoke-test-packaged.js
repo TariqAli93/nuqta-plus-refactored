@@ -29,8 +29,11 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname).replace(/^\//, ''), '..');
-const UNPACKED_DIR = path.join(REPO_ROOT, 'frontend', 'release', 'win-unpacked');
+const REPO_ROOT = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname).replace(/^\//, ''),
+  '..'
+);
+const UNPACKED_DIR = path.join(REPO_ROOT, 'release', 'win-unpacked');
 const BACKEND_DIR = path.join(UNPACKED_DIR, 'resources', 'backend');
 const SERVER_SCRIPT = path.join(BACKEND_DIR, 'src', 'server.js');
 const NODE_BIN = path.join(BACKEND_DIR, 'bin', 'node.exe');

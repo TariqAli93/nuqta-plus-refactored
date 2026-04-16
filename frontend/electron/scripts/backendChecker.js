@@ -15,6 +15,7 @@
  */
 
 import net from 'node:net';
+import { app } from 'electron';
 import {
   BACKEND_HOST,
   BACKEND_PORT,
@@ -27,6 +28,9 @@ import {
   HEALTH_FETCH_TIMEOUT_MS,
   PORT_PROBE_TIMEOUT_MS,
 } from '../../../packages/shared/index.js';
+
+const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
+const isServiceMode = !isDev;
 
 // ─── Semver compatibility ───────────────────────────────────────────────────
 
@@ -193,6 +197,14 @@ export async function verifyVersion(logger) {
 /**
  * ensureBackendRunning
  *
+ * Two paths:
+ *   - DEV mode: legacy spawn-and-poll. Electron owns the backend process.
+ *   - SERVICE mode (production): the backend is hosted by the Windows
+ *     Service NuqtaPlusBackend, started at boot by the SCM. Electron
+ *     ONLY checks /health and /version. If /health fails, we ask the
+ *     SCM to start the service (covers the rare case where a user
+ *     manually stopped it) and re-poll. We NEVER spawn node.exe.
+ *
  * @param {BackendManager} backendManager
  * @param {Logger}         logger
  * @returns {{ status: 'ready'|'error', version: string|null, error?: string }}
@@ -205,12 +217,11 @@ export async function ensureBackendRunning(backendManager, logger) {
     logger.info('Backend already running — verifying ownership');
     const { ok, version, error } = await verifyVersion(logger);
     if (!ok) return { status: 'error', version, error };
+    if (isServiceMode) backendManager._serviceRunningCached = true;
     return { status: 'ready', version };
   }
 
   // (b) Port occupied but /health failed → foreign process holding our port.
-  //     Bail out with a clear, actionable error instead of attempting to spawn
-  //     and getting a cryptic EADDRINUSE from the backend child.
   if (await isPortOccupied()) {
     const msg =
       `Port ${BACKEND_PORT} is occupied by a foreign process ` +
@@ -219,8 +230,19 @@ export async function ensureBackendRunning(backendManager, logger) {
     return { status: 'error', version: null, error: msg };
   }
 
-  // (c) Spawn
-  if (!backendManager.isRunning()) {
+  // (c) Bring the backend up.
+  //     SERVICE mode → ask the SCM to start NuqtaPlusBackend.
+  //     DEV mode     → spawn the child via BackendManager (legacy).
+  if (isServiceMode) {
+    try {
+      logger.info('[svc] backend not responding — requesting SCM start');
+      await backendManager.StartBackend(); // delegates to serviceController
+    } catch (err) {
+      const msg = `Failed to start NuqtaPlusBackend service: ${err.message}`;
+      logger.error(err, { phase: 'svc-start' });
+      return { status: 'error', version: null, error: msg };
+    }
+  } else if (!backendManager.isRunning()) {
     try {
       logger.info('Spawning backend process...');
       await backendManager.StartBackend();
@@ -244,5 +266,6 @@ export async function ensureBackendRunning(backendManager, logger) {
   const { ok, version, error } = await verifyVersion(logger);
   if (!ok) return { status: 'error', version, error };
 
+  if (isServiceMode) backendManager._serviceRunningCached = true;
   return { status: 'ready', version };
 }

@@ -40,6 +40,15 @@ const REQUIRED_AFTER_COPY = [
   'node_modules/better-sqlite3/package.json',
   'node_modules/better-sqlite3/build/Release/better_sqlite3.node',
   'node_modules/fastify/package.json',
+  // ── Windows Service host (WinSW) ─────────────────────────────────────────
+  'NuqtaPlusBackend.exe',
+  'NuqtaPlusBackend.xml',
+  'service/install-service.cmd',
+  'service/uninstall-service.cmd',
+  'service/start-service.cmd',
+  'service/stop-service.cmd',
+  'service/restart-service.cmd',
+  'service/status-service.cmd',
 ];
 
 exports.default = async function afterPack(context) {

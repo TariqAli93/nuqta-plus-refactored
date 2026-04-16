@@ -15,6 +15,13 @@ export const BACKEND_HOST = '127.0.0.1';
 export const BACKEND_BASE_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 export const BACKEND_API_BASE_URL = `${BACKEND_BASE_URL}/api`;
 
+/**
+ * Windows Service identity for the production backend.
+ * Must match service/NuqtaPlusBackend.xml#id and the NSIS installer macro.
+ * Strict identifier — never derived from user input or filesystem state.
+ */
+export const BACKEND_SERVICE_NAME = 'NuqtaPlusBackend';
+
 export const HEALTH_ENDPOINT = `${BACKEND_BASE_URL}/health`;
 export const VERSION_ENDPOINT = `${BACKEND_BASE_URL}/version`;
 

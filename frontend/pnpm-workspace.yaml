@@ -1,0 +1,17 @@
+onlyBuiltDependencies:
+  - /
+  - '@'
+  - '@parcel/watcher'
+  - a
+  - c
+  - e
+  - electron
+  - electron-winstaller
+  - esbuild
+  - h
+  - l
+  - p
+  - r
+  - t
+  - vue-demi
+  - w

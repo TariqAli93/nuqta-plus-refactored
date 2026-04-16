@@ -121,7 +121,12 @@
                         @update:search="(val) => (productSearchQueries[index] = val)"
                       >
                         <template #item="{ props, item: productItem }">
-                          <v-list-item v-bind="props">
+                          <v-list-item
+                            v-bind="{
+                              ...props,
+                              disabled: (productItem?.raw?.stock ?? 0) <= 0,
+                            }"
+                          >
                             <template #title>
                               {{ productItem.raw.name }}
                             </template>

@@ -1,24 +1,34 @@
 /**
  * backendManager.js
  *
- * Owns the lifecycle of the spawned backend child process.
+ * Owns the lifecycle of the backend.
  *
- * Responsibilities:
- *   - Spawn with correct dev/prod paths, env, and stdio strategy
- *   - Distinguish intentional shutdown vs crash via an `intentionalShutdown` flag
- *   - Bounded crash-restart policy (max N attempts per window, cooldown between)
- *   - Graceful SIGTERM → SIGKILL shutdown with a hard timeout
- *   - Capture child stdout/stderr to a per-day log file in production
- *     (safe: file descriptor, no in-process pipe buffer to drain)
+ * Two execution modes — selected automatically at construction time:
  *
- * Emits (EventEmitter):
+ *   DEV MODE  (Electron not packaged, NODE_ENV !== 'production')
+ *     - Spawns `node --watch src/server.js` as a child of the Electron process
+ *     - Owns crash detection, bounded restart policy, graceful shutdown
+ *     - This is the original behaviour, unchanged.
+ *
+ *   SERVICE MODE  (packaged production app)
+ *     - Does NOT spawn a child process
+ *     - Delegates to serviceController.js, which talks to the Windows SCM
+ *     - Start/Stop/Restart map to sc.exe verbs against NuqtaPlusBackend
+ *     - Crash recovery is handled by WinSW (configured in
+ *       NuqtaPlusBackend.xml: 5s/10s restart-on-failure)
+ *     - The Electron app NEVER directly executes node.exe in this mode
+ *
+ * Public surface is identical between the two modes so the rest of the app
+ * (main.js, backendUpdater.js) doesn't need to know which one is active.
+ *
+ * Emits (DEV mode only — SERVICE mode is silent because WinSW manages crashes):
  *   'started'              { pid }
- *   'exit'                 { code, signal, intentional: true }   — clean stop
- *   'crash'                { code, signal }                      — unexpected exit
+ *   'exit'                 { code, signal, intentional: true }
+ *   'crash'                { code, signal }
  *   'restart-scheduled'    { attempt, cooldownMs }
  *   'restart-success'      { attempt }
- *   'permanent-failure'    { attempts }                          — gave up
- *   'error'                Error                                 — spawn error
+ *   'permanent-failure'    { attempts }
+ *   'error'                Error
  */
 
 import { spawn } from 'child_process';
@@ -35,6 +45,12 @@ import {
   sanitizePath,
 } from './security.js';
 import {
+  startService,
+  stopService,
+  queryServiceState,
+  isServiceInstalled,
+} from './serviceController.js';
+import {
   BACKEND_RESTART_MAX_ATTEMPTS,
   BACKEND_RESTART_COOLDOWN_MS,
   BACKEND_RESTART_WINDOW_MS,
@@ -42,6 +58,7 @@ import {
 } from '../../../packages/shared/index.js';
 
 const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
+const isServiceMode = !isDev;
 
 export default class BackendManager extends EventEmitter {
   constructor() {
@@ -49,25 +66,49 @@ export default class BackendManager extends EventEmitter {
     this.backendProcess = null;
     this.backendPID = null;
 
-    // Crash-detection state
+    // Crash-detection state (DEV mode only — SERVICE mode delegates to WinSW)
     this.intentionalShutdown = false;
     this.permanentlyFailed = false;
 
-    // Bounded restart policy state
+    // Bounded restart policy state (DEV mode only)
     this.restartAttempts = 0;
     this.firstRestartAt = 0;
     this.restartTimer = null;
 
-    // Child-output capture (production only)
+    // Child-output capture (DEV mode only — service has its own log rotation)
     this.backendLogFd = null;
+
+    // SERVICE mode: cached service running flag, refreshed by StartBackend /
+    // StopBackend / refreshServiceState() / ensureBackendRunning(). isRunning()
+    // returns this synchronously because it is a hot path.
+    this._serviceRunningCached = false;
   }
 
   isRunning() {
+    if (isServiceMode) {
+      // In service mode there is no child process to introspect. The truth
+      // about "is the backend running" lives in the SCM, but isRunning() is
+      // called synchronously from a few places (e.g. backup:restore guard),
+      // so we use a cached state updated by start/stop. ensureBackendRunning
+      // performs the real probe via /health.
+      return this._serviceRunningCached === true;
+    }
     return !!(
       this.backendProcess &&
       !this.backendProcess.killed &&
       typeof this.backendProcess.pid === 'number'
     );
+  }
+
+  /** Production-only: refresh the cached service running flag. */
+  async refreshServiceState() {
+    if (!isServiceMode) return;
+    try {
+      const state = await queryServiceState();
+      this._serviceRunningCached = state === 'running';
+    } catch {
+      this._serviceRunningCached = false;
+    }
   }
 
   // ── stdio capture helpers (production) ────────────────────────────────────
@@ -112,6 +153,28 @@ export default class BackendManager extends EventEmitter {
   // ── Public API ────────────────────────────────────────────────────────────
 
   async StartBackend() {
+    // ── Service mode: ask the SCM to start NuqtaPlusBackend. ──────────────
+    if (isServiceMode) {
+      if (!(await isServiceInstalled())) {
+        const msg =
+          'NuqtaPlusBackend Windows Service is not installed. ' +
+          'Reinstall the application or run service\\install-service.cmd as Administrator.';
+        logger.error(msg);
+        throw new Error(msg);
+      }
+      try {
+        await startService();
+        this._serviceRunningCached = true;
+        this.emit('started', { pid: null });
+        logger.info('[svc] backend service started via SCM');
+      } catch (err) {
+        this._serviceRunningCached = false;
+        logger.error(err, { phase: 'svc-start' });
+        throw err;
+      }
+      return;
+    }
+
     if (this.permanentlyFailed) {
       throw new Error(
         'Backend is in permanent-failure state — restart attempts exhausted. Call resetRestartPolicy() to retry.'
@@ -311,6 +374,22 @@ export default class BackendManager extends EventEmitter {
   // ── Graceful shutdown ─────────────────────────────────────────────────────
 
   async StopBackend() {
+    // ── Service mode: ask the SCM to stop NuqtaPlusBackend. ───────────────
+    if (isServiceMode) {
+      try {
+        await stopService();
+        this._serviceRunningCached = false;
+        logger.info('[svc] backend service stopped via SCM');
+        this.emit('exit', { code: 0, signal: null, intentional: true });
+      } catch (err) {
+        // Don't throw — caller often calls StopBackend speculatively before
+        // a database operation. Surface the error in logs and let callers
+        // re-check via /health.
+        logger.warn(`[svc] StopBackend failed: ${err.message}`);
+      }
+      return;
+    }
+
     if (!this.isRunning()) {
       logger.warn('StopBackend: process not running — skip.');
       return;
@@ -372,6 +451,16 @@ export default class BackendManager extends EventEmitter {
   }
 
   async CleanupBackendProcess() {
+    // ── Service mode: NO-OP. The Windows Service is owned by the SCM and
+    // intentionally outlives the Electron app — that is the entire point of
+    // hosting the backend as a service. Maintenance callers that need the
+    // database lock released (backup:restore, backup:import, database:clear,
+    // applyBackendUpdate) must call StopBackend() explicitly instead.
+    if (isServiceMode) {
+      logger.info('[svc] CleanupBackendProcess (no-op in service mode)');
+      return;
+    }
+
     if (!this.isRunning()) {
       // Still wipe any lingering restart timer from a previous failure so we
       // don't fire a zombie spawn during app shutdown.

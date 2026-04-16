@@ -995,14 +995,14 @@ ipcMain.handle('backend:start', async () => {
 });
 
 ipcMain.handle('backend:stop', async () => {
-  await backendManager.CleanupBackendProcess();
+  await backendManager.StopBackend();
   return { ok: true };
 });
 
 ipcMain.handle('backend:restart', async () => {
   backendStatus = 'starting';
   broadcastBackendStatus({ reason: 'manual-restart-begin' });
-  await backendManager.CleanupBackendProcess();
+  await backendManager.StopBackend();
   // Manual restart is a user-initiated recovery — clear the crash budget so
   // the next spawn isn't blocked by a prior permanent-failure state.
   backendManager.resetRestartPolicy();
@@ -1128,7 +1128,7 @@ ipcMain.handle('backup:restore', async (_e, filename) => {
     }
 
     logger.info('Stopping backend for restore...');
-    await backendManager.CleanupBackendProcess();
+    await backendManager.StopBackend();
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -1246,7 +1246,7 @@ ipcMain.handle('backup:import', async () => {
 
     // 3. Stop Backend first to release database lock
     logger.info('Stopping backend for database import...');
-    await backendManager.CleanupBackendProcess();
+    await backendManager.StopBackend();
 
     // Wait a bit to ensure file lock is released
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -1298,7 +1298,7 @@ ipcMain.handle('database:clear', async () => {
 
     // 1. Stop Backend first to release database lock
     logger.info('Stopping backend for database clear...');
-    await backendManager.CleanupBackendProcess();
+    await backendManager.StopBackend();
 
     // Wait a bit to ensure file lock is released
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -1377,7 +1377,7 @@ ipcMain.handle('backup:exportAndCreateNewDatabase', async (_e) => {
     await fs.copyFile(dbPath, saveLocation.filePath);
 
     logger.info('Stopping backend for new database creation...');
-    await backendManager.CleanupBackendProcess();
+    await backendManager.StopBackend();
 
     logger.info('Deleting current database file...');
     await fs.unlink(dbPath, { recursive: true });

@@ -31,6 +31,15 @@ const DIST_DIR = path.join(ROOT, 'dist-backend');
 const IS_WIN = process.platform === 'win32';
 const BUNDLED_NODE = path.join(DIST_DIR, 'bin', IS_WIN ? 'node.exe' : 'node');
 
+// ── Windows Service host (WinSW) ───────────────────────────────────────────
+const SERVICE_NAME = 'NuqtaPlusBackend';
+const WINSW_SOURCE = path.join(ROOT, 'tools', 'winsw', 'WinSW-x64.exe');
+const SERVICE_TEMPLATE_DIR = path.join(SOURCE_DIR, 'service');
+const SERVICE_XML_TEMPLATE = path.join(SERVICE_TEMPLATE_DIR, `${SERVICE_NAME}.xml.tmpl`);
+const SERVICE_EXE_DIST = path.join(DIST_DIR, `${SERVICE_NAME}.exe`);
+const SERVICE_XML_DIST = path.join(DIST_DIR, `${SERVICE_NAME}.xml`);
+const SERVICE_SCRIPTS_DIST = path.join(DIST_DIR, 'service');
+
 const BETTER_SQLITE_NATIVE = path.join(
   DIST_DIR,
   'node_modules',
@@ -278,6 +287,70 @@ function verifyLoadUnderBundledNode() {
   }
 }
 
+function bundleServiceHost() {
+  // Source backend already contains the .cmd wrappers under backend/service.
+  // copyBackendSource() copied them into dist-backend/service automatically,
+  // but we still need to:
+  //   1. Drop in WinSW.exe renamed to NuqtaPlusBackend.exe at dist-backend root
+  //   2. Render NuqtaPlusBackend.xml from the template (substitute version)
+  //   3. Make sure the service/ scripts subdirectory exists (it should after
+  //      copyBackendSource, but assert anyway).
+  log('Bundling Windows Service host (WinSW)...');
+
+  if (!fs.existsSync(WINSW_SOURCE)) {
+    fail(
+      `WinSW binary missing: ${WINSW_SOURCE}\n` +
+        'Run `pnpm fetch:winsw` to download and verify it, then re-run this build.\n' +
+        'See scripts/fetch-winsw.js for the pinned version and supply-chain checks.'
+    );
+  }
+
+  if (!fs.existsSync(SERVICE_XML_TEMPLATE)) {
+    fail(
+      `Service descriptor template missing: ${SERVICE_XML_TEMPLATE}\n` +
+        'Expected backend/service/NuqtaPlusBackend.xml.tmpl to be committed.'
+    );
+  }
+
+  // 1. Copy WinSW.exe → dist-backend/NuqtaPlusBackend.exe
+  fs.copyFileSync(WINSW_SOURCE, SERVICE_EXE_DIST);
+  log(`✓ ${path.relative(ROOT, SERVICE_EXE_DIST)}`);
+
+  // 2. Render the XML descriptor with the backend version baked in.
+  const backendPkg = JSON.parse(
+    fs.readFileSync(path.join(DIST_DIR, 'package.json'), 'utf8')
+  );
+  const tmpl = fs.readFileSync(SERVICE_XML_TEMPLATE, 'utf8');
+  const rendered = tmpl.replace(/\$\{BACKEND_VERSION\}/g, backendPkg.version || '0.0.0');
+  fs.writeFileSync(SERVICE_XML_DIST, rendered, 'utf8');
+  log(`✓ ${path.relative(ROOT, SERVICE_XML_DIST)} (v${backendPkg.version})`);
+
+  // 3. Sanity check the service scripts directory.
+  if (!fs.existsSync(SERVICE_SCRIPTS_DIST)) {
+    fail(
+      `Service scripts directory missing in dist-backend: ${SERVICE_SCRIPTS_DIST}\n` +
+        'Expected backend/service/*.cmd to be copied by copyBackendSource().'
+    );
+  }
+  for (const required of [
+    'install-service.cmd',
+    'uninstall-service.cmd',
+    'start-service.cmd',
+    'stop-service.cmd',
+    'restart-service.cmd',
+    'status-service.cmd',
+  ]) {
+    const abs = path.join(SERVICE_SCRIPTS_DIST, required);
+    if (!fs.existsSync(abs)) fail(`Missing service script: service/${required}`);
+  }
+  // The .xml.tmpl is not needed at runtime — we already rendered it above.
+  // Remove it from dist-backend so the packaged app doesn't ship dead bytes.
+  const distTmpl = path.join(SERVICE_SCRIPTS_DIST, `${SERVICE_NAME}.xml.tmpl`);
+  if (fs.existsSync(distTmpl)) fs.rmSync(distTmpl, { force: true });
+
+  log('✓ service host bundled');
+}
+
 function main() {
   log(`Platform: ${process.platform}`);
   log(`Source:   ${SOURCE_DIR}`);
@@ -289,6 +362,7 @@ function main() {
   rebuildBetterSqlite();
   verifyNativeBinary();
   verifyLoadUnderBundledNode();
+  bundleServiceHost();
 
   log('✅ Backend build complete — dist-backend is ready for packaging');
 }
