@@ -1,0 +1,57 @@
+appId: com.nuqtaplus.app
+productName: "نقطة بلس"
+asar: true
+
+files:
+  - package.json
+  - dist-electron/**/*
+  - "!**/*.map"
+  - "!**/.env*"
+
+extraResources:
+  - from: dist-electron
+    to: dist-electron
+    filter:
+      - "**/*"
+
+  - from: ./splash.html
+    to: dist-electron/dist/splash.html
+
+  - from: ./activation.html
+    to: dist-electron/dist/activation.html
+
+  - from: ./electron/scripts
+    to: dist-electron/scripts
+
+afterPack: ../scripts/afterPack.cjs
+
+directories:
+  buildResources: build
+  output: ../release
+
+publish:
+  - provider: github
+    owner: TariqAli93
+    repo: nuqta-plus-refactored
+    releaseType: release
+
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  artifactName: NuqtaPlus-Setup-${version}.exe
+
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "نقطة بلس"
+  installerHeader: build/installer-header.bmp
+  installerSidebar: build/installer-sidebar.bmp
+  uninstallerIcon: build/icon.ico
+  uninstallDisplayName: "نقطة بلس"
+  license: build/license.md
+  unicode: true
+  include: ../scripts/installer-include.nsh
