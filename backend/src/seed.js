@@ -9,10 +9,9 @@ async function seed() {
     const db = await getDb();
     // Helper: Count rows of a table
     const countTable = async (table) => {
-      const result = await db
+      const [result] = await db
         .select({ count: sql`count(*)` })
-        .from(table)
-        .get();
+        .from(table);
       return Number(result?.count || 0);
     };
 

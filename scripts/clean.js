@@ -22,6 +22,7 @@ const ROOT = path.resolve(__dirname, '..');
 const TARGETS = [
   'dist-backend',
   'release',
+  'release-client',
   'frontend/dist',
   'frontend/dist-electron',
 ];

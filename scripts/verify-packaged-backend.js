@@ -32,8 +32,7 @@ const REQUIRED = [
   'package.json',
   'bin/node.exe',
   'node_modules',
-  'node_modules/better-sqlite3/package.json',
-  'node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+  'node_modules/pg/package.json',
   'node_modules/fastify/package.json',
   'node_modules/drizzle-orm/package.json',
 ];

@@ -550,12 +550,13 @@ const availableCurrencies = computed(() => settingsStore.availableCurrencies);
 
 // تحويل سعر بين عملتين بناءً على إعدادات الصرف
 const convertPrice = (amount, from, to) => {
-  if (!amount || from === to) return amount || 0;
+  const num = Number(amount) || 0;
+  if (!num || from === to) return num;
   const usdRate = Number(currencySettings.value.usdRate) || 1500;
   // لدينا عملتان IQD و USD
-  if (from === 'USD' && to === 'IQD') return amount * usdRate;
-  if (from === 'IQD' && to === 'USD') return amount / usdRate;
-  return amount; // fallback
+  if (from === 'USD' && to === 'IQD') return num * usdRate;
+  if (from === 'IQD' && to === 'USD') return num / usdRate;
+  return num; // fallback
 };
 
 // تطبيق تحويل العملة على كل عناصر السلة عند تغيير عملة البيع

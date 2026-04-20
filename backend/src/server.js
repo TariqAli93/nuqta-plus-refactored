@@ -25,6 +25,7 @@ import currencyRoutes from './routes/currencyRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import backupRoutes from './routes/backupRoutes.js';
 import alertRoutes from './routes/alertRoutes.js';
+import auditRoutes from './routes/auditRoutes.js';
 import resetRoutes from './routes/resetRoutes.js';
 
 // Debug features - only in development
@@ -63,6 +64,10 @@ const start = async () => {
     await fastify.register(authPlugin);
     await fastify.register(errorHandlerPlugin);
 
+    // Audit logging — auto-logs all mutating API requests
+    const { default: auditLogPlugin } = await import('./plugins/auditLog.js');
+    await fastify.register(auditLogPlugin);
+
     // Health check route
     fastify.get('/', async () => {
       return {
@@ -86,6 +91,20 @@ const start = async () => {
       return { version };
     });
 
+    // Server info endpoint — used by client apps to discover and identify the server.
+    // Responds without authentication so clients can probe before login.
+    fastify.get('/server-info', async (request) => {
+      return {
+        name: 'Nuqta Plus Server',
+        version,
+        mode: 'server',
+        host: config.server.host,
+        port: config.server.port,
+        timestamp: new Date().toISOString(),
+        clientIp: request.ip,
+      };
+    });
+
     // Register API routes
     await fastify.register(authRoutes, { prefix: '/api/auth' });
     await fastify.register(customerRoutes, { prefix: '/api/customers' });
@@ -97,12 +116,34 @@ const start = async () => {
     await fastify.register(settingsRoutes, { prefix: '/api/settings' });
     await fastify.register(backupRoutes, { prefix: '/api/settings/backups' });
     await fastify.register(alertRoutes, { prefix: '/api/alerts' });
+    await fastify.register(auditRoutes, { prefix: '/api/audit' });
     await fastify.register(resetRoutes, { prefix: '/api/reset' });
     // Only register debug routes in development
     if (!isProduction) {
       const { default: debugRoutes } = await import('./routes/debugRoutes.js');
       await fastify.register(debugRoutes, { prefix: '/debug' });
     }
+
+    // Authenticated shutdown route — only admins can trigger
+    fastify.post('/__shutdown__', {
+      onRequest: [fastify.authenticate],
+      config: { skipAudit: true },
+    }, async (req, res) => {
+      if (req.user?.role !== 'admin') {
+        return res.code(403).send({ error: 'Forbidden' });
+      }
+      fastify.log.info('Shutdown requested via authenticated API call');
+      res.send({ message: 'Shutting down...' });
+      setTimeout(async () => {
+        try {
+          await closeServer();
+          process.exit(0);
+        } catch (err) {
+          fastify.log.error('Error closing server:', err);
+          process.exit(1);
+        }
+      }, 200);
+    });
 
     // Delete old draft sales on startup
     try {
@@ -136,23 +177,27 @@ const start = async () => {
 export const closeServer = async () => {
   fastify.log.info('Shutting down server...');
   await fastify.close();
+
+  // Close the PostgreSQL connection pool
+  const { closeDatabase } = await import('./db.js');
+  await closeDatabase();
+
   fastify.log.info('Server shut down complete.');
 };
 
-fastify.post('/__shutdown__', async (req, res) => {
-  fastify.log.info('🛑 Shutdown requested from Electron');
-  res.send({ message: 'Shutting down...' });
-
-  setTimeout(async () => {
-    try {
-      await closeServer();
-      fastify.log.info('✅ Server closed via HTTP shutdown route');
-      process.exit(0);
-    } catch (err) {
-      fastify.log.error('❌ Error closing server:', err);
-      process.exit(1);
-    }
-  }, 200);
-});
-
 start();
+
+// Graceful shutdown on process signals
+const gracefulShutdown = async (signal) => {
+  fastify.log.info(`${signal} received — shutting down gracefully`);
+  try {
+    await closeServer();
+    process.exit(0);
+  } catch (err) {
+    fastify.log.error(`Error during ${signal} shutdown:`, err);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

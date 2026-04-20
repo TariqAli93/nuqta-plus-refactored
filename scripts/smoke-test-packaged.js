@@ -12,7 +12,7 @@
  * Flow:
  *   1. locate release/win-unpacked/resources/backend
  *   2. spawn the bundled node.exe against src/server.js
- *   3. poll http://127.0.0.1:41731/health for up to 30 s
+ *   3. poll http://127.0.0.1:41732/health for up to 30 s
  *   4. also poll /version and compare to frontend/package.json#version
  *   5. kill the child, cleanup, exit 0 on success / 1 on failure
  *
@@ -38,7 +38,7 @@ const BACKEND_DIR = path.join(UNPACKED_DIR, 'resources', 'backend');
 const SERVER_SCRIPT = path.join(BACKEND_DIR, 'src', 'server.js');
 const NODE_BIN = path.join(BACKEND_DIR, 'bin', 'node.exe');
 
-const PORT = 41731;
+const PORT = 41732;
 const HEALTH_URL = `http://127.0.0.1:${PORT}/health`;
 const VERSION_URL = `http://127.0.0.1:${PORT}/version`;
 

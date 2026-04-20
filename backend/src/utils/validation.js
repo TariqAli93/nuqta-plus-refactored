@@ -66,8 +66,8 @@ export const categorySchema = z.object({
 export const saleItemSchema = z.object({
   productId: z.number().int().positive('Product ID must be a positive integer'),
   quantity: z.number().int().positive('Quantity must be at least 1'),
-  unitPrice: z.number().positive('Unit price must be positive'),
-  discount: z.number().nonnegative('Discount cannot be negative').optional(),
+  unitPrice: z.coerce.number().positive('Unit price must be positive'),
+  discount: z.coerce.number().nonnegative('Discount cannot be negative').optional(),
 });
 
 export const saleSchema = z.object({

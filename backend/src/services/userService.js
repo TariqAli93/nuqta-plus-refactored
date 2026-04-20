@@ -39,7 +39,7 @@ export class UserService {
     if (where) {
       countQuery = countQuery.where(where);
     }
-    const countResult = await countQuery.get();
+    const [countResult] = await countQuery;
     const total = Number(countResult?.count || 0);
 
     return { data, page, limit, total, totalPages: Math.ceil(total / limit) };
@@ -97,7 +97,7 @@ export class UserService {
 
     // Build update object with only provided fields
     const updateData = {
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(),
     };
 
     if (data.fullName !== undefined) {
@@ -126,7 +126,7 @@ export class UserService {
     const hashed = await hashPassword(newPassword);
     await db
       .update(users)
-      .set({ password: hashed, updatedAt: new Date().toISOString() })
+      .set({ password: hashed, updatedAt: new Date() })
       .where(eq(users.id, id));
 
     saveDatabase();
@@ -145,11 +145,10 @@ export class UserService {
 
     // Prevent deleting the last admin user
     if (userToDelete.role === 'admin' && userToDelete.isActive) {
-      const adminCount = await db
+      const [adminCount] = await db
         .select({ count: sql`count(*)` })
         .from(users)
-        .where(and(eq(users.role, 'admin'), eq(users.isActive, true)))
-        .get();
+        .where(and(eq(users.role, 'admin'), eq(users.isActive, true)));
 
       const totalAdmins = Number(adminCount?.count || 0);
       if (totalAdmins <= 1) {
@@ -159,7 +158,7 @@ export class UserService {
 
     await db
       .update(users)
-      .set({ isActive: false, updatedAt: new Date().toISOString() })
+      .set({ isActive: false, updatedAt: new Date() })
       .where(eq(users.id, id));
 
     saveDatabase();

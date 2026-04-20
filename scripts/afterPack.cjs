@@ -21,8 +21,12 @@
  *      (build-backend.js runs before electron-builder).
  *   2. Removes any stale resources/backend that might have been created
  *      by extraResources or a previous run.
- *   3. Recursively copies dist-backend → resources/backend.
- *   4. Verifies the critical files and native binary exist.
+ *   3. Recursively copies dist-backend -> resources/backend.
+ *   4. Verifies the critical runtime files exist (server entry, pg driver,
+ *      Drizzle migrations, WinSW service host, etc.).
+ *
+ * The backend uses PostgreSQL via the pure-JS `pg` driver — no native
+ * binaries need to be rebuilt or verified.
  *
  * CommonJS (.cjs) is used so it works regardless of the nearest
  * package.json "type" setting.
@@ -31,16 +35,26 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+// ── Files that MUST exist after copy for the backend to run ──────────────
 const REQUIRED_AFTER_COPY = [
+  // Core server
   'src/server.js',
   'src/db.js',
   'package.json',
+
+  // Bundled Node.js runtime
   'bin/node.exe',
+
+  // Production dependencies
   'node_modules',
-  'node_modules/better-sqlite3/package.json',
-  'node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+  'node_modules/pg/package.json',
+  'node_modules/drizzle-orm/package.json',
   'node_modules/fastify/package.json',
-  // ── Windows Service host (WinSW) ─────────────────────────────────────────
+
+  // Drizzle migration files
+  'drizzle',
+
+  // ── Windows Service host (WinSW) ──────────────────────────────────────
   'NuqtaPlusBackend.exe',
   'NuqtaPlusBackend.xml',
   'service/install-service.cmd',
@@ -72,6 +86,7 @@ exports.default = async function afterPack(context) {
   console.log(`[afterPack] distBackend = ${distBackend}`);
   console.log(`[afterPack] target      = ${target}`);
 
+  // ── Pre-flight: dist-backend must already be built ─────────────────────
   if (!fs.existsSync(distBackend)) {
     throw new Error(
       `[afterPack] dist-backend does not exist at ${distBackend}. ` +
@@ -87,6 +102,16 @@ exports.default = async function afterPack(context) {
     );
   }
 
+  // Quick sanity check: pg driver must be present (PostgreSQL is the sole DB)
+  const pgDir = path.join(distBackend, 'node_modules', 'pg');
+  if (!fs.existsSync(pgDir)) {
+    throw new Error(
+      `[afterPack] pg driver not found in dist-backend/node_modules. ` +
+        'The backend requires PostgreSQL — ensure "pg" is in backend/package.json dependencies.'
+    );
+  }
+
+  // ── Copy dist-backend -> resources/backend ─────────────────────────────
   // Remove whatever electron-builder may have left in resources/backend
   // so we start from a clean slate.
   if (fs.existsSync(target)) {
@@ -95,14 +120,15 @@ exports.default = async function afterPack(context) {
   }
   fs.mkdirSync(path.dirname(target), { recursive: true });
 
-  console.log('[afterPack] copying dist-backend → resources/backend ...');
+  console.log('[afterPack] copying dist-backend -> resources/backend ...');
   fs.cpSync(distBackend, target, {
     recursive: true,
     dereference: false,
     verbatimSymlinks: false,
   });
 
-  // Post-copy verification — fail the build if anything is missing.
+  // ── Post-copy verification ─────────────────────────────────────────────
+  // Fail the build if anything required for PostgreSQL-based runtime is missing.
   const missing = [];
   for (const rel of REQUIRED_AFTER_COPY) {
     const abs = path.join(target, rel);
@@ -118,5 +144,5 @@ exports.default = async function afterPack(context) {
     );
   }
 
-  console.log('[afterPack] ✅ resources/backend packaged and verified');
+  console.log('[afterPack] backend packaged and verified (PostgreSQL runtime)');
 };

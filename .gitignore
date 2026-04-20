@@ -1,6 +1,7 @@
 dist-backend/
 frontend/dist-electron/
 release/
+release-client/
 node_modules
 frontend/node_modules
 frontend/pnpm-lock.yaml
@@ -32,3 +33,6 @@ backend/.env
 .env.development.local
 .env.test.local
 .env.production.local
+.env.example
+.env.debug
+.claude/

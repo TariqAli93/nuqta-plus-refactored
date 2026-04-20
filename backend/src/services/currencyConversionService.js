@@ -110,7 +110,7 @@ export class CurrencyConversionService {
    */
   async getAllRatesForCurrency(baseCurrency) {
     const db = await getDb();
-    const currencies = await db.select().from(currencySettings).all();
+    const currencies = await db.select().from(currencySettings);
 
     const rates = {};
     for (const currency of currencies) {
@@ -206,8 +206,7 @@ export class CurrencyConversionService {
     const currencies = await db
       .select()
       .from(currencySettings)
-      .where(eq(currencySettings.isActive, 1))
-      .all();
+      .where(eq(currencySettings.isActive, true));
 
     return currencies.map((c) => ({
       code: c.currencyCode,

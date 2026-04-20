@@ -7,7 +7,19 @@
       "Bash(/d/dev_projects/nuqta-plus-refactored/backend/bin/node.exe --version)",
       "Bash(cmd //c '\"D:\\\\dev_projects\\\\nuqta-plus-refactored\\\\backend\\\\bin\\\\node.exe\" --version')",
       "Bash(\"backend/bin/node.exe\" -p \"process.version + ' arch=' + process.arch\")",
-      "Bash(./backend/bin/node.exe -p \"process.version\")"
+      "Bash(./backend/bin/node.exe -p \"process.version\")",
+      "Bash(psql -U postgres -c \"SELECT datname FROM pg_database WHERE datname = 'nuqtaplus';\")",
+      "Bash(/c/Program Files/PostgreSQL/18/bin/psql.exe:*)",
+      "Bash(PGPASSWORD=postgres /c/Program Files/PostgreSQL/18/bin/psql.exe:*)",
+      "Bash(netstat -ano)",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5432 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess | Format-Table\")",
+      "Bash(grep -v '^$')",
+      "Bash(npx drizzle-kit:*)",
+      "Bash(curl -s http://127.0.0.1:41732/api/auth/initial-setup)",
+      "Bash(curl -s -X POST http://127.0.0.1:41732/api/auth/first-user -H \"Content-Type: application/json\" -d '{\"username\":\"admin\",\"password\":\"Admin@123\",\"fullName\":\"test\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:41732/api/reset -H \"Content-Type: application/json\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwidXNlcm5hbWUiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3NjYyMTAzOSwiZXhwIjoxNzc3MjI1ODM5fQ.8AO3vzSO8-IJEau5GE800K1r_vE_wTG5aj6rBCjoN9M\")",
+      "Bash(PGPASSWORD=root /c/Program Files/PostgreSQL/18/bin/psql.exe:*)",
+      "Bash(ls:*)"
     ]
   }
 }

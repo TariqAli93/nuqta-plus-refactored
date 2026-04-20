@@ -12,7 +12,7 @@
 <service>
   <id>NuqtaPlusBackend</id>
   <name>NuqtaPlus Backend</name>
-  <description>NuqtaPlus POS - Local backend service (HTTP on 127.0.0.1:41731). Version ${BACKEND_VERSION}.</description>
+  <description>NuqtaPlus POS - Local backend service (HTTP on 127.0.0.1:41732). Version ${BACKEND_VERSION}.</description>
 
   <executable>%BASE%\bin\node.exe</executable>
   <arguments>src\server.js</arguments>
@@ -20,7 +20,7 @@
 
   <env name="NODE_ENV" value="production" />
   <env name="BACKEND_HOST" value="127.0.0.1" />
-  <env name="BACKEND_PORT" value="41731" />
+  <env name="BACKEND_PORT" value="41732" />
   <env name="NUQTA_RUN_MODE" value="service" />
 
   <log mode="roll-by-size">

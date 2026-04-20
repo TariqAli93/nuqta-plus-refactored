@@ -1,4 +1,5 @@
-import { getDb, getSqlite, saveDatabase } from '../db.js';
+import { getDb, getPool, saveDatabase } from '../db.js';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import {
   sales,
   saleItems,
@@ -8,53 +9,64 @@ import {
   installments,
   users,
 } from '../models/index.js';
+import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { generateInvoiceNumber, calculateSaleTotals } from '../utils/helpers.js';
-import { eq, desc, and, or, gte, lte, sql, inArray, lt } from 'drizzle-orm';
+import { eq, desc, and, or, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
 import settingsService from './settingsService.js';
+
+/**
+ * Run a callback inside a PostgreSQL transaction.
+ * Creates a dedicated client from the pool, wraps in BEGIN/COMMIT/ROLLBACK,
+ * and provides a transaction-scoped Drizzle instance.
+ */
+async function withTransaction(callback) {
+  const pool = await getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const txDb = drizzle(client, { schema });
+    const result = await callback(txDb);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 
 /**
  * Round amount based on currency
  * For IQD: round to nearest multiple of 250 (smallest denomination)
  * For USD: round to nearest integer
- * @param {number} amount - Amount to round
- * @param {string} currency - Currency code ('IQD' or 'USD')
- * @returns {number} Rounded amount
  */
 function roundByCurrency(amount, currency) {
   if (currency === 'IQD') {
-    // Round to nearest multiple of 250
     return Math.ceil(amount / 250) * 250;
   } else {
-    // For USD and other currencies, round to nearest integer
     return Math.ceil(amount);
   }
 }
 
+/** Parse numeric string from PG to JS number. PG numeric columns return strings. */
+function n(val) {
+  if (val === null || val === undefined) return 0;
+  return Number(val);
+}
+
 export class SaleService {
-  /**
-   * Create a new sale with items, payments, and installments
-   * @param {Object} saleData - Sale data including items and payment info
-   * @param {number} userId - ID of user creating the sale
-   * @returns {Promise<Object>} Created sale with all details
-   */
   async create(saleData, userId) {
-    const db = await getDb();
-    // Get currency settings
     const currencySettings = await settingsService.getCurrencySettings();
 
-    // Validate items exist
     if (!saleData.items || saleData.items.length === 0) {
       throw new ValidationError('Sale must have at least one item');
     }
 
-    // Calculate totals
     const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
-
-    // Generate invoice number
     const invoiceNumber = generateInvoiceNumber();
 
-    // Calculate interest for installment payments
     let interestAmount = 0;
     let finalTotal = totals.total;
 
@@ -66,196 +78,194 @@ export class SaleService {
       finalTotal = totals.total + interestAmount;
     }
 
-    // Use currency from settings if not provided
     const currency = saleData.currency || currencySettings.defaultCurrency;
-
-    // Round finalTotal based on currency (IQD: nearest 250, USD: nearest integer)
     finalTotal = roundByCurrency(finalTotal, currency);
 
-    // Calculate remaining amount
     const paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
     let remainingAmount = Math.max(0, finalTotal - paidAmount);
 
-    // Round remainingAmount based on currency
-    // If remainingAmount is less than threshold, consider it as 0
     const threshold = currency === 'IQD' ? 250 : 0.01;
     remainingAmount = remainingAmount < threshold ? 0 : roundByCurrency(remainingAmount, currency);
 
-    // Get exchange rate based on currency
     const exchangeRate =
       saleData.exchangeRate ||
       (currency === 'USD' ? currencySettings.usdRate : currencySettings.iqdRate);
 
-    // Handle customer selection
     const customerId = saleData.customerId || null;
 
-    // Validate customer if installment payment
     if (saleData.paymentType === 'installment' && !customerId) {
       throw new ValidationError('Customer is required for installment payments');
     }
 
-    // Create sale record
-    const [newSale] = await db
-      .insert(sales)
-      .values({
-        invoiceNumber,
-        customerId,
-        subtotal: totals.subtotal,
-        discount: totals.discount,
-        tax: totals.tax,
-        total: finalTotal,
-        currency,
-        exchangeRate,
-        paymentType: saleData.paymentType,
-        paidAmount,
-        remainingAmount,
-        status: remainingAmount <= 0 ? 'completed' : 'pending',
-        notes: saleData.notes || null,
-        createdBy: userId,
-        interestRate: parseFloat(saleData.interestRate) || 0,
-        interestAmount: roundByCurrency(interestAmount, currency), // Round based on currency
-      })
-      .returning();
-
-    // Create sale items and update product stock
-    for (const item of saleData.items) {
-      // Get product details
-      const [product] = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, item.productId))
-        .limit(1);
-
-      if (!product) {
-        throw new NotFoundError(`Product with ID ${item.productId} not found`);
-      }
-
-      // Validate stock availability
-      if (product.stock < item.quantity) {
-        throw new ValidationError(
-          `Insufficient stock for product: ${product.name}. Available: ${product.stock}, Required: ${item.quantity}`
-        );
-      }
-
-      // Calculate item subtotal
-      // item.discount is per unit, so multiply by quantity
-      const itemDiscountTotal = (item.discount || 0) * item.quantity;
-      const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
-
-      // Create sale item
-      await db.insert(saleItems).values({
-        saleId: newSale.id,
-        productId: item.productId,
-        productName: product.name,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discount: itemDiscountTotal, // Store total discount (per unit * quantity)
-        subtotal: parseFloat(itemSubtotal.toFixed(2)),
-      });
-
-      // Update product stock
-      await db
-        .update(products)
-        .set({
-          stock: product.stock - item.quantity,
-          updatedAt: new Date().toISOString(),
+    const newSaleId = await withTransaction(async (tx) => {
+      const [newSale] = await tx
+        .insert(sales)
+        .values({
+          invoiceNumber,
+          customerId,
+          subtotal: String(totals.subtotal),
+          discount: String(totals.discount),
+          tax: String(totals.tax),
+          total: String(finalTotal),
+          currency,
+          exchangeRate: String(exchangeRate),
+          paymentType: saleData.paymentType,
+          paidAmount: String(paidAmount),
+          remainingAmount: String(remainingAmount),
+          status: remainingAmount <= 0 ? 'completed' : 'pending',
+          notes: saleData.notes || null,
+          createdBy: userId,
+          interestRate: String(parseFloat(saleData.interestRate) || 0),
+          interestAmount: String(roundByCurrency(interestAmount, currency)),
         })
-        .where(eq(products.id, item.productId));
-    }
+        .returning();
 
-    // Create initial payment if amount was paid
-    if (paidAmount > 0) {
-      await db.insert(payments).values({
-        saleId: newSale.id,
-        customerId,
-        amount: parseFloat(paidAmount.toFixed(2)),
-        currency,
-        exchangeRate,
-        paymentMethod: saleData.paymentMethod || 'cash',
-        createdBy: userId,
-        notes: saleData.paymentNotes || 'دفع نقدي عند البيع',
-      });
-    }
+      for (const item of saleData.items) {
+        const [product] = await tx
+          .select()
+          .from(products)
+          .where(eq(products.id, item.productId))
+          .limit(1);
 
-    // Create installment schedule if needed
-    if (
-      (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
-      remainingAmount > 0
-    ) {
-      const installmentCount = parseInt(saleData.installmentCount) || 3;
+        if (!product) {
+          throw new NotFoundError(`Product with ID ${item.productId} not found`);
+        }
 
-      // Validate installment count
-      if (installmentCount < 1) {
-        throw new ValidationError('Installment count must be at least 1');
+        if (product.stock < item.quantity) {
+          throw new ValidationError(
+            `Insufficient stock for product: ${product.name}. Available: ${product.stock}, Required: ${item.quantity}`
+          );
+        }
+
+        const itemDiscountTotal = (item.discount || 0) * item.quantity;
+        const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
+
+        await tx.insert(saleItems).values({
+          saleId: newSale.id,
+          productId: item.productId,
+          productName: product.name,
+          quantity: item.quantity,
+          unitPrice: String(item.unitPrice),
+          discount: String(itemDiscountTotal),
+          subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
+        });
+
+        // Atomic stock decrement — safe under concurrent access
+        await tx
+          .update(products)
+          .set({
+            stock: sql`${products.stock} - ${item.quantity}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(products.id, item.productId));
       }
 
-      // Round remainingAmount based on currency before dividing
-      const roundedRemainingAmount = roundByCurrency(remainingAmount, currency);
-
-      // Calculate base installment amount (rounded up based on currency)
-      const baseInstallmentAmount = roundByCurrency(
-        roundedRemainingAmount / installmentCount,
-        currency
-      );
-
-      // Calculate total if all installments use base amount
-      const totalWithBaseAmount = baseInstallmentAmount * installmentCount;
-
-      // Adjust last installment if there's a difference due to rounding
-      const adjustment = totalWithBaseAmount - roundedRemainingAmount;
-
-      const currentDate = new Date();
-
-      for (let i = 0; i < installmentCount; i++) {
-        const dueDate = new Date(currentDate);
-        dueDate.setMonth(dueDate.getMonth() + i + 1);
-
-        // Last installment gets adjusted amount to ensure total equals remainingAmount
-        const isLastInstallment = i === installmentCount - 1;
-        const installmentAmount = isLastInstallment
-          ? baseInstallmentAmount - adjustment
-          : baseInstallmentAmount;
-
-        // Round based on currency to ensure proper denomination
-        const roundedAmount = roundByCurrency(installmentAmount, currency);
-
-        await db.insert(installments).values({
+      if (paidAmount > 0) {
+        await tx.insert(payments).values({
           saleId: newSale.id,
           customerId,
-          installmentNumber: i + 1,
-          dueAmount: roundedAmount,
-          paidAmount: 0,
-          remainingAmount: roundedAmount,
+          amount: String(parseFloat(paidAmount.toFixed(2))),
           currency,
-          dueDate: dueDate.toISOString().split('T')[0],
-          status: 'pending',
+          exchangeRate: String(exchangeRate),
+          paymentMethod: saleData.paymentMethod || 'cash',
+          createdBy: userId,
+          notes: saleData.paymentNotes || 'دفع نقدي عند البيع',
         });
       }
 
-      // Update remainingAmount to match the rounded total
-      remainingAmount = roundedRemainingAmount;
-    }
+      if (
+        (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
+        remainingAmount > 0
+      ) {
+        const installmentCount = parseInt(saleData.installmentCount) || 3;
 
-    // Update customer totals if customer is specified
-    if (customerId && remainingAmount > 0) {
-      await db
-        .update(customers)
-        .set({
-          totalDebt: customers.totalDebt + remainingAmount,
-          totalPurchases: customers.totalPurchases + finalTotal,
-        })
-        .where(eq(customers.id, customerId));
-    }
+        if (installmentCount < 1) {
+          throw new ValidationError('Installment count must be at least 1');
+        }
 
-    saveDatabase();
+        const roundedRemainingAmount = roundByCurrency(remainingAmount, currency);
+        const baseInstallmentAmount = roundByCurrency(
+          roundedRemainingAmount / installmentCount,
+          currency
+        );
+        const totalWithBaseAmount = baseInstallmentAmount * installmentCount;
+        const adjustment = totalWithBaseAmount - roundedRemainingAmount;
+        const currentDate = new Date();
 
-    return await this.getById(newSale.id);
+        for (let i = 0; i < installmentCount; i++) {
+          const dueDate = new Date(currentDate);
+          dueDate.setMonth(dueDate.getMonth() + i + 1);
+
+          const isLastInstallment = i === installmentCount - 1;
+          const installmentAmount = isLastInstallment
+            ? baseInstallmentAmount - adjustment
+            : baseInstallmentAmount;
+
+          const roundedAmount = roundByCurrency(installmentAmount, currency);
+
+          await tx.insert(installments).values({
+            saleId: newSale.id,
+            customerId,
+            installmentNumber: i + 1,
+            dueAmount: String(roundedAmount),
+            paidAmount: '0',
+            remainingAmount: String(roundedAmount),
+            currency,
+            dueDate: dueDate.toISOString().split('T')[0],
+            status: 'pending',
+          });
+        }
+      }
+
+      if (customerId && remainingAmount > 0) {
+        await tx
+          .update(customers)
+          .set({
+            totalDebt: sql`${customers.totalDebt}::numeric + ${remainingAmount}`,
+            totalPurchases: sql`${customers.totalPurchases}::numeric + ${finalTotal}`,
+          })
+          .where(eq(customers.id, customerId));
+      }
+
+      return newSale.id;
+    });
+
+    return await this.getById(newSaleId);
   }
 
   async getAll(filters = {}) {
     const db = await getDb();
     const { page = 1, limit = 10, status, startDate, endDate } = filters;
 
+    const conditions = [];
+
+    if (status) {
+      conditions.push(eq(sales.status, status));
+    }
+
+    if (startDate) {
+      conditions.push(gte(sales.createdAt, new Date(startDate)));
+    }
+
+    if (endDate) {
+      conditions.push(lte(sales.createdAt, new Date(endDate)));
+    }
+
+    if (filters.customer) {
+      conditions.push(eq(sales.customerId, filters.customer));
+    }
+
+    // Get total count
+    let countQuery = db.select({ count: sql`count(*)` }).from(sales);
+    if (conditions.length > 0) {
+      countQuery = countQuery.where(and(...conditions));
+    }
+    const [countResult] = await countQuery;
+    const total = Number(countResult?.count || 0);
+
+    const offset = (page - 1) * limit;
+
+    // Main query with joins + pagination
     let query = db
       .select({
         id: sales.id,
@@ -273,129 +283,29 @@ export class SaleService {
       })
       .from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
-      .leftJoin(users, eq(sales.createdBy, users.id));
-
-    const conditions = [];
-
-    if (status) {
-      conditions.push(eq(sales.status, status));
-    }
-
-    if (startDate) {
-      conditions.push(gte(sales.createdAt, startDate));
-    }
-
-    if (endDate) {
-      conditions.push(lte(sales.createdAt, endDate));
-    }
-
-    if (filters.customer) {
-      conditions.push(eq(sales.customerId, filters.customer));
-    }
+      .leftJoin(users, eq(sales.createdBy, users.id))
+      .orderBy(desc(sales.createdAt))
+      .limit(limit)
+      .offset(offset);
 
     if (conditions.length > 0) {
       query = query.where(and(...conditions));
     }
 
-    // Get total count for pagination metadata
-    // Note: We count from sales table only (no joins needed) since all filter conditions
-    // reference only the sales table, and joins would cause incorrect counts if there are
-    // multiple related rows (e.g., multiple saleItems per sale)
-    let countQuery = db.select({ count: sql`count(*)` }).from(sales);
-
-    if (conditions.length > 0) {
-      countQuery = countQuery.where(and(...conditions));
-    }
-
-    const countResult = await countQuery.get();
-    const total = Number(countResult?.count || 0);
-
-    // Calculate offset for pagination
-    const offset = (page - 1) * limit;
-
-    // Workaround for Drizzle ORM offset issue with joins:
-    // Use raw SQL to get paginated IDs, then use Drizzle for the join query
-    const sqlite = await getSqlite();
-    
-    // Build WHERE clause and parameters
-    let whereClause = '';
-    const params = [];
-    
-    if (status) {
-      whereClause += (whereClause ? ' AND ' : '') + 'status = ?';
-      params.push(status);
-    }
-    
-    if (startDate) {
-      whereClause += (whereClause ? ' AND ' : '') + 'created_at >= ?';
-      params.push(startDate);
-    }
-    
-    if (endDate) {
-      whereClause += (whereClause ? ' AND ' : '') + 'created_at <= ?';
-      params.push(endDate);
-    }
-    
-    if (filters.customer) {
-      whereClause += (whereClause ? ' AND ' : '') + 'customer_id = ?';
-      params.push(filters.customer);
-    }
-    
-    // Get paginated IDs using raw SQL (avoids Drizzle offset bug)
-    const idsQuery = sqlite.prepare(`
-      SELECT id FROM sales 
-      ${whereClause ? 'WHERE ' + whereClause : ''}
-      ORDER BY created_at DESC 
-      LIMIT ? OFFSET ?
-    `);
-    
-    const paginatedIds = idsQuery.all(...params, limit, offset);
-    const saleIds = paginatedIds.map((row) => row.id);
-    
-    // If no sales found, return empty array
-    if (saleIds.length === 0) {
-      return {
-        data: [],
-        meta: {
-          total: total || 0,
-          page,
-          limit,
-          totalPages: Math.ceil((total || 0) / limit),
-        },
-      };
-    }
-    
-    // Now get full sale data with joins for the paginated IDs
-    let finalQuery = db
-      .select({
-        id: sales.id,
-        invoiceNumber: sales.invoiceNumber,
-        total: sales.total,
-        currency: sales.currency,
-        paymentType: sales.paymentType,
-        paidAmount: sales.paidAmount,
-        remainingAmount: sales.remainingAmount,
-        status: sales.status,
-        createdAt: sales.createdAt,
-        customer: customers.name,
-        customerPhone: customers.phone,
-        createdBy: users.username,
-      })
-      .from(sales)
-      .leftJoin(customers, eq(sales.customerId, customers.id))
-      .leftJoin(users, eq(sales.createdBy, users.id))
-      .where(inArray(sales.id, saleIds))
-      .orderBy(desc(sales.createdAt));
-    
-    const results = await finalQuery;
+    const results = await query;
 
     return {
-      data: results,
+      data: results.map((row) => ({
+        ...row,
+        total: n(row.total),
+        paidAmount: n(row.paidAmount),
+        remainingAmount: n(row.remainingAmount),
+      })),
       meta: {
-        total: total || 0,
+        total,
         page,
         limit,
-        totalPages: Math.ceil((total || 0) / limit),
+        totalPages: Math.ceil(total / limit),
       },
     };
   }
@@ -435,7 +345,6 @@ export class SaleService {
       throw new NotFoundError('Sale');
     }
 
-    // Get full customer object if customerId exists
     let customer = null;
     if (sale.customerId) {
       const [customerData] = await db
@@ -446,7 +355,6 @@ export class SaleService {
       customer = customerData || null;
     }
 
-    // Get sale items with product description
     const items = await db
       .select({
         id: saleItems.id,
@@ -464,40 +372,50 @@ export class SaleService {
       .leftJoin(products, eq(saleItems.productId, products.id))
       .where(eq(saleItems.saleId, id));
 
-    // Get payments
     const salePayments = await db
-      .select({
-        ...payments,
-        createdBy: users.username,
-      })
+      .select()
       .from(payments)
-      .leftJoin(users, eq(payments.createdBy, users.id))
       .where(eq(payments.saleId, id));
 
-    // Get installments
     const saleInstallments = await db
-      .select({
-        ...installments,
-        customerName: customers.name,
-        customerPhone: customers.phone,
-        createdBy: users.username,
-      })
+      .select()
       .from(installments)
-      .leftJoin(customers, eq(installments.customerId, customers.id))
-      .leftJoin(users, eq(installments.createdBy, users.id))
       .where(eq(installments.saleId, id));
 
+    // Convert numeric strings to numbers for the response
     return {
       ...sale,
-      customer, // Include full customer object
-      items,
-      payments: salePayments,
-      installments: saleInstallments,
+      subtotal: n(sale.subtotal),
+      discount: n(sale.discount),
+      tax: n(sale.tax),
+      total: n(sale.total),
+      exchangeRate: n(sale.exchangeRate),
+      interestRate: n(sale.interestRate),
+      interestAmount: n(sale.interestAmount),
+      paidAmount: n(sale.paidAmount),
+      remainingAmount: n(sale.remainingAmount),
+      customer,
+      items: items.map((item) => ({
+        ...item,
+        unitPrice: n(item.unitPrice),
+        discount: n(item.discount),
+        subtotal: n(item.subtotal),
+      })),
+      payments: salePayments.map((p) => ({
+        ...p,
+        amount: n(p.amount),
+        exchangeRate: n(p.exchangeRate),
+      })),
+      installments: saleInstallments.map((inst) => ({
+        ...inst,
+        dueAmount: n(inst.dueAmount),
+        paidAmount: n(inst.paidAmount),
+        remainingAmount: n(inst.remainingAmount),
+      })),
     };
   }
 
   async addPayment(saleId, paymentData, userId) {
-    const db = await getDb();
     const sale = await this.getById(saleId);
 
     if (sale.status === 'cancelled') {
@@ -508,161 +426,136 @@ export class SaleService {
       throw new ValidationError('Sale is already fully paid');
     }
 
-    // Validate payment amount
     if (!paymentData.amount || paymentData.amount <= 0) {
       throw new ValidationError('Payment amount must be greater than zero');
     }
 
-    // Round payment amount based on currency to avoid decimal fractions
     const currency = sale.currency || 'USD';
     const roundedPaymentDataAmount = roundByCurrency(paymentData.amount, currency);
     const roundedRemainingAmount = roundByCurrency(sale.remainingAmount, currency);
     const paymentAmount = Math.min(roundedPaymentDataAmount, roundedRemainingAmount);
 
-    // Create payment record
-    await db.insert(payments).values({
-      saleId,
-      customerId: sale.customerId,
-      amount: paymentAmount,
-      currency: paymentData.currency || sale.currency,
-      exchangeRate: paymentData.exchangeRate || sale.exchangeRate,
-      paymentMethod: paymentData.paymentMethod || 'cash',
-      notes: paymentData.notes,
-      createdBy: userId,
-    });
+    await withTransaction(async (tx) => {
+      await tx.insert(payments).values({
+        saleId,
+        customerId: sale.customerId,
+        amount: String(paymentAmount),
+        currency: paymentData.currency || sale.currency,
+        exchangeRate: String(paymentData.exchangeRate || sale.exchangeRate),
+        paymentMethod: paymentData.paymentMethod || 'cash',
+        notes: paymentData.notes,
+        createdBy: userId,
+      });
 
-    // Update sale amounts
-    // Round amounts based on currency to avoid decimal fractions
-    const roundedPaymentAmount = roundByCurrency(paymentAmount, currency);
-    const newPaidAmount = roundByCurrency(sale.paidAmount + roundedPaymentAmount, currency);
-    const newRemainingAmount = Math.max(
-      0,
-      roundByCurrency(sale.remainingAmount - roundedPaymentAmount, currency)
-    );
-    const newStatus = newRemainingAmount <= 0 ? 'completed' : 'pending';
+      const roundedPaymentAmount = roundByCurrency(paymentAmount, currency);
+      const newPaidAmount = roundByCurrency(sale.paidAmount + roundedPaymentAmount, currency);
+      const newRemainingAmount = Math.max(
+        0,
+        roundByCurrency(sale.remainingAmount - roundedPaymentAmount, currency)
+      );
+      const newStatus = newRemainingAmount <= 0 ? 'completed' : 'pending';
 
-    await db
-      .update(sales)
-      .set({
-        paidAmount: newPaidAmount,
-        remainingAmount: newRemainingAmount,
-        status: newStatus,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(sales.id, saleId));
-
-    // Update customer debt
-    if (sale.customerId) {
-      await db
-        .update(customers)
+      await tx
+        .update(sales)
         .set({
-          totalDebt: customers.totalDebt - paymentAmount,
+          paidAmount: String(newPaidAmount),
+          remainingAmount: String(newRemainingAmount),
+          status: newStatus,
+          updatedAt: new Date(),
         })
-        .where(eq(customers.id, sale.customerId));
-    }
+        .where(eq(sales.id, saleId));
 
-    // Update installments if applicable
-    if (sale.installments && sale.installments.length > 0) {
-      let remainingPayment = paymentAmount;
-
-      for (const installment of sale.installments) {
-        if (remainingPayment <= 0) break;
-        if (installment.status === 'paid') continue;
-
-        const installmentPayment = Math.min(remainingPayment, installment.remainingAmount);
-        const newInstallmentPaid = installment.paidAmount + installmentPayment;
-        const newInstallmentRemaining = installment.remainingAmount - installmentPayment;
-        const installmentStatus = newInstallmentRemaining <= 0 ? 'paid' : 'pending';
-
-        await db
-          .update(installments)
+      if (sale.customerId) {
+        await tx
+          .update(customers)
           .set({
-            paidAmount: newInstallmentPaid,
-            remainingAmount: newInstallmentRemaining,
-            status: installmentStatus,
-            paidDate: installmentStatus === 'paid' ? new Date().toISOString().split('T')[0] : null,
-            updatedAt: new Date().toISOString(),
+            totalDebt: sql`${customers.totalDebt}::numeric - ${paymentAmount}`,
           })
-          .where(eq(installments.id, installment.id));
-
-        remainingPayment -= installmentPayment;
+          .where(eq(customers.id, sale.customerId));
       }
-    }
 
-    saveDatabase();
+      if (sale.installments && sale.installments.length > 0) {
+        let remainingPayment = paymentAmount;
+
+        for (const installment of sale.installments) {
+          if (remainingPayment <= 0) break;
+          if (installment.status === 'paid') continue;
+
+          const installmentPayment = Math.min(remainingPayment, installment.remainingAmount);
+          const newInstallmentPaid = installment.paidAmount + installmentPayment;
+          const newInstallmentRemaining = installment.remainingAmount - installmentPayment;
+          const installmentStatus = newInstallmentRemaining <= 0 ? 'paid' : 'pending';
+
+          await tx
+            .update(installments)
+            .set({
+              paidAmount: String(newInstallmentPaid),
+              remainingAmount: String(newInstallmentRemaining),
+              status: installmentStatus,
+              paidDate: installmentStatus === 'paid' ? new Date().toISOString().split('T')[0] : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(installments.id, installment.id));
+
+          remainingPayment -= installmentPayment;
+        }
+      }
+    });
 
     return await this.getById(saleId);
   }
 
   async cancel(id, _userId) {
-    const db = await getDb();
     const sale = await this.getById(id);
 
     if (sale.status === 'cancelled') {
       throw new ValidationError('Sale is already cancelled');
     }
 
-    // Restore product stock correctly
-    for (const item of sale.items) {
-      const [product] = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, item.productId))
-        .limit(1);
-
-      if (product) {
-        await db
-          .update(products)
-          .set({
-            stock: product.stock + item.quantity,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(products.id, item.productId));
+    return await withTransaction(async (tx) => {
+      // Atomic stock restore
+      for (const item of sale.items) {
+        if (item.productId) {
+          await tx
+            .update(products)
+            .set({
+              stock: sql`${products.stock} + ${item.quantity}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(products.id, item.productId));
+        }
       }
-    }
 
-    // Update customer debt
-    if (sale.customerId && sale.remainingAmount > 0) {
-      const [customer] = await db
-        .select()
-        .from(customers)
-        .where(eq(customers.id, sale.customerId))
-        .limit(1);
-
-      if (customer) {
-        await db
+      if (sale.customerId && sale.remainingAmount > 0) {
+        await tx
           .update(customers)
           .set({
-            totalDebt: Math.max(0, customer.totalDebt - sale.remainingAmount),
-            totalPurchases: Math.max(0, customer.totalPurchases - sale.total),
-            updatedAt: new Date().toISOString(),
+            totalDebt: sql`GREATEST(${customers.totalDebt}::numeric - ${sale.remainingAmount}, 0)`,
+            totalPurchases: sql`GREATEST(${customers.totalPurchases}::numeric - ${sale.total}, 0)`,
+            updatedAt: new Date(),
           })
           .where(eq(customers.id, sale.customerId));
       }
-    }
 
-    // Cancel all pending installments
-    await db
-      .update(installments)
-      .set({
-        status: 'cancelled',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(installments.saleId, id), eq(installments.status, 'pending')));
+      await tx
+        .update(installments)
+        .set({
+          status: 'cancelled',
+          updatedAt: new Date(),
+        })
+        .where(and(eq(installments.saleId, id), eq(installments.status, 'pending')));
 
-    // Update sale status
-    const [updated] = await db
-      .update(sales)
-      .set({
-        status: 'cancelled',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(sales.id, id))
-      .returning();
+      const [updated] = await tx
+        .update(sales)
+        .set({
+          status: 'cancelled',
+          updatedAt: new Date(),
+        })
+        .where(eq(sales.id, id))
+        .returning();
 
-    saveDatabase();
-
-    return updated;
+      return updated;
+    });
   }
 
   async getSalesReport(filters = {}) {
@@ -673,7 +566,8 @@ export class SaleService {
     const start = toYmd(startDate);
     const end = toYmd(endDate);
 
-    const createdDate = sql`substr(${sales.createdAt}, 1, 10)`;
+    // Use sql cast for date comparison with timestamps
+    const createdDate = sql`${sales.createdAt}::date::text`;
     const conds = [
       or(eq(sales.status, 'completed'), eq(sales.status, 'pending')),
       ...(start ? [gte(createdDate, start)] : []),
@@ -681,15 +575,13 @@ export class SaleService {
     ];
     if (currency) conds.push(eq(sales.currency, currency));
 
-    // 1️⃣ نجلب المبيعات ضمن الفترة
     const salesData = await db
       .select()
       .from(sales)
-      .where(and(...conds))
-      .all();
+      .where(and(...conds));
+
     const saleIds = salesData.map((s) => s.id);
 
-    // 2️⃣ نجلب كل العناصر المرتبطة لتحديد الربح الحقيقي
     let items = [];
     if (saleIds.length) {
       items = await db
@@ -706,11 +598,9 @@ export class SaleService {
         .from(saleItems)
         .leftJoin(products, eq(saleItems.productId, products.id))
         .leftJoin(sales, eq(saleItems.saleId, sales.id))
-        .where(inArray(saleItems.saleId, saleIds))
-        .all();
+        .where(inArray(saleItems.saleId, saleIds));
     }
 
-    // 3️⃣ نحسب القيم حسب العملة
     const byCur = {};
     for (const s of salesData) {
       const c = s.currency || 'USD';
@@ -731,42 +621,47 @@ export class SaleService {
       };
       const o = byCur[c];
 
-      o.totalSales += s.total ?? 0;
-      o.totalPaid += s.paidAmount ?? 0;
-      o.totalRemaining += s.remainingAmount ?? 0;
-      o.totalDiscount += s.discount ?? 0;
-      o.totalInterest += s.interestAmount ?? 0;
-      o.totalRevenue += (s.total ?? 0) - (s.interestAmount ?? 0);
+      o.totalSales += n(s.total);
+      o.totalPaid += n(s.paidAmount);
+      o.totalRemaining += n(s.remainingAmount);
+      o.totalDiscount += n(s.discount);
+      o.totalInterest += n(s.interestAmount);
+      o.totalRevenue += n(s.total) - n(s.interestAmount);
 
       o.count += 1;
-      if (s.paymentType) o[`${s.paymentType}Sales`] += 1;
-      o[`${s.status}Sales`] += 1;
+      if (s.paymentType) o[`${s.paymentType}Sales`] = (o[`${s.paymentType}Sales`] || 0) + 1;
+      o[`${s.status}Sales`] = (o[`${s.status}Sales`] || 0) + 1;
     }
 
-    // 4️⃣ نحسب الربح من العناصر بشكل محاسبي دقيق
     for (const item of items) {
       const c = item.currency || 'USD';
-      const itemDiscount = item.discount ?? 0;
-      // Prevent division by zero - skip items with zero or invalid quantity
-      if (!item.quantity || item.quantity <= 0) {
-        continue;
-      }
-      const netUnitPrice = item.unitPrice - itemDiscount / item.quantity;
-      const costPrice = item.productCost ?? 0;
+      if (!item.quantity || item.quantity <= 0) continue;
+      const itemDiscount = n(item.discount);
+      const netUnitPrice = n(item.unitPrice) - itemDiscount / item.quantity;
+      const costPrice = n(item.productCost);
       const profit = (netUnitPrice - costPrice) * item.quantity;
-      byCur[c].totalProfit += profit;
+      if (byCur[c]) byCur[c].totalProfit += profit;
     }
 
-    // 5️⃣ نطرح الخصم الإضافي ونضيف الفائدة
     for (const c in byCur) {
       const o = byCur[c];
       o.totalProfit = o.totalProfit - o.totalDiscount + o.totalInterest;
     }
 
-    // 6️⃣ نحسب المتوسطات والتقرير النهائي
     const usd = byCur['USD'] ?? {};
     const iqd = byCur['IQD'] ?? {};
     const allCount = Object.values(byCur).reduce((a, d) => a + (d.count || 0), 0);
+
+    // Overdue installments count
+    const overdueResult = await db
+      .select({ count: sql`count(*)` })
+      .from(installments)
+      .where(
+        and(
+          eq(installments.status, 'pending'),
+          lte(installments.dueDate, new Date().toISOString().split('T')[0])
+        )
+      );
 
     return {
       salesUSD: usd.totalSales || 0,
@@ -796,18 +691,7 @@ export class SaleService {
       count: allCount,
       completedSales: (usd.completedSales || 0) + (iqd.completedSales || 0),
       pendingSales: (usd.pendingSales || 0) + (iqd.pendingSales || 0),
-      overdueInstallments: (
-        await db
-          .select()
-          .from(installments)
-          .where(
-            and(
-              eq(installments.status, 'pending'),
-              lte(installments.dueDate, new Date().toISOString().split('T')[0])
-            )
-          )
-          .all()
-      ).length,
+      overdueInstallments: Number(overdueResult[0]?.count || 0),
     };
   }
 
@@ -819,73 +703,60 @@ export class SaleService {
       throw new Error('Payment not found');
     }
 
-    // Check if the user is authorized to remove the payment
     if (payment.userId !== userId) {
       throw new Error('Unauthorized');
     }
 
-    await db.delete(payments).where(eq(payments.id, paymentId));
-
-    // Update sale amounts
     const sale = await this.getById(saleId);
-    const newPaidAmount = sale.paidAmount - payment.amount;
-    const newRemainingAmount = sale.remainingAmount + payment.amount;
-    const newStatus = 'pending';
+    const paymentAmount = n(payment.amount);
 
-    await db
-      .update(sales)
-      .set({
-        paidAmount: newPaidAmount,
-        remainingAmount: newRemainingAmount,
-        status: newStatus,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(sales.id, saleId));
+    await withTransaction(async (tx) => {
+      await tx.delete(payments).where(eq(payments.id, paymentId));
 
-    // Update customer debt
-    if (sale.customerId) {
-      await db
-        .update(customers)
+      const newPaidAmount = sale.paidAmount - paymentAmount;
+      const newRemainingAmount = sale.remainingAmount + paymentAmount;
+
+      await tx
+        .update(sales)
         .set({
-          totalDebt: customers.totalDebt + payment.amount,
+          paidAmount: String(newPaidAmount),
+          remainingAmount: String(newRemainingAmount),
+          status: 'pending',
+          updatedAt: new Date(),
         })
-        .where(eq(customers.id, sale.customerId));
-    }
+        .where(eq(sales.id, saleId));
 
-    saveDatabase();
+      if (sale.customerId) {
+        await tx
+          .update(customers)
+          .set({
+            totalDebt: sql`${customers.totalDebt}::numeric + ${paymentAmount}`,
+          })
+          .where(eq(customers.id, sale.customerId));
+      }
+    });
 
     return payment;
   }
 
-  // db.delete(...).from is not a function
   async removeSale(saleId) {
-    const db = await getDb();
     const sale = await this.getById(saleId);
 
     if (!sale) {
       throw new NotFoundError('Sale');
     }
 
-    // Delete related payments
-    await db.delete(payments).where(eq(payments.saleId, saleId));
-
-    // Delete related installments
-    await db.delete(installments).where(eq(installments.saleId, saleId));
-
-    // Delete related sale items
-    await db.delete(saleItems).where(eq(saleItems.saleId, saleId));
-
-    // Delete the sale itself
-    await db.delete(sales).where(eq(sales.id, saleId));
-
-    saveDatabase();
+    await withTransaction(async (tx) => {
+      await tx.delete(payments).where(eq(payments.saleId, saleId));
+      await tx.delete(installments).where(eq(installments.saleId, saleId));
+      await tx.delete(saleItems).where(eq(saleItems.saleId, saleId));
+      await tx.delete(sales).where(eq(sales.id, saleId));
+    });
 
     return sale;
   }
 
   async restoreSale(saleId) {
-    const db = await getDb();
-    // restore sale by setting its status back to 'completed' and adjusting stock and customer debt accordingly
     const sale = await this.getById(saleId);
 
     if (!sale) {
@@ -896,124 +767,97 @@ export class SaleService {
       throw new ValidationError('Only cancelled sales can be restored');
     }
 
-    // Adjust stock for each sale item
-    for (const item of sale.items) {
-      const [product] = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, item.productId))
-        .limit(1);
-
-      if (product) {
-        await db
-          .update(products)
-          .set({
-            stock: product.stock - item.quantity,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(products.id, item.productId));
+    return await withTransaction(async (tx) => {
+      // Atomic stock decrement
+      for (const item of sale.items) {
+        if (item.productId) {
+          await tx
+            .update(products)
+            .set({
+              stock: sql`${products.stock} - ${item.quantity}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(products.id, item.productId));
+        }
       }
-    }
 
-    // Update customer debt
-    if (sale.customerId && sale.remainingAmount > 0) {
-      await db
-        .update(customers)
+      if (sale.customerId && sale.remainingAmount > 0) {
+        await tx
+          .update(customers)
+          .set({
+            totalDebt: sql`${customers.totalDebt}::numeric + ${sale.remainingAmount}`,
+            totalPurchases: sql`${customers.totalPurchases}::numeric + ${sale.total}`,
+          })
+          .where(eq(customers.id, sale.customerId));
+      }
+
+      const currency = sale.currency || 'USD';
+      const roundedRemainingAmount = roundByCurrency(sale.remainingAmount, currency);
+      const [updated] = await tx
+        .update(sales)
         .set({
-          totalDebt: customers.totalDebt + sale.remainingAmount,
-          totalPurchases: customers.totalPurchases + sale.total,
+          status: roundedRemainingAmount <= 0 ? 'completed' : 'pending',
+          updatedAt: new Date(),
         })
-        .where(eq(customers.id, sale.customerId));
-    }
+        .where(eq(sales.id, saleId))
+        .returning();
 
-    // Restore sale status
-    // Round remainingAmount based on currency to avoid decimal fractions
-    const currency = sale.currency || 'USD';
-    const roundedRemainingAmount = roundByCurrency(sale.remainingAmount, currency);
-    const [updated] = await db
-      .update(sales)
-      .set({
-        status: roundedRemainingAmount <= 0 ? 'completed' : 'pending',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(sales.id, saleId))
-      .returning();
+      await tx
+        .update(installments)
+        .set({
+          status: 'pending',
+          updatedAt: new Date(),
+        })
+        .where(and(eq(installments.saleId, saleId), eq(installments.status, 'cancelled')));
 
-    // Restore pending installments
-    await db
-      .update(installments)
-      .set({
-        status: 'pending',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(installments.saleId, saleId), eq(installments.status, 'cancelled')));
-
-    saveDatabase();
-
-    return updated;
+      return updated;
+    });
   }
 
-  /**
-   * Create a draft sale (saved temporarily)
-   * @param {Object} saleData - Sale data including items
-   * @param {number} userId - ID of user creating the draft
-   * @returns {Promise<Object>} Created draft sale
-   */
   async createDraft(saleData, userId) {
     const db = await getDb();
     const currencySettings = await settingsService.getCurrencySettings();
 
-    // Calculate totals if items exist
     let totals = { subtotal: 0, discount: 0, tax: 0, total: 0 };
     if (saleData.items && saleData.items.length > 0) {
       totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
     }
 
-    // Generate invoice number
     const invoiceNumber = generateInvoiceNumber();
-
-    // Use currency from settings if not provided
     const currency = saleData.currency || currencySettings.defaultCurrency;
-
-    // Get exchange rate based on currency
     const exchangeRate =
       saleData.exchangeRate ||
       (currency === 'USD' ? currencySettings.usdRate : currencySettings.iqdRate);
 
-    // Create draft sale record (status = 'draft')
-    // Prepare values object
     const draftValues = {
       invoiceNumber,
-      subtotal: totals.subtotal,
-      discount: totals.discount || 0,
-      tax: totals.tax || 0,
-      total: totals.total,
+      subtotal: String(totals.subtotal),
+      discount: String(totals.discount || 0),
+      tax: String(totals.tax || 0),
+      total: String(totals.total),
       currency,
-      exchangeRate,
+      exchangeRate: String(exchangeRate),
       paymentType: saleData.paymentType || 'cash',
-      paidAmount: 0,
-      remainingAmount: totals.total,
-      status: 'draft', // Draft status
+      paidAmount: '0',
+      remainingAmount: String(totals.total),
+      status: 'draft',
       notes: saleData.notes || null,
       createdBy: userId,
-      interestRate: parseFloat(saleData.interestRate) || 0,
-      interestAmount: 0,
+      interestRate: String(parseFloat(saleData.interestRate) || 0),
+      interestAmount: '0',
     };
 
-    // إضافة customerId فقط إذا كان موجوداً
     if (saleData.customerId !== undefined && saleData.customerId !== null) {
       draftValues.customerId = saleData.customerId;
     }
 
     const [newDraft] = await db.insert(sales).values(draftValues).returning();
 
-    // Create sale items if they exist (without updating stock)
     if (saleData.items && saleData.items.length > 0) {
       const itemsToInsert = [];
       for (const item of saleData.items) {
         let productName = item.productName || 'Unknown Product';
 
-        // Try to get product name from database if productId exists
         if (item.productId) {
           const [product] = await db
             .select({ name: products.name })
@@ -1025,8 +869,6 @@ export class SaleService {
           }
         }
 
-        // Calculate item subtotal and discount (consistent with create method)
-        // item.discount is per unit, so multiply by quantity to get total discount
         const itemDiscountTotal = (item.discount || 0) * (item.quantity || 1);
         const itemSubtotal = (item.unitPrice || 0) * (item.quantity || 1) - itemDiscountTotal;
 
@@ -1035,9 +877,9 @@ export class SaleService {
           productId: item.productId || null,
           productName,
           quantity: item.quantity || 1,
-          unitPrice: item.unitPrice || 0,
-          discount: itemDiscountTotal, // Store total discount (per unit * quantity)
-          subtotal: parseFloat(itemSubtotal.toFixed(2)),
+          unitPrice: String(item.unitPrice || 0),
+          discount: String(itemDiscountTotal),
+          subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
         });
       }
 
@@ -1048,64 +890,31 @@ export class SaleService {
     return await this.getById(newDraft.id);
   }
 
-  /**
-   * Delete old draft sales (older than 1 day)
-   * @returns {Promise<number>} Number of deleted drafts
-   */
   async deleteOldDrafts() {
     const db = await getDb();
-    // Calculate one day ago in local time (matching database datetime format)
-    const now = new Date();
-    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // Format as local time string (YYYY-MM-DD HH:MM:SS) to match SQLite datetime('now','localtime')
-    // SQLite stores timestamps in local time format: YYYY-MM-DD HH:MM:SS
-    const year = oneDayAgo.getFullYear();
-    const month = String(oneDayAgo.getMonth() + 1).padStart(2, '0');
-    const day = String(oneDayAgo.getDate()).padStart(2, '0');
-    const hours = String(oneDayAgo.getHours()).padStart(2, '0');
-    const minutes = String(oneDayAgo.getMinutes()).padStart(2, '0');
-    const seconds = String(oneDayAgo.getSeconds()).padStart(2, '0');
-    const oneDayAgoLocal = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-
-    // Delete draft sales older than 1 day
     const deleted = await db
       .delete(sales)
-      .where(and(eq(sales.status, 'draft'), lt(sales.createdAt, oneDayAgoLocal)))
+      .where(and(eq(sales.status, 'draft'), lt(sales.createdAt, oneDayAgo)))
       .returning();
 
     saveDatabase();
     return deleted.length;
   }
 
-  /**
-   * Complete a draft sale (convert to regular sale)
-   * @param {number} draftId - ID of draft sale
-   * @param {Object} saleData - Complete sale data
-   * @param {number} userId - ID of user completing the sale
-   * @returns {Promise<Object>} Completed sale
-   */
   async completeDraft(draftId, saleData, userId) {
-    const db = await getDb();
-
-    // Get the draft sale
     const draft = await this.getById(draftId);
     if (draft.status !== 'draft') {
       throw new ValidationError('Sale is not a draft');
     }
 
-    // Delete old draft items
-    await db.delete(saleItems).where(eq(saleItems.saleId, draftId));
-
-    // Validate items exist
     if (!saleData.items || saleData.items.length === 0) {
       throw new ValidationError('Sale must have at least one item');
     }
 
-    // Calculate totals
     const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
 
-    // Calculate interest for installment payments
     let interestAmount = 0;
     let finalTotal = totals.total;
 
@@ -1117,221 +926,170 @@ export class SaleService {
       finalTotal = totals.total + interestAmount;
     }
 
-    // Get currency settings
     const currencySettings = await settingsService.getCurrencySettings();
-
-    // Use currency from saleData or draft
     const currency = saleData.currency || draft.currency || currencySettings.defaultCurrency;
 
-    // Round finalTotal based on currency (IQD: nearest 250, USD: nearest integer)
     finalTotal = roundByCurrency(finalTotal, currency);
 
-    // Calculate remaining amount
     const paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
     let remainingAmount = Math.max(0, finalTotal - paidAmount);
 
-    // Round remainingAmount based on currency
-    // If remainingAmount is less than threshold, consider it as 0
     const threshold = currency === 'IQD' ? 250 : 0.01;
     remainingAmount = remainingAmount < threshold ? 0 : roundByCurrency(remainingAmount, currency);
 
-    // Update draft to completed sale
-    // Use exchangeRate from saleData if provided, otherwise use draft values
     const exchangeRate =
       saleData.exchangeRate !== undefined ? saleData.exchangeRate : draft.exchangeRate;
 
-    const [updatedSale] = await db
-      .update(sales)
-      .set({
-        customerId: saleData.customerId || draft.customerId,
-        subtotal: totals.subtotal,
-        discount: totals.discount,
-        tax: totals.tax,
-        total: finalTotal,
-        currency: currency,
-        exchangeRate: exchangeRate,
-        paymentType: saleData.paymentType || draft.paymentType,
-        paidAmount,
-        remainingAmount,
-        status: remainingAmount <= 0 ? 'completed' : 'pending',
-        notes: saleData.notes || draft.notes,
-        interestRate: parseFloat(saleData.interestRate) || 0,
-        interestAmount: roundByCurrency(interestAmount, currency), // Round based on currency
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(sales.id, draftId))
-      .returning();
+    const updatedSaleId = await withTransaction(async (tx) => {
+      await tx.delete(saleItems).where(eq(saleItems.saleId, draftId));
 
-    // Create sale items and update product stock
-    for (const item of saleData.items) {
-      const [product] = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, item.productId))
-        .limit(1);
+      const [updatedSale] = await tx
+        .update(sales)
+        .set({
+          customerId: saleData.customerId || draft.customerId,
+          subtotal: String(totals.subtotal),
+          discount: String(totals.discount),
+          tax: String(totals.tax),
+          total: String(finalTotal),
+          currency,
+          exchangeRate: String(exchangeRate),
+          paymentType: saleData.paymentType || draft.paymentType,
+          paidAmount: String(paidAmount),
+          remainingAmount: String(remainingAmount),
+          status: remainingAmount <= 0 ? 'completed' : 'pending',
+          notes: saleData.notes || draft.notes,
+          interestRate: String(parseFloat(saleData.interestRate) || 0),
+          interestAmount: String(roundByCurrency(interestAmount, currency)),
+          updatedAt: new Date(),
+        })
+        .where(eq(sales.id, draftId))
+        .returning();
 
-      if (!product) {
-        throw new ValidationError(`Product with ID ${item.productId} not found`);
-      }
+      for (const item of saleData.items) {
+        const [product] = await tx
+          .select()
+          .from(products)
+          .where(eq(products.id, item.productId))
+          .limit(1);
 
-      // Check stock availability
-      if (product.stock < item.quantity) {
-        throw new ValidationError(
-          `Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`
-        );
-      }
+        if (!product) {
+          throw new ValidationError(`Product with ID ${item.productId} not found`);
+        }
 
-      // Calculate item subtotal and discount (consistent with create method)
-      // item.discount is per unit, so multiply by quantity to get total discount
-      const itemDiscountTotal = (item.discount || 0) * item.quantity;
-      const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
+        if (product.stock < item.quantity) {
+          throw new ValidationError(
+            `Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`
+          );
+        }
 
-      // Create sale item
-      await db.insert(saleItems).values({
-        saleId: updatedSale.id,
-        productId: item.productId,
-        productName: product.name,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discount: itemDiscountTotal, // Store total discount (per unit * quantity)
-        subtotal: parseFloat(itemSubtotal.toFixed(2)),
-      });
+        const itemDiscountTotal = (item.discount || 0) * item.quantity;
+        const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
-      // Update product stock
-      await db
-        .update(products)
-        .set({ stock: product.stock - item.quantity })
-        .where(eq(products.id, item.productId));
-    }
-
-    // Handle payments if any
-    // If paidAmount > 0, create a payment record even if paymentMethod is not specified
-    // Use default payment method 'cash' if not provided to maintain payment audit trail
-    if (paidAmount > 0) {
-      const customerId = saleData.customerId || draft.customerId || null;
-      await db.insert(payments).values({
-        saleId: updatedSale.id,
-        customerId: customerId,
-        amount: paidAmount, // Already rounded by currency
-        currency: currency,
-        exchangeRate: exchangeRate,
-        paymentMethod: saleData.paymentMethod || 'cash', // Default to 'cash' if not specified
-        createdBy: userId,
-      });
-    }
-
-    // Handle installments if payment type is installment or mixed
-    if (
-      (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
-      saleData.installments &&
-      saleData.installments.length > 0
-    ) {
-      // Validate that customerId is provided for installment sales
-      const customerId = saleData.customerId || draft.customerId;
-      if (!customerId) {
-        throw new ValidationError('Customer ID is required for installment sales');
-      }
-
-      for (const installment of saleData.installments) {
-        // Round installment amount based on currency to avoid decimal fractions
-        const roundedAmount = roundByCurrency(installment.amount, currency);
-
-        await db.insert(installments).values({
+        await tx.insert(saleItems).values({
           saleId: updatedSale.id,
-          customerId: customerId,
-          installmentNumber: installment.number,
-          dueAmount: roundedAmount,
-          paidAmount: 0,
-          remainingAmount: roundedAmount,
-          currency: currency,
-          dueDate: installment.dueDate,
-          status: 'pending',
+          productId: item.productId,
+          productName: product.name,
+          quantity: item.quantity,
+          unitPrice: String(item.unitPrice),
+          discount: String(itemDiscountTotal),
+          subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
+        });
+
+        // Atomic stock decrement
+        await tx
+          .update(products)
+          .set({
+            stock: sql`${products.stock} - ${item.quantity}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(products.id, item.productId));
+      }
+
+      if (paidAmount > 0) {
+        const customerId = saleData.customerId || draft.customerId || null;
+        await tx.insert(payments).values({
+          saleId: updatedSale.id,
+          customerId,
+          amount: String(paidAmount),
+          currency,
+          exchangeRate: String(exchangeRate),
+          paymentMethod: saleData.paymentMethod || 'cash',
           createdBy: userId,
         });
       }
 
-      // Update customer debt
-      if (customerId) {
-        const { CustomerService } = await import('./customerService.js');
-        const customerService = new CustomerService();
-        await customerService.updateDebt(customerId, remainingAmount);
-      }
-    }
+      if (
+        (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
+        saleData.installments &&
+        saleData.installments.length > 0
+      ) {
+        const customerId = saleData.customerId || draft.customerId;
+        if (!customerId) {
+          throw new ValidationError('Customer ID is required for installment sales');
+        }
 
-    saveDatabase();
-    return await this.getById(updatedSale.id);
+        for (const installment of saleData.installments) {
+          const roundedAmount = roundByCurrency(installment.amount, currency);
+
+          await tx.insert(installments).values({
+            saleId: updatedSale.id,
+            customerId,
+            installmentNumber: installment.number,
+            dueAmount: String(roundedAmount),
+            paidAmount: '0',
+            remainingAmount: String(roundedAmount),
+            currency,
+            dueDate: installment.dueDate,
+            status: 'pending',
+            createdBy: userId,
+          });
+        }
+
+        if (customerId && remainingAmount > 0) {
+          await tx
+            .update(customers)
+            .set({
+              totalDebt: sql`${customers.totalDebt}::numeric + ${remainingAmount}`,
+              totalPurchases: sql`${customers.totalPurchases}::numeric + ${finalTotal}`,
+            })
+            .where(eq(customers.id, customerId));
+        }
+      }
+
+      return updatedSale.id;
+    });
+
+    return await this.getById(updatedSaleId);
   }
 
-  /**
-   * Get top selling products
-   * @param {Object} filters - Filters like limit, startDate, endDate
-   * @returns {Promise<Array>} Array of top products with sales data
-   */
   async getTopProducts(filters = {}) {
     const db = await getDb();
     const { limit = 5, startDate, endDate } = filters;
 
-    // Build WHERE conditions for sales
-    const saleConditions = [eq(sales.status, 'completed')];
-    
-    if (startDate) {
-      saleConditions.push(gte(sales.createdAt, startDate));
-    }
-    
-    if (endDate) {
-      saleConditions.push(lte(sales.createdAt, endDate));
-    }
+    const conditions = [eq(sales.status, 'completed')];
+    if (startDate) conditions.push(gte(sales.createdAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(sales.createdAt, new Date(endDate)));
 
-    // Query to aggregate product sales
-    // Use raw SQL for better compatibility with SQLite aggregations
-    const sqlite = await getSqlite();
-    
-    // Build WHERE clause
-    let whereClause = 'sales.status = ?';
-    const params = ['completed'];
-    
-    if (startDate) {
-      whereClause += ' AND sales.created_at >= ?';
-      params.push(startDate);
-    }
-    
-    if (endDate) {
-      whereClause += ' AND sales.created_at <= ?';
-      params.push(endDate);
-    }
-    
-    // Build SQL query
-    const query = `
-      SELECT 
-        sale_items.product_id as productId,
-        products.name as productName,
-        CAST(SUM(sale_items.quantity) AS INTEGER) as totalQuantity,
-        CAST(SUM(sale_items.quantity * sale_items.unit_price) AS REAL) as totalRevenue
-      FROM sale_items
-      INNER JOIN sales ON sale_items.sale_id = sales.id
-      INNER JOIN products ON sale_items.product_id = products.id
-      WHERE ${whereClause}
-      GROUP BY sale_items.product_id, products.name
-      ORDER BY SUM(sale_items.quantity) DESC
-      LIMIT ?
-    `;
-    
-    params.push(limit);
-    
-    const result = sqlite.prepare(query).all(...params);
-    
-    const topProducts = result.map((row) => ({
+    const result = await db
+      .select({
+        productId: saleItems.productId,
+        productName: sql`min(${products.name})`.as('productName'),
+        totalQuantity: sql`CAST(sum(${saleItems.quantity}) AS integer)`.as('totalQuantity'),
+        totalRevenue: sql`CAST(sum(${saleItems.quantity} * ${saleItems.unitPrice}::numeric) AS numeric)`.as('totalRevenue'),
+      })
+      .from(saleItems)
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      .innerJoin(products, eq(saleItems.productId, products.id))
+      .where(and(...conditions))
+      .groupBy(saleItems.productId)
+      .orderBy(sql`sum(${saleItems.quantity}) DESC`)
+      .limit(limit);
+
+    return result.map((row) => ({
       productId: row.productId,
       productName: row.productName,
       totalQuantity: Number(row.totalQuantity) || 0,
       totalRevenue: Number(row.totalRevenue) || 0,
-    }));
-
-    return topProducts.map((product) => ({
-      productId: product.productId,
-      productName: product.productName,
-      totalQuantity: Number(product.totalQuantity) || 0,
-      totalRevenue: Number(product.totalRevenue) || 0,
     }));
   }
 }

@@ -19,6 +19,22 @@ export default async function backupRoutes(fastify) {
     handler: backupController.create,
   });
 
+  fastify.post('/:filename/restore', {
+    schema: {
+      tags: ['Settings'],
+      summary: 'Restore database from a backup',
+      params: {
+        type: 'object',
+        properties: {
+          filename: { type: 'string' },
+        },
+        required: ['filename'],
+      },
+    },
+    onRequest: [fastify.authenticate, fastify.authorize('settings:create')],
+    handler: backupController.restore,
+  });
+
   fastify.delete('/:filename', {
     schema: {
       tags: ['Settings'],

@@ -15,7 +15,6 @@
 
     <v-row>
       <v-col cols="12" md="2">
-        <!-- 🔹 شريط الأدوات العلوي -->
         <v-card class="flex flex-col">
           <div class="flex justify-space-between items-center pa-3">
             <div class="text-h6 font-semibold text-primary">الاعدادات</div>
@@ -30,7 +29,10 @@
               <v-icon start>mdi-currency-usd</v-icon>
               <span>إعدادات العملة</span>
             </v-tab>
-
+            <v-tab value="connection">
+              <v-icon start>mdi-server-network</v-icon>
+              <span>الاتصال</span>
+            </v-tab>
             <v-tab value="backup">
               <v-icon start>mdi-backup-restore</v-icon>
               <span>إدارة النسخ الاحتياطي</span>
@@ -55,6 +57,12 @@
             <CurrencySettings />
           </v-window-item>
 
+          <!-- Connection Tab -->
+          <v-window-item value="connection" class="pa-0">
+            <ConnectionSettings v-if="connectionStore.isClientMode" />
+            <ServerConnectionInfo v-else />
+          </v-window-item>
+
           <v-window-item value="backup" class="pa-0">
             <BackupManager />
           </v-window-item>
@@ -71,14 +79,18 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useSettingsStore } from '../stores/settings';
+import { useConnectionStore } from '@/stores/connection';
 import { useRoute } from 'vue-router';
 import CompanyInfoForm from '@/components/settings/CompanyInfoForm.vue';
 import BackupManager from '@/components/settings/BackupManager.vue';
 import CurrencySettings from '@/components/settings/CurrencySettings.vue';
 import LicenseStatus from '@/components/settings/LicenseStatus.vue';
+import ConnectionSettings from '@/components/settings/ConnectionSettings.vue';
+import ServerConnectionInfo from '@/components/settings/ServerConnectionInfo.vue';
 
 // Stores
 const settingsStore = useSettingsStore();
+const connectionStore = useConnectionStore();
 const route = useRoute();
 // State
 const activeTab = ref('company');

@@ -50,7 +50,7 @@ export class SettingsService {
     if (existingSetting.length > 0) {
       throw new ConflictError(`Setting with key '${key}' already exists.`);
     }
-    const now = new Date().toISOString();
+    const now = new Date();
     const [newSetting] = await db
       .insert(settings)
       .values({
@@ -58,7 +58,6 @@ export class SettingsService {
         value: String(value),
         description,
         updatedAt: now,
-        createdAt: now,
       })
       .returning();
     await saveDatabase();
@@ -75,7 +74,7 @@ export class SettingsService {
       throw new NotFoundError(`Setting with key '${key}' not found.`);
     }
     const updateData = {
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(),
     };
     if (value !== undefined) updateData.value = String(value);
     if (description !== undefined) updateData.description = description;

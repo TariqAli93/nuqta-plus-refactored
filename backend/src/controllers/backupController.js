@@ -20,6 +20,16 @@ export class BackupController {
   }
 
   /**
+   * Restore from a backup
+   * POST /settings/backups/:filename/restore
+   */
+  async restore(request, reply) {
+    const { filename } = request.params;
+    const result = await backupService.restore(filename);
+    return reply.send({ success: true, data: result });
+  }
+
+  /**
    * Delete a backup
    * DELETE /settings/backups/:filename
    */

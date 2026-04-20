@@ -49,10 +49,10 @@ export class CustomerService {
         or(like(customers.name, `%${search}%`), like(customers.phone, `%${search}%`))
       );
     }
-    const countResult = await countQuery.get();
+    const [countResult] = await countQuery;
     const total = Number(countResult?.count || 0);
 
-    // Get paginated results using offset and limit (better-sqlite3 supports this)
+    // Get paginated results using offset and limit
     const results = await query
       .orderBy(desc(customers.createdAt))
       .limit(limit)
@@ -107,7 +107,7 @@ export class CustomerService {
       .update(customers)
       .set({
         ...customerData,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       })
       .where(eq(customers.id, id))
       .returning();
@@ -142,7 +142,7 @@ export class CustomerService {
       .update(customers)
       .set({
         totalDebt: (customer.totalDebt || 0) + amount,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       })
       .where(eq(customers.id, customerId))
       .returning();

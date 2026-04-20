@@ -73,6 +73,11 @@ const PERMISSION_MATRIX = {
   'settings:manage': ['admin'],
   'settings:create': ['admin'],
   'settings:delete': ['admin'],
+
+  // Audit log (admin only)
+  'audit:read': ['admin'],
+  'audit:delete': ['admin'],
+  'view:audit': ['admin'],
 };
 
 /**

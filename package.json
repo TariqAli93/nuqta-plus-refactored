@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "cross-env NODE_ENV=development concurrently \"cd backend && pnpm dev\" \"cd frontend && pnpm dev\"",
+    "dev:client": "cd frontend && cross-env NODE_ENV=development pnpm dev:client",
     "dev:web": "cross-env NODE_ENV=development concurrently \"cd backend && pnpm dev\" \"cd frontend && pnpm dev:web\"",
     "dev:backend": "cd backend && cross-env NODE_ENV=development pnpm dev",
     "dev:electron": "cd frontend && cross-env NODE_ENV=development pnpm dev",
@@ -13,6 +14,8 @@
     "fetch:winsw": "node scripts/fetch-winsw.js",
     "build:backend": "node build-backend.js",
     "build:frontend": "cd frontend && pnpm run build:win",
+    "build:server": "pnpm run clean && pnpm run build:backend && pnpm run build:frontend && pnpm run verify:packaged",
+    "build:client": "cd frontend && pnpm run build:client",
     "publish:frontend": "cd frontend && pnpm run publish:win",
     "verify:packaged": "node scripts/verify-packaged-backend.js",
     "build": "pnpm run clean && pnpm run build:backend && pnpm run build:frontend && pnpm run verify:packaged",

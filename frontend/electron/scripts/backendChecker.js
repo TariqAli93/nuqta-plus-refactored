@@ -17,7 +17,7 @@
 import net from 'node:net';
 import { app } from 'electron';
 import {
-  BACKEND_HOST,
+  BACKEND_HOST_DEV,
   BACKEND_PORT,
   HEALTH_ENDPOINT,
   VERSION_ENDPOINT,
@@ -28,6 +28,10 @@ import {
   HEALTH_FETCH_TIMEOUT_MS,
   PORT_PROBE_TIMEOUT_MS,
 } from '../../../packages/shared/index.js';
+
+// Electron always probes 127.0.0.1 (the loopback interface) regardless of
+// which interface the backend binds to (0.0.0.0 in production).
+const BACKEND_HOST = BACKEND_HOST_DEV;
 
 const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
 const isServiceMode = !isDev;

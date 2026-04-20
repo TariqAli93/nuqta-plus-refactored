@@ -4,6 +4,8 @@ import { hashPassword, comparePassword } from '../utils/helpers.js';
 import { AuthenticationError, NotFoundError, ConflictError } from '../utils/errors.js';
 import { eq } from 'drizzle-orm';
 import { getRolePermissions } from '../auth/permissionMatrix.js';
+import config from '../config.js';
+import auditService from './auditService.js';
 
 export class AuthService {
   /**
@@ -30,8 +32,6 @@ export class AuthService {
       isFirstRun,
       hasUsers,
       hasCompanyInfo,
-      username: 'admin',
-      password: 'Admin@123',
     };
   }
 
@@ -66,17 +66,25 @@ export class AuthService {
       .returning();
 
     // Generate token
-    const token = fastify.jwt.sign({
-      id: newUser.id,
-      username: newUser.username,
-      role: newUser.role,
-    });
+    const token = fastify.jwt.sign(
+      { id: newUser.id, username: newUser.username, role: newUser.role },
+      { expiresIn: config.jwt.expiresIn }
+    );
 
     // Remove password from response
     const userWithoutPassword = { ...newUser };
     delete userWithoutPassword.password;
 
     saveDatabase();
+
+    await auditService.log({
+      userId: newUser.id,
+      username: newUser.username,
+      action: 'system:first-user-setup',
+      resource: 'users',
+      resourceId: newUser.id,
+      details: { role: 'admin' },
+    });
 
     return {
       user: userWithoutPassword,
@@ -120,11 +128,10 @@ export class AuthService {
       .returning();
 
     // Generate token
-    const token = fastify.jwt.sign({
-      id: newUser.id,
-      username: newUser.username,
-      role: newUser.role,
-    });
+    const token = fastify.jwt.sign(
+      { id: newUser.id, username: newUser.username, role: newUser.role },
+      { expiresIn: config.jwt.expiresIn }
+    );
 
     // Remove password from response
     const userWithoutPassword = { ...newUser };
@@ -144,7 +151,7 @@ export class AuthService {
    * @param {Object} fastify - Fastify instance for JWT signing
    * @returns {Promise<Object>} User data and JWT token
    */
-  async login(credentials, fastify) {
+  async login(credentials, fastify, ipAddress) {
     const db = await getDb();
     // Find user by username
     const [user] = await db
@@ -154,11 +161,26 @@ export class AuthService {
       .limit(1);
 
     if (!user) {
+      await auditService.log({
+        action: 'user:login-failed',
+        resource: 'users',
+        details: { username: credentials.username, reason: 'not found' },
+        ipAddress,
+      });
       throw new AuthenticationError('Invalid username or password');
     }
 
     // Check if user account is active
     if (!user.isActive) {
+      await auditService.log({
+        userId: user.id,
+        username: user.username,
+        action: 'user:login-failed',
+        resource: 'users',
+        resourceId: user.id,
+        details: { reason: 'inactive account' },
+        ipAddress,
+      });
       throw new AuthenticationError('Account is inactive');
     }
 
@@ -166,24 +188,41 @@ export class AuthService {
     const isValidPassword = await comparePassword(credentials.password, user.password);
 
     if (!isValidPassword) {
+      await auditService.log({
+        userId: user.id,
+        username: user.username,
+        action: 'user:login-failed',
+        resource: 'users',
+        resourceId: user.id,
+        details: { reason: 'wrong password' },
+        ipAddress,
+      });
       throw new AuthenticationError('Invalid username or password');
     }
 
     // Update last login
     await db
       .update(users)
-      .set({ lastLoginAt: new Date().toISOString() })
+      .set({ lastLoginAt: new Date() })
       .where(eq(users.id, user.id));
 
     // Generate JWT token
-    const token = fastify.jwt.sign({
-      id: user.id,
-      username: user.username,
-      role: user.role,
-    });
+    const token = fastify.jwt.sign(
+      { id: user.id, username: user.username, role: user.role },
+      { expiresIn: config.jwt.expiresIn }
+    );
 
     // Save database changes
     saveDatabase();
+
+    await auditService.log({
+      userId: user.id,
+      username: user.username,
+      action: 'user:login',
+      resource: 'users',
+      resourceId: user.id,
+      ipAddress,
+    });
 
     // Remove sensitive data from response
     const userWithoutPassword = { ...user };
@@ -267,9 +306,17 @@ export class AuthService {
     // Update password
     await db
       .update(users)
-      .set({ password: hashedPassword, updatedAt: new Date().toISOString() })
+      .set({ password: hashedPassword, updatedAt: new Date() })
       .where(eq(users.id, userId));
 
     saveDatabase();
+
+    await auditService.log({
+      userId,
+      username: user.username,
+      action: 'user:password-changed',
+      resource: 'users',
+      resourceId: userId,
+    });
   }
 }

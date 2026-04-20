@@ -36,6 +36,12 @@ export default async function authRoutes(fastify) {
 
   fastify.post('/login', {
     handler: authController.login,
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '5 minutes',
+      },
+    },
     schema: {
       description: 'User login',
       tags: ['auth'],

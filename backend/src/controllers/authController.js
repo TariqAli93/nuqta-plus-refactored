@@ -34,7 +34,7 @@ export class AuthController {
 
   async login(request, reply) {
     const validatedData = loginSchema.parse(request.body);
-    const result = await authService.login(validatedData, request.server);
+    const result = await authService.login(validatedData, request.server, request.ip);
     return reply.send({
       success: true,
       data: result,

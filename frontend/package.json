@@ -6,10 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "cross-env VITE_TARGET=electron vite",
+    "dev:client": "cross-env VITE_TARGET=electron NUQTA_APP_MODE=client vite",
     "dev:web": "cross-env VITE_TARGET=web vite",
     "build": "cross-env NODE_ENV=production VITE_TARGET=electron vite build",
-    "build:win": "cross-env NODE_ENV=production VITE_TARGET=electron vite build && electron-builder --win",
-    "publish:win": "cross-env VITE_TARGET=electron NODE_ENV=production vite build && electron-builder --win --publish always",
+    "build:server": "cross-env NODE_ENV=production VITE_TARGET=electron NUQTA_APP_MODE=server vite build && electron-builder --win",
+    "build:client": "cross-env NODE_ENV=production VITE_TARGET=electron NUQTA_APP_MODE=client vite build && electron-builder --win --config electron-builder-client.yml",
+    "build:win": "cross-env NODE_ENV=production VITE_TARGET=electron NUQTA_APP_MODE=server vite build && electron-builder --win",
+    "publish:win": "cross-env VITE_TARGET=electron NODE_ENV=production NUQTA_APP_MODE=server vite build && electron-builder --win --publish always",
     "lint": "eslint src",
     "format": "prettier --write src"
   },

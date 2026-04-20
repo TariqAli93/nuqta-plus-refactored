@@ -1,4 +1,4 @@
-import { getDb, getSqlite, saveDatabase } from '../db.js';
+import { getDb, saveDatabase } from '../db.js';
 import { products, categories } from '../models/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
 import { eq, like, or, and, desc, lte, sql, inArray } from 'drizzle-orm';
@@ -97,81 +97,17 @@ export class ProductService {
         countQuery = countQuery.where(and(...whereConditions));
       }
     }
-    const countResult = await countQuery.get();
+    const [countResult] = await countQuery;
     const total = Number(countResult?.count || 0);
 
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
-    // Workaround for Drizzle ORM offset issue with joins:
-    // Use raw SQL to get paginated IDs, then use Drizzle for the join query
-    const sqlite = await getSqlite();
-    
-    // Build WHERE clause and parameters
-    let whereClause = '';
-    const params = [];
-    
-    if (normalizedSearch) {
-      whereClause += (whereClause ? ' AND ' : '') + '(name LIKE ? OR sku LIKE ? OR barcode LIKE ?)';
-      const searchPattern = `%${normalizedSearch}%`;
-      params.push(searchPattern, searchPattern, searchPattern);
-    }
-    
-    if (categoryId) {
-      whereClause += (whereClause ? ' AND ' : '') + 'category_id = ?';
-      params.push(categoryId);
-    }
-    
-    // Get paginated IDs using raw SQL (avoids Drizzle offset bug)
-    const idsQuery = sqlite.prepare(`
-      SELECT id FROM products 
-      ${whereClause ? 'WHERE ' + whereClause : ''}
-      ORDER BY created_at DESC 
-      LIMIT ? OFFSET ?
-    `);
-    
-    const paginatedIds = idsQuery.all(...params, limit, offset);
-    const productIds = paginatedIds.map((row) => row.id);
-    
-    // If no products found, return empty array
-    if (productIds.length === 0) {
-      return {
-        data: [],
-        meta: {
-          total: total || 0,
-          page,
-          limit,
-          totalPages: Math.ceil((total || 0) / limit),
-        },
-      };
-    }
-    
-    // Now get full product data with join for the paginated IDs
-    let finalQuery = db
-      .select({
-        id: products.id,
-        name: products.name,
-        sku: products.sku,
-        barcode: products.barcode,
-        description: products.description,
-        costPrice: products.costPrice,
-        sellingPrice: products.sellingPrice,
-        currency: products.currency,
-        stock: products.stock,
-        minStock: products.minStock,
-        unit: products.unit,
-        supplier: products.supplier,
-        isActive: products.isActive,
-        createdAt: products.createdAt,
-        category: categories.name,
-        status: products.status,
-      })
-      .from(products)
-      .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(inArray(products.id, productIds))
-      .orderBy(desc(products.createdAt));
-    
-    const results = await finalQuery;
+    // PostgreSQL handles LIMIT/OFFSET with JOINs correctly
+    const results = await baseQuery
+      .orderBy(desc(products.createdAt))
+      .limit(limit)
+      .offset(offset);
 
     return {
       data: results,
@@ -223,7 +159,7 @@ export class ProductService {
       .update(products)
       .set({
         ...productData,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       })
       .where(eq(products.id, id))
       .returning();
@@ -258,7 +194,7 @@ export class ProductService {
       .update(products)
       .set({
         stock: product.stock + quantity,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       })
       .where(eq(products.id, productId))
       .returning();

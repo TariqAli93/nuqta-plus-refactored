@@ -12,7 +12,7 @@ import { eq } from 'drizzle-orm';
  */
 export async function list() {
   const db = await getDb();
-  const currencies = await db.select().from(currencySettings).all();
+  const currencies = await db.select().from(currencySettings);
   return currencies;
 }
 
@@ -21,11 +21,11 @@ export async function list() {
  */
 export async function getByCode(currencyCode) {
   const db = await getDb();
-  const currency = await db
+  const [currency] = await db
     .select()
     .from(currencySettings)
     .where(eq(currencySettings.currencyCode, currencyCode))
-    .get();
+    .limit(1);
 
   if (!currency) {
     throw new Error('Currency not found');
@@ -39,11 +39,11 @@ export async function getByCode(currencyCode) {
  */
 export async function updateExchangeRate(currencyCode, newRate, _userId) {
   const db = await getDb();
-  const currency = await db
+  const [currency] = await db
     .select()
     .from(currencySettings)
     .where(eq(currencySettings.currencyCode, currencyCode))
-    .get();
+    .limit(1);
 
   if (!currency) {
     throw new Error('Currency not found');
@@ -53,15 +53,14 @@ export async function updateExchangeRate(currencyCode, newRate, _userId) {
     throw new Error('Cannot update exchange rate for base currency');
   }
 
-  const updated = await db
+  const [updated] = await db
     .update(currencySettings)
     .set({
       exchangeRate: newRate,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(),
     })
     .where(eq(currencySettings.currencyCode, currencyCode))
-    .returning()
-    .get();
+    .returning();
 
   // Persist changes to disk
   saveDatabase();
@@ -74,25 +73,24 @@ export async function updateExchangeRate(currencyCode, newRate, _userId) {
  */
 export async function update(currencyCode, data, _userId) {
   const db = await getDb();
-  const currency = await db
+  const [currency] = await db
     .select()
     .from(currencySettings)
     .where(eq(currencySettings.currencyCode, currencyCode))
-    .get();
+    .limit(1);
 
   if (!currency) {
     throw new Error('Currency not found');
   }
 
-  const updated = await db
+  const [updated] = await db
     .update(currencySettings)
     .set({
       ...data,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(),
     })
     .where(eq(currencySettings.currencyCode, currencyCode))
-    .returning()
-    .get();
+    .returning();
 
   // Persist changes to disk
   saveDatabase();
@@ -108,8 +106,7 @@ export async function getActiveCurrencies() {
   const currencies = await db
     .select()
     .from(currencySettings)
-    .where(eq(currencySettings.isActive, true))
-    .all();
+    .where(eq(currencySettings.isActive, true));
 
   return currencies;
 }
@@ -119,11 +116,11 @@ export async function getActiveCurrencies() {
  */
 export async function getBaseCurrency() {
   const db = await getDb();
-  const currency = await db
+  const [currency] = await db
     .select()
     .from(currencySettings)
     .where(eq(currencySettings.isBaseCurrency, true))
-    .get();
+    .limit(1);
 
   return currency;
 }

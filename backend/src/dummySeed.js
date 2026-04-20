@@ -128,10 +128,9 @@ async function seed() {
     const db = await getDb();
 
     // 0. Ensure Admin User exists
-    const usersCount = await db
+    const [usersCount] = await db
       .select({ count: sql`count(*)` })
-      .from(users)
-      .get();
+      .from(users);
     if (Number(usersCount.count) === 0) {
       const hashedPassword = await bcrypt.hash('Admin@123', 10);
       await db.insert(users).values({

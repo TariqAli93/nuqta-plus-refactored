@@ -39,21 +39,27 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useBackendStateStore } from '@/stores/backendState';
+import { useConnectionStore } from '@/stores/connection';
 
 const route = useRoute();
 const backendStore = useBackendStateStore();
+const connectionStore = useConnectionStore();
 const restarting = ref(false);
 
 /**
- * The Activation window loads the same SPA (App.vue) as the main window,
- * but it opens BEFORE the backend starts. Bypass the gate entirely so the
- * activation form is never hidden behind a loading overlay.
+ * Bypass the backend gate when:
+ * - On the Activation route (opens before backend starts)
+ * - On the ServerSetup route (client mode, no local backend)
+ * - In client mode (no local backend to wait for)
  */
-const shouldBypass = computed(() => route.name === 'Activation');
+const shouldBypass = computed(
+  () =>
+    route.name === 'Activation' ||
+    route.name === 'ServerSetup' ||
+    connectionStore.isClientMode
+);
 
 onMounted(() => {
-  // Do not poll for backend status on the Activation route — backend has
-  // not started yet at that point and polling would be meaningless noise.
   if (shouldBypass.value) return;
   backendStore.initialize();
 });

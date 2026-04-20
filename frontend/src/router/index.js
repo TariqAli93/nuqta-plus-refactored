@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { useConnectionStore } from '@/stores/connection';
 import * as uiAccess from '@/auth/uiAccess.js';
 
 // Layouts
@@ -8,6 +9,7 @@ import AuthLayout from '@/layouts/AuthLayout.vue';
 
 // Views
 import Activation from '@/views/Activation.vue';
+import ServerSetup from '@/views/ServerSetup.vue';
 import Login from '@/views/auth/Login.vue';
 import Dashboard from '@/views/Dashboard.vue';
 import Customers from '@/views/customers/Customers.vue';
@@ -31,6 +33,11 @@ const routes = [
     path: '/activation',
     name: 'Activation',
     component: Activation,
+  },
+  {
+    path: '/server-setup',
+    name: 'ServerSetup',
+    component: ServerSetup,
   },
   {
     path: '/auth',
@@ -126,10 +133,27 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to, from, next) => {
+  const connectionStore = useConnectionStore();
+
+  // Client mode: redirect to ServerSetup if no server connection is configured,
+  // unless we're already going there (or to Activation).
+  if (
+    connectionStore.isClientMode &&
+    connectionStore.needsSetup &&
+    to.name !== 'ServerSetup' &&
+    to.name !== 'Activation'
+  ) {
+    return next({ name: 'ServerSetup' });
+  }
+
+  // Don't allow server-mode users to see the setup screen
+  if (to.name === 'ServerSetup' && connectionStore.isServerMode) {
+    return next({ name: 'Dashboard' });
+  }
+
   const authStore = useAuthStore();
 
   // Wait for auth check if it hasn't been done yet (on initial load)
-  // If there's a token but user is not loaded, we need to verify it first
   const token = localStorage.getItem('token');
   if (token && !authStore.isAuthenticated && authStore.user === null) {
     await authStore.checkAuth();

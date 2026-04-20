@@ -76,6 +76,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearDatabase: () => ipcRenderer.invoke('database:clear'),
   closeApp: () => ipcRenderer.invoke('app:close'),
 
+  // ---- App mode ----
+  getMode: () => ipcRenderer.invoke('app:getMode'),
+
+  // ---- Client-mode connection config ----
+  connectionConfig: {
+    load: () => ipcRenderer.invoke('connection:load'),
+    save: (config) => ipcRenderer.invoke('connection:save', config),
+    clear: () => ipcRenderer.invoke('connection:clear'),
+  },
+
   // ---- fallback invoke ----
   invoke: (channel, data) => ipcRenderer.invoke(channel, data),
 });

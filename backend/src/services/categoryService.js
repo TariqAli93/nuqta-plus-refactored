@@ -39,10 +39,10 @@ export class CategoryService {
     if (search) {
       countQuery = countQuery.where(like(categories.name, `%${search}%`));
     }
-    const countResult = await countQuery.get();
+    const [countResult] = await countQuery;
     const total = Number(countResult?.count || 0);
 
-    // Get paginated results using offset and limit (better-sqlite3 supports this)
+    // Get paginated results using offset and limit
     const results = await query
       .orderBy(desc(categories.createdAt))
       .limit(limit)

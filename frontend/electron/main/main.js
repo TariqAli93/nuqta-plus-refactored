@@ -37,6 +37,16 @@ import { generateReceiptHtml } from '../scripts/receiptBuilder.js';
 // --- المتغيرات العامة ---
 const isDev = !app.isPackaged;
 
+/**
+ * Application mode: 'server' or 'client'.
+ * - server: spawns and manages the local backend + PostgreSQL
+ * - client: connects to a remote server over LAN, no local backend
+ * Set via NUQTA_APP_MODE env var at build time (defaults to 'server').
+ */
+const APP_MODE = process.env.NUQTA_APP_MODE || 'server';
+const isServerMode = APP_MODE === 'server';
+const isClientMode = APP_MODE === 'client';
+
 let mainWindow = null;
 let splashWindow = null;
 let activationWindow = null;
@@ -276,7 +286,9 @@ function createWindow() {
     // If user clicked "إغلاق" (Close), proceed with quit
     if (response === 1) {
       isQuitting = true;
-      await backendManager.CleanupBackendProcess();
+      if (isServerMode) {
+        await backendManager.CleanupBackendProcess();
+      }
       // Close the window (this will trigger the 'closed' event)
       mainWindow.close();
     }
@@ -286,7 +298,9 @@ function createWindow() {
   mainWindow.on('closed', async () => {
     logger.info('Main window closed');
     mainWindow = null;
-    await backendManager.CleanupBackendProcess();
+    if (isServerMode) {
+      await backendManager.CleanupBackendProcess();
+    }
   });
 
   // Block all new window requests (Ctrl+click, middle-click, target="_blank", etc.)
@@ -792,16 +806,23 @@ async function startNormalApp() {
   createSplashWindow();
   createWindow();
 
-  // Run ensureBackendRunning: spawn → poll /health → verify /version
-  const result = await ensureBackendRunning(backendManager, logger);
-  backendStatus = result.status;
-  broadcastBackendStatus({ reason: 'startup', version: result.version, error: result.error });
+  if (isServerMode) {
+    // Server mode: spawn and manage the local backend
+    const result = await ensureBackendRunning(backendManager, logger);
+    backendStatus = result.status;
+    broadcastBackendStatus({ reason: 'startup', version: result.version, error: result.error });
 
-  if (result.status === 'ready') {
-    logger.info(`Backend ready — version: ${result.version}`);
+    if (result.status === 'ready') {
+      logger.info(`Backend ready — version: ${result.version}`);
+    } else {
+      logger.error(`Backend failed to start: ${result.error}`);
+    }
   } else {
-    logger.error(`Backend failed to start: ${result.error}`);
-    // Still set backendReady so the main window appears and shows the error state
+    // Client mode: no local backend — mark as ready immediately.
+    // The Vue frontend handles server connection via the setup screen.
+    logger.info('Client mode — skipping local backend startup');
+    backendStatus = 'ready';
+    broadcastBackendStatus({ reason: 'client-mode' });
   }
 
   backendReady = true;
@@ -918,10 +939,11 @@ app.whenReady().then(async () => {
 // --- عند إغلاق جميع النوافذ ---
 app.on('window-all-closed', async () => {
   isQuitting = true;
-  // Mark intentional + drop crash listeners so no zombie restart fires during quit.
-  backendManager.removeAllListeners('crash');
-  backendManager.removeAllListeners('restart-scheduled');
-  await backendManager.CleanupBackendProcess();
+  if (isServerMode) {
+    backendManager.removeAllListeners('crash');
+    backendManager.removeAllListeners('restart-scheduled');
+    await backendManager.CleanupBackendProcess();
+  }
   app.quit();
 });
 
@@ -937,20 +959,56 @@ app.on('before-quit', async (event) => {
     splashTimeout = null;
   }
 
-  backendManager.removeAllListeners('crash');
-  backendManager.removeAllListeners('restart-scheduled');
-  await backendManager.CleanupBackendProcess();
+  if (isServerMode) {
+    backendManager.removeAllListeners('crash');
+    backendManager.removeAllListeners('restart-scheduled');
+    await backendManager.CleanupBackendProcess();
+  }
   app.quit();
 });
 
 // --- will quit ---
 app.on('will-quit', async () => {
-  await backendManager.CleanupBackendProcess();
+  if (isServerMode) {
+    await backendManager.CleanupBackendProcess();
+  }
 });
 
 // --- IPC: معلومات التطبيق ---
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:getPlatform', () => process.platform);
+ipcMain.handle('app:getMode', () => APP_MODE);
+
+// --- IPC: Client-mode connection config ---
+// Stores server-connection.json in userData for client-mode apps.
+const connectionConfigPath = join(app.getPath('userData'), 'server-connection.json');
+
+ipcMain.handle('connection:load', async () => {
+  try {
+    const data = await fs.readFile(connectionConfigPath, 'utf8');
+    return { success: true, config: JSON.parse(data) };
+  } catch {
+    return { success: true, config: null };
+  }
+});
+
+ipcMain.handle('connection:save', async (_e, config) => {
+  try {
+    await fs.writeFile(connectionConfigPath, JSON.stringify(config, null, 2), 'utf8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('connection:clear', async () => {
+  try {
+    await fs.unlink(connectionConfigPath);
+  } catch {
+    // file didn't exist — that's fine
+  }
+  return { success: true };
+});
 
 // --- Dialog ---
 ipcMain.handle('dialog:showSaveDialog', async (_e, options) =>
@@ -988,18 +1046,21 @@ ipcMain.handle('backend:getVersion', async () => {
   }
 });
 
-// --- التحكم في backend (يدوي فقط) ---
+// --- التحكم في backend (يدوي فقط — server mode only) ---
 ipcMain.handle('backend:start', async () => {
+  if (!isServerMode) return { ok: false, error: 'Not available in client mode' };
   await backendManager.StartBackend();
   return { ok: true };
 });
 
 ipcMain.handle('backend:stop', async () => {
+  if (!isServerMode) return { ok: false, error: 'Not available in client mode' };
   await backendManager.StopBackend();
   return { ok: true };
 });
 
 ipcMain.handle('backend:restart', async () => {
+  if (!isServerMode) return { ok: false, error: 'Not available in client mode' };
   backendStatus = 'starting';
   broadcastBackendStatus({ reason: 'manual-restart-begin' });
   await backendManager.StopBackend();
@@ -1095,86 +1156,69 @@ ipcMain.handle('backend:pruneVersions', () => {
   }
 });
 
-// --- استعادة النسخة الاحتياطية ---
-ipcMain.handle('backup:restore', async (_e, filename) => {
+// ── PostgreSQL-aware backup/restore IPC handlers ───────────────────────────
+// These delegate to the backend API rather than manipulating .db files.
+// The backend uses pg_dump / pg_restore under the hood.
+
+const BACKEND_URL = 'http://127.0.0.1:41732';
+
+/** Helper: get a valid JWT token from the renderer's localStorage (via webContents). */
+async function getAuthToken() {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
   try {
-    const os = await import('os');
-    const path = await import('path');
+    return await mainWindow.webContents.executeJavaScript(
+      `localStorage.getItem('token')`,
+      true
+    );
+  } catch {
+    return null;
+  }
+}
 
-    const getUserDataDir = () => {
-      const platform = process.platform;
-      const homeDir = os.homedir();
+ipcMain.handle('backup:restore', async (_e, filename) => {
+  if (!isServerMode) return { ok: false, error: 'Restore is only available in server mode' };
+  try {
+    const token = await getAuthToken();
+    if (!token) throw new Error('Not authenticated');
 
-      if (platform === 'win32') {
-        return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
-      } else if (platform === 'darwin') {
-        return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
-      } else {
-        return path.join(homeDir, '.config', '@nuqtaplus');
-      }
-    };
+    const { default: http } = await import('http');
+    const url = `${BACKEND_URL}/api/settings/backups/${encodeURIComponent(filename)}/restore`;
 
-    const userDataDir = getUserDataDir();
-    const dbPath = path.join(userDataDir, 'database', 'nuqtaplus.db');
-    const backupDir = path.join(userDataDir, 'database', 'backups');
-    const backupPath = path.join(backupDir, filename);
+    const result = await new Promise((resolve, reject) => {
+      const req = http.request(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+          catch { resolve({ status: res.statusCode, body: data }); }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
 
-    logger.info(`Restoring backup from: ${backupPath} to ${dbPath}`);
-
-    try {
-      await fs.access(backupPath);
-    } catch {
-      throw new Error('ملف النسخة الاحتياطية غير موجود');
-    }
-
-    logger.info('Stopping backend for restore...');
-    await backendManager.StopBackend();
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    logger.info('Copying backup file...');
-    await fs.copyFile(backupPath, dbPath);
-
-    logger.info('Restarting backend...');
-    await backendManager.StartBackend();
-    backendReady = true;
-
+    if (result.status >= 400) throw new Error(result.body?.message || 'Restore failed');
     return { ok: true };
   } catch (error) {
     logger.error('Failed to restore backup:', error);
-    try {
-      if (!backendManager.isRunning()) {
-        await backendManager.StartBackend();
-      }
-    } catch (e) {
-      logger.error('Failed to recover backend after failed restore:', e);
-    }
-
     return { ok: false, error: error.message };
   }
 });
 
-// --- تصدير النسخة الاحتياطية ---
 ipcMain.handle('backup:export', async (_e, filename) => {
+  if (!isServerMode) return { ok: false, error: 'Export is only available in server mode' };
   try {
     const os = await import('os');
-    const path = await import('path');
 
     const getUserDataDir = () => {
       const platform = process.platform;
       const homeDir = os.homedir();
-
-      if (platform === 'win32') {
-        return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
-      } else if (platform === 'darwin') {
-        return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
-      } else {
-        return path.join(homeDir, '.config', '@nuqtaplus');
-      }
+      if (platform === 'win32') return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
+      if (platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
+      return path.join(homeDir, '.config', '@nuqtaplus');
     };
 
-    const userDataDir = getUserDataDir();
-    const backupDir = path.join(userDataDir, 'database', 'backups');
+    const backupDir = path.join(getUserDataDir(), 'backups');
     const sourcePath = path.join(backupDir, filename);
 
     try {
@@ -1186,15 +1230,11 @@ ipcMain.handle('backup:export', async (_e, filename) => {
     const { canceled, filePath: destPath } = await dialog.showSaveDialog(mainWindow, {
       title: 'حفظ النسخة الاحتياطية',
       defaultPath: filename,
-      filters: [{ name: 'Database Backup', extensions: ['db'] }],
+      filters: [{ name: 'Database Backup', extensions: ['dump'] }],
     });
 
-    if (canceled || !destPath) {
-      return { ok: false, reason: 'canceled' };
-    }
-
+    if (canceled || !destPath) return { ok: false, reason: 'canceled' };
     await fs.copyFile(sourcePath, destPath);
-
     return { ok: true };
   } catch (error) {
     logger.error('Failed to export backup:', error);
@@ -1202,135 +1242,102 @@ ipcMain.handle('backup:export', async (_e, filename) => {
   }
 });
 
-// --- استيراد النسخة الاحتياطية ---
 ipcMain.handle('backup:import', async () => {
+  if (!isServerMode) return { ok: false, error: 'Import is only available in server mode' };
   try {
     const os = await import('os');
-    const path = await import('path');
 
-    // Logic to match backend/src/utils/database.js
     const getUserDataDir = () => {
       const platform = process.platform;
       const homeDir = os.homedir();
-
-      if (platform === 'win32') {
-        return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
-      } else if (platform === 'darwin') {
-        return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
-      } else {
-        return path.join(homeDir, '.config', '@nuqtaplus');
-      }
+      if (platform === 'win32') return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
+      if (platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
+      return path.join(homeDir, '.config', '@nuqtaplus');
     };
 
-    // 1. Show Open Dialog to select backup file
+    // 1. Show Open Dialog to select backup file (.dump format for PostgreSQL)
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       title: 'استيراد نسخة احتياطية',
-      filters: [{ name: 'Database Backup', extensions: ['db'] }],
+      filters: [{ name: 'Database Backup', extensions: ['dump'] }],
       properties: ['openFile'],
     });
 
-    if (canceled || !filePaths.length) {
-      return { ok: false, reason: 'canceled' };
-    }
+    if (canceled || !filePaths.length) return { ok: false, reason: 'canceled' };
 
     const sourcePath = filePaths[0];
-    const userDataDir = getUserDataDir();
-    const dbPath = path.join(userDataDir, 'database', 'nuqtaplus.db');
+    const backupDir = path.join(getUserDataDir(), 'backups');
 
-    // 2. Verify the source file exists
-    try {
-      await fs.access(sourcePath);
-    } catch {
-      throw new Error('ملف النسخة الاحتياطية غير موجود');
-    }
+    // Ensure backup directory exists
+    await fs.mkdir(backupDir, { recursive: true });
 
-    // 3. Stop Backend first to release database lock
-    logger.info('Stopping backend for database import...');
-    await backendManager.StopBackend();
+    // 2. Copy the selected file into the backups directory
+    const importedFilename = `backup-imported-${Date.now()}.dump`;
+    const destPath = path.join(backupDir, importedFilename);
+    await fs.copyFile(sourcePath, destPath);
 
-    // Wait a bit to ensure file lock is released
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // 3. Restore via backend API
+    const token = await getAuthToken();
+    if (!token) throw new Error('Not authenticated');
 
-    // 4. Replace DB file with imported file
-    logger.info(`Importing backup from: ${sourcePath} to ${dbPath}`);
-    await fs.copyFile(sourcePath, dbPath);
+    const { default: http } = await import('http');
+    const url = `${BACKEND_URL}/api/settings/backups/${encodeURIComponent(importedFilename)}/restore`;
 
-    // 5. Restart Backend
-    logger.info('Restarting backend after import...');
-    await backendManager.StartBackend();
-    backendReady = true;
+    const result = await new Promise((resolve, reject) => {
+      const req = http.request(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+          catch { resolve({ status: res.statusCode, body: data }); }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
 
+    if (result.status >= 400) throw new Error(result.body?.message || 'Import restore failed');
     return { ok: true };
   } catch (error) {
     logger.error('Failed to import backup:', error);
-    // Try to restart backend if it failed
-    try {
-      if (!backendManager.isRunning()) {
-        await backendManager.StartBackend();
-        backendReady = true;
-      }
-    } catch (e) {
-      logger.error('Failed to recover backend after failed import:', e);
-    }
     return { ok: false, error: error.message };
   }
 });
 
 ipcMain.handle('database:clear', async () => {
+  if (!isServerMode) return { ok: false, error: 'Database clear is only available in server mode' };
   try {
-    const { homedir } = await import('os');
-    const oGFs = await import('fs');
+    // Call the backend reset API which truncates all tables
+    const token = await getAuthToken();
+    if (!token) throw new Error('Not authenticated');
 
-    // Logic to match backend/src/utils/database.js
-    const getUserDataDir = () => {
-      const platform = process.platform;
-      if (platform === 'win32') {
-        return path.join(homedir(), 'AppData', 'Roaming', '@nuqtaplus');
-      } else if (platform === 'darwin') {
-        return path.join(homedir(), 'Library', 'Application Support', '@nuqtaplus');
-      } else {
-        return path.join(homedir(), '.config', '@nuqtaplus');
-      }
-    };
+    const { default: http } = await import('http');
+    const url = `${BACKEND_URL}/api/reset`;
 
-    const userDataDir = getUserDataDir();
-    const dbPath = path.join(userDataDir, 'database', 'nuqtaplus.db');
+    const result = await new Promise((resolve, reject) => {
+      const req = http.request(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+          catch { resolve({ status: res.statusCode, body: data }); }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
 
-    // 1. Stop Backend first to release database lock
-    logger.info('Stopping backend for database clear...');
-    await backendManager.StopBackend();
+    if (result.status >= 400) throw new Error(result.body?.message || 'Database clear failed');
 
-    // Wait a bit to ensure file lock is released
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // 2. Delete the database file and related WAL/SHM files
-    try {
-      await oGFs.unlinkSync(dbPath);
-      logger.info('Database file deleted synchronously');
-      logger.info('Database file deleted');
-    } catch (err) {
-      if (err.code !== 'ENOENT') {
-        logger.warn(`Could not delete database file: ${err.message}`);
-      }
-    }
-
-    // 3. Restart Backend - it will recreate the database with fresh schema
-    logger.info('Restarting backend to recreate database...');
-    await backendManager.StartBackend();
-    backendReady = true;
-
-    logger.info('Database cleared successfully');
+    logger.info('Database cleared via backend API');
     return { ok: true };
   } catch (error) {
     logger.error('Failed to clear database:', error);
-    // Try to restart backend if it failed partially
-    try {
-      await backendManager.StartBackend();
-      backendReady = true;
-    } catch (e) {
-      logger.error('Failed to restart backend after clear error:', e);
-    }
-
     return { ok: false, error: error.message };
   }
 });
@@ -1343,47 +1350,73 @@ ipcMain.handle('app:close', () => {
   app.exit(0);
 });
 
-// --- تصدير النسخة الاحتياطية مع تصفير قاعدة البيانات ---
+// --- Export backup and reset database ---
 ipcMain.handle('backup:exportAndCreateNewDatabase', async (_e) => {
+  if (!isServerMode) return { ok: false, error: 'Only available in server mode' };
   try {
-    const os = await import('os');
-    const path = await import('path');
+    const token = await getAuthToken();
+    if (!token) throw new Error('Not authenticated');
 
-    const getUserDataDir = () => {
-      const platform = process.platform;
-      const homeDir = os.homedir();
-      if (platform === 'win32') {
-        return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
-      } else if (platform === 'darwin') {
-        return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
-      }
-      return path.join(homeDir, '.config', '@nuqtaplus');
-    };
+    const { default: http } = await import('http');
 
-    const userDataDir = getUserDataDir();
-    const dbDir = path.join(userDataDir, 'database');
-    const dbPath = path.join(dbDir, 'nuqtaplus.db');
+    // 1. Create a backup via backend API
+    const createResult = await new Promise((resolve, reject) => {
+      const req = http.request(`${BACKEND_URL}/api/settings/backups`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+          catch { resolve({ status: res.statusCode, body: data }); }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
 
+    if (createResult.status >= 400) throw new Error('Failed to create backup');
+    const backupInfo = createResult.body;
+
+    // 2. Let user choose where to save the export
     const saveLocation = await dialog.showSaveDialog(mainWindow, {
       title: 'حفظ النسخة الاحتياطية',
-      defaultPath: `nuqtaplus-backup-${new Date().toISOString().slice(0, 10)}.db`,
-      filters: [{ name: 'Database Backup', extensions: ['db'] }],
+      defaultPath: backupInfo.filename || `nuqtaplus-backup-${new Date().toISOString().slice(0, 10)}.dump`,
+      filters: [{ name: 'Database Backup', extensions: ['dump'] }],
     });
 
     if (saveLocation.canceled || !saveLocation.filePath) {
       return { ok: false, reason: 'canceled' };
     }
 
-    await fs.copyFile(dbPath, saveLocation.filePath);
+    // Copy the backup file to user's chosen location
+    if (backupInfo.path) {
+      await fs.copyFile(backupInfo.path, saveLocation.filePath);
+    }
 
-    logger.info('Stopping backend for new database creation...');
-    await backendManager.StopBackend();
+    // 3. Reset the database via backend API
+    const resetResult = await new Promise((resolve, reject) => {
+      const req = http.request(`${BACKEND_URL}/api/reset`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+          catch { resolve({ status: res.statusCode, body: data }); }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
 
-    logger.info('Deleting current database file...');
-    await fs.unlink(dbPath, { recursive: true });
+    if (resetResult.status >= 400) {
+      logger.warn('Database reset failed after backup export:', resetResult.body);
+    }
 
-    logger.info('New database will be created on next backend start.');
-
+    // 4. Relaunch the app
     BrowserWindow.getAllWindows().forEach((win) => win.destroy());
     app.relaunch();
     app.exit(0);
@@ -1391,16 +1424,6 @@ ipcMain.handle('backup:exportAndCreateNewDatabase', async (_e) => {
   } catch (error) {
     logger.error('Failed to export backup and create new database:', error);
     return { ok: false, error: error.message };
-  } finally {
-    try {
-      if (!backendManager.isRunning()) {
-        logger.info('Restarting backend after new database creation...');
-        await backendManager.StartBackend();
-        backendReady = true;
-      }
-    } catch (e) {
-      logger.error('Failed to restart backend after new database creation:', e);
-    }
   }
 });
 

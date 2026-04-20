@@ -68,11 +68,6 @@ onUnmounted(() => {
 
 <style>
 @import './styles/tailwind.css';
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
 
 .bg-glass {
   backdrop-filter: blur(8px);

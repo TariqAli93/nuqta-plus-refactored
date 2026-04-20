@@ -30,14 +30,42 @@ const getHelpLinkForError = (error) => {
   return null;
 };
 
-// Port 41731 mirrors packages/shared BACKEND_PORT — keep in sync.
+// The base URL is set dynamically by the connection store.
+// In server mode it defaults to localhost:41732; in client mode it
+// comes from the user's saved server configuration.
 const api = axios.create({
-  baseURL: 'http://127.0.0.1:41731/api',
+  baseURL: 'http://127.0.0.1:41732/api', // overridden at runtime by initAxiosBaseUrl()
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+/**
+ * Call once at app startup (after Pinia is ready) to sync the axios
+ * baseURL with the connection store.  Also installs a reactive watcher
+ * so future changes to the server URL propagate automatically.
+ *
+ * @param {import('@/stores/connection').ReturnType<typeof import('@/stores/connection').useConnectionStore>} connectionStore
+ */
+export function initAxiosBaseUrl(connectionStore) {
+  // Set initial baseURL
+  if (connectionStore.apiBaseUrl) {
+    api.defaults.baseURL = connectionStore.apiBaseUrl;
+  }
+
+  // Import watch inline — this function is called after Vue app is ready
+  import('vue').then(({ watch }) => {
+    watch(
+      () => connectionStore.apiBaseUrl,
+      (newUrl) => {
+        if (newUrl) {
+          api.defaults.baseURL = newUrl;
+        }
+      }
+    );
+  });
+}
 
 // Request interceptor
 api.interceptors.request.use(

@@ -1,12 +1,12 @@
 import { defineConfig } from 'drizzle-kit';
-import { dbFilePath } from './src/utils/database.js';
+import { buildDatabaseUrl } from './src/utils/database.js';
 
 export default defineConfig({
   schema: './src/models/index.js',
   out: './drizzle',
-  dialect: 'sqlite',
+  dialect: 'postgresql',
   dbCredentials: {
-    url: dbFilePath || './nuqtaplus.db',
+    url: buildDatabaseUrl(),
   },
   verbose: true,
   strict: true,
