@@ -17,6 +17,8 @@ const PERMISSION_MATRIX = {
   'sales:read': ['admin', 'manager', 'cashier', 'viewer'],
   'sales:update': ['admin', 'manager', 'cashier'], // Cashiers can add payments, managers/admins can restore
   'sales:delete': ['admin', 'manager'], // Only managers and admins can cancel/delete sales
+  // Bypass the recommended credit limit on an installment sale
+  'sales.override_credit_limit': ['admin', 'manager'],
 
   // Products permissions
   'products:create': ['admin', 'manager'],

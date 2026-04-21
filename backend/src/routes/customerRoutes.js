@@ -68,4 +68,24 @@ export default async function customerRoutes(fastify) {
       security: [{ bearerAuth: [] }],
     },
   });
+
+  fastify.get('/:id/credit', {
+    onRequest: [fastify.authenticate, fastify.authorize('customers:read')],
+    handler: customerController.getCreditSnapshot,
+    schema: {
+      description: "Get customer's cached credit score & recommended limit",
+      tags: ['customers'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
+  fastify.post('/:id/credit/recalculate', {
+    onRequest: [fastify.authenticate, fastify.authorize('customers:update')],
+    handler: customerController.recalculateCreditScore,
+    schema: {
+      description: 'Recalculate one customer’s credit score on demand',
+      tags: ['customers'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
 }

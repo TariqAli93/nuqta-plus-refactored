@@ -11,7 +11,8 @@ export class SaleController {
    */
   async create(request, reply) {
     const validatedData = saleSchema.parse(request.body);
-    const sale = await saleService.create(validatedData, request.user.id);
+    // Pass the full user so the service can apply RBAC (credit-limit override).
+    const sale = await saleService.create(validatedData, request.user);
 
     return reply.code(201).send({
       success: true,
@@ -132,7 +133,7 @@ export class SaleController {
 
   async completeDraft(request, reply) {
     const validatedData = saleSchema.parse(request.body);
-    const sale = await saleService.completeDraft(request.params.id, validatedData, request.user.id);
+    const sale = await saleService.completeDraft(request.params.id, validatedData, request.user);
     return reply.send({
       success: true,
       data: sale,
