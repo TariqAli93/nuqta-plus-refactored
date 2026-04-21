@@ -45,8 +45,8 @@ export const productSchema = z.object({
   barcode: z.string().optional(),
   categoryId: z.number().int().positive().optional(),
   description: z.string().optional(),
-  costPrice: z.number().positive('Cost price must be positive'),
-  sellingPrice: z.number().positive('Selling price must be positive'),
+  costPrice: z.coerce.number().positive('Cost price must be positive'),
+  sellingPrice: z.coerce.number().positive('Selling price must be positive'),
   currency: z.enum(['USD', 'IQD'], {
     errorMap: () => ({ message: 'Currency must be USD or IQD' }),
   }),

@@ -2,6 +2,7 @@ import { getDb, saveDatabase } from '../db.js';
 import { products, categories } from '../models/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
 import { eq, like, or, and, desc, lte, sql, inArray } from 'drizzle-orm';
+import alertBus from '../events/alertBus.js';
 
 export class ProductService {
   async create(productData, userId) {
@@ -28,6 +29,7 @@ export class ProductService {
       .returning();
 
     saveDatabase();
+    alertBus.emit('alerts.changed', 'product.created');
 
     return newProduct;
   }
@@ -150,7 +152,11 @@ export class ProductService {
       throw new NotFoundError('Product');
     }
 
-    return product;
+    return {
+      ...product,
+      costPrice: Number(product.costPrice) || 0,
+      sellingPrice: Number(product.sellingPrice) || 0,
+    };
   }
 
   async update(id, productData) {
@@ -169,6 +175,7 @@ export class ProductService {
     }
 
     saveDatabase();
+    alertBus.emit('alerts.changed', 'product.updated');
 
     return updated;
   }
@@ -182,6 +189,7 @@ export class ProductService {
     }
 
     saveDatabase();
+    alertBus.emit('alerts.changed', 'product.deleted');
 
     return { message: 'Product deleted successfully' };
   }
@@ -200,6 +208,7 @@ export class ProductService {
       .returning();
 
     saveDatabase();
+    alertBus.emit('alerts.changed', 'product.stock_updated');
 
     return updated;
   }

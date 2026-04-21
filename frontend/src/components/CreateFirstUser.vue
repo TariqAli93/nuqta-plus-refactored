@@ -213,7 +213,7 @@ const invoiceTypes = [
   { text: 'فاتورة A5', value: 'a5' },
   { text: 'رول حراري 58mm', value: 'roll-58' },
   { text: 'رول حراري 80mm', value: 'roll-80' },
-  { text: 'رول حراري عريض', value: 'roll-88' },
+  { text: 'رول حراري 88mm', value: 'roll-88' },
 ];
 
 const companyData = ref({

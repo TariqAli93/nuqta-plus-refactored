@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getPgConfig, getUserDataDir } from '../utils/database.js';
+import alertBus from '../events/alertBus.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,7 +22,7 @@ function findPgBinary(name) {
 
   for (const base of [programFiles, programFilesX86]) {
     // Check versions 17 down to 12
-    for (let v = 17; v >= 12; v--) {
+    for (let v = 18; v >= 12; v--) {
       pgDirs.push(join(base, 'PostgreSQL', String(v), 'bin'));
     }
   }
@@ -164,6 +165,7 @@ export class BackupService {
       // Otherwise it succeeded with warnings — that's normal for --clean --if-exists.
     }
 
+    alertBus.emit('alerts.changed', 'backup.restored');
     return { success: true, message: `Database restored from ${filename}` };
   }
 

@@ -32,7 +32,11 @@ export class CategoryController {
   }
 
   async update(request, reply) {
-    const validatedData = categorySchema.partial().parse(request.body);
+    const validatedData = categorySchema.partial().parse({
+      ...request.body,
+      name: request.body.name.trim(),
+      description: request.body.description?.trim(),
+    });
     const category = await categoryService.update(request.params.id, validatedData);
     return reply.send({
       success: true,

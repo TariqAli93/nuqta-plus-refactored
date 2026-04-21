@@ -14,6 +14,7 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { generateInvoiceNumber, calculateSaleTotals } from '../utils/helpers.js';
 import { eq, desc, and, or, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
 import settingsService from './settingsService.js';
+import alertBus from '../events/alertBus.js';
 
 /**
  * Run a callback inside a PostgreSQL transaction.
@@ -230,6 +231,7 @@ export class SaleService {
       return newSale.id;
     });
 
+    alertBus.emit('alerts.changed', 'sale.created');
     return await this.getById(newSaleId);
   }
 
@@ -502,6 +504,7 @@ export class SaleService {
       }
     });
 
+    alertBus.emit('alerts.changed', 'payment.added');
     return await this.getById(saleId);
   }
 
@@ -512,7 +515,7 @@ export class SaleService {
       throw new ValidationError('Sale is already cancelled');
     }
 
-    return await withTransaction(async (tx) => {
+    const result = await withTransaction(async (tx) => {
       // Atomic stock restore
       for (const item of sale.items) {
         if (item.productId) {
@@ -556,6 +559,9 @@ export class SaleService {
 
       return updated;
     });
+
+    alertBus.emit('alerts.changed', 'sale.cancelled');
+    return result;
   }
 
   async getSalesReport(filters = {}) {
@@ -736,6 +742,7 @@ export class SaleService {
       }
     });
 
+    alertBus.emit('alerts.changed', 'payment.removed');
     return payment;
   }
 
@@ -753,6 +760,7 @@ export class SaleService {
       await tx.delete(sales).where(eq(sales.id, saleId));
     });
 
+    alertBus.emit('alerts.changed', 'sale.removed');
     return sale;
   }
 
@@ -767,7 +775,7 @@ export class SaleService {
       throw new ValidationError('Only cancelled sales can be restored');
     }
 
-    return await withTransaction(async (tx) => {
+    const result = await withTransaction(async (tx) => {
       // Atomic stock decrement
       for (const item of sale.items) {
         if (item.productId) {
@@ -812,6 +820,9 @@ export class SaleService {
 
       return updated;
     });
+
+    alertBus.emit('alerts.changed', 'sale.restored');
+    return result;
   }
 
   async createDraft(saleData, userId) {
@@ -1059,6 +1070,7 @@ export class SaleService {
       return updatedSale.id;
     });
 
+    alertBus.emit('alerts.changed', 'draft.completed');
     return await this.getById(updatedSaleId);
   }
 

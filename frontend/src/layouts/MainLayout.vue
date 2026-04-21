@@ -322,7 +322,7 @@ const toggleTheme = () => {
 };
 
 const handleLogout = () => {
-  alertStore.stopPolling();
+  alertStore.disconnectRealtime();
   authStore.logout();
   router.push({ name: 'Login' });
 };
@@ -413,9 +413,9 @@ useKeyboardShortcuts();
 
 // Lifecycle hooks
 onMounted(() => {
-  // Start polling for alerts when authenticated
+  // Connect realtime alerts when authenticated
   if (authStore.isAuthenticated) {
-    alertStore.startPolling();
+    alertStore.connectRealtime();
   }
 
   // Update navigation drawer sub-items open state based on current route
@@ -425,8 +425,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  // Stop polling when component unmounts
-  alertStore.stopPolling();
+  alertStore.disconnectRealtime();
 });
 </script>
 

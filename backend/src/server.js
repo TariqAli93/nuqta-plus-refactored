@@ -10,6 +10,7 @@ const __dirname = dirname(__filename);
 const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
 const version = packageJson.version || '1.0.0';
 // Plugins
+import websocket from '@fastify/websocket';
 import securityPlugin from './plugins/security.js';
 import authPlugin from './plugins/auth.js';
 import errorHandlerPlugin from './plugins/errorHandler.js';
@@ -25,6 +26,7 @@ import currencyRoutes from './routes/currencyRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import backupRoutes from './routes/backupRoutes.js';
 import alertRoutes from './routes/alertRoutes.js';
+import alertWsRoutes from './routes/alertWsRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
 import resetRoutes from './routes/resetRoutes.js';
 
@@ -60,6 +62,7 @@ const start = async () => {
       const { default: debuggerPlugin } = await import('./plugins/debugger.js');
       await fastify.register(debuggerPlugin);
     }
+    await fastify.register(websocket);
     await fastify.register(securityPlugin);
     await fastify.register(authPlugin);
     await fastify.register(errorHandlerPlugin);
@@ -116,6 +119,7 @@ const start = async () => {
     await fastify.register(settingsRoutes, { prefix: '/api/settings' });
     await fastify.register(backupRoutes, { prefix: '/api/settings/backups' });
     await fastify.register(alertRoutes, { prefix: '/api/alerts' });
+    await fastify.register(alertWsRoutes, { prefix: '/api/alerts' });
     await fastify.register(auditRoutes, { prefix: '/api/audit' });
     await fastify.register(resetRoutes, { prefix: '/api/reset' });
     // Only register debug routes in development

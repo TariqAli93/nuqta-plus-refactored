@@ -63,6 +63,7 @@ export const useProductStore = defineStore('product', {
         const response = await api.get(`/products/${id}`);
 
         this.currentProduct = response?.data || null;
+        console.log(this.currentProduct);
         return response;
       } catch (error) {
         notificationStore.error(error.response?.data?.message || 'فشل تحميل بيانات المنتج');

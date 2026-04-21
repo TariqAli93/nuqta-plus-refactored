@@ -51,7 +51,6 @@
             <v-text-field
               v-model="formData.name"
               label="اسم التصنيف"
-              :rules="[rules.required]"
               variant="outlined"
             ></v-text-field>
             <v-textarea v-model="formData.description" variant="outlined" class="mt-4" label="الوصف" rows="2"></v-textarea>
@@ -109,10 +108,6 @@ const headers = [
 ];
 
 const isEdit = computed(() => !!selectedCategory.value);
-
-const rules = {
-  required: (v) => !!v || 'هذا الحقل مطلوب',
-};
 
 const openDialog = (category = null) => {
   if (category) {

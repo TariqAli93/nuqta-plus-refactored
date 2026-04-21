@@ -168,10 +168,10 @@
                   <div class="mb-2 text-subtitle-2 text-medium-emphasis">فيسبوك</div>
                   <div class="text-body-1 font-weight-bold">
                     <a
-                      href="https://www.facebook.com/codel.apps/"
+                      href="https://www.facebook.com/codelsapp/"
                       target="_blank"
                       class="text-decoration-none"
-                      @click.prevent="openExternal('https://www.facebook.com/codel.apps/')"
+                      @click.prevent="openExternal('https://www.facebook.com/codelsapp/')"
                     >
                       Codel
                     </a>

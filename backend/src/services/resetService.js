@@ -1,4 +1,5 @@
 import { getPool } from '../db.js';
+import alertBus from '../events/alertBus.js';
 
 export default class ResetService {
   async resetDatabase() {
@@ -31,6 +32,7 @@ export default class ResetService {
       client.release();
     }
 
+    alertBus.emit('alerts.changed', 'database.reset');
     return { success: true, message: 'Database reset successfully.' };
   }
 }
