@@ -75,7 +75,7 @@ async function gatherCustomerMetrics(customerId, db) {
       // paid on time means paid_date <= due_date (when both present)
       onTimePaid: sql`COALESCE(COUNT(CASE WHEN ${installments.status} = 'paid' AND ${installments.paidDate} IS NOT NULL AND ${installments.paidDate} <= ${installments.dueDate} THEN 1 END), 0)`,
       // late payments: paid after due, or still pending but overdue
-      latePaid: sql`COALESCE(COUNT(CASE WHEN (${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate}) OR (${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE) THEN 1 END), 0)`,
+      latePaid: sql`COALESCE(COUNT(CASE WHEN (${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate}) OR (${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE::text) THEN 1 END), 0)`,
       // average delay (days) on paid-late installments
       avgDelayDays: sql`COALESCE(AVG(CASE WHEN ${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate} THEN (${installments.paidDate}::date - ${installments.dueDate}::date) END), 0)`,
     })
