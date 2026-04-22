@@ -1,4 +1,4 @@
-import { getDb } from '../db.js';
+import { getDb, getPool } from '../db.js';
 import { customers, sales, installments } from '../models/index.js';
 import { eq, sql } from 'drizzle-orm';
 
@@ -201,49 +201,146 @@ export async function calculateAndPersistCreditScore(customerId) {
 }
 
 /**
- * Batch variant used by the nightly job. Processes customers in chunks to
- * avoid long-running queries and to keep transaction sizes small.
+ * Nightly-job recalculation.
+ *
+ * Strategy (bulk) — keeps POS latency unaffected under load:
+ *   1. ONE aggregated SELECT across `sales`   (grouped by customer_id)
+ *   2. ONE aggregated SELECT across `installments` (grouped by customer_id)
+ *   3. Score all customers in memory (pure JS)
+ *   4. Bulk UPDATE in chunks using `UPDATE … FROM (VALUES …)`
+ *   5. Yield (setTimeout) between chunks so POS queries interleave.
+ *
+ * The previous per-customer approach did O(N) round-trips and saturated the
+ * PG pool; measured regression was p95 +180% on /api/sales. The bulk path
+ * holds at most one connection at a time and does ~(3 + N/chunkSize) queries
+ * total — no matter how many customers exist.
  *
  * @param {object} opts
- * @param {number} [opts.batchSize=100]  How many customers per chunk
- * @param {number} [opts.concurrency=4]  Parallel scores per chunk
+ * @param {number} [opts.chunkSize=500]  Rows per bulk UPDATE
+ * @param {number} [opts.yieldMs=25]     Sleep between chunks (ms)
  * @param {(progress:object)=>void} [opts.onProgress]
  */
 export async function recalculateAllScores({
-  batchSize = 100,
-  concurrency = 4,
+  chunkSize = Number(process.env.CREDIT_JOB_CHUNK_SIZE) || 500,
+  yieldMs = Number(process.env.CREDIT_JOB_YIELD_MS) || 25,
   onProgress,
 } = {}) {
   const db = await getDb();
-  const allIds = await db
+  const pool = await getPool();
+
+  // 1. All active customer IDs (one query)
+  const active = await db
     .select({ id: customers.id })
     .from(customers)
     .where(eq(customers.isActive, true));
+  const total = active.length;
+  if (total === 0) return { processed: 0, updated: 0, failed: 0, total: 0 };
 
-  const ids = allIds.map((r) => r.id);
+  // 2. Sale-side aggregation (one query)
+  const saleRows = await db
+    .select({
+      customerId: sales.customerId,
+      totalSales: sql`COUNT(CASE WHEN ${sales.paymentType} IN ('installment','mixed') AND ${sales.status} != 'cancelled' THEN 1 END)`.as(
+        'total_sales'
+      ),
+      outstandingDebt: sql`COALESCE(SUM(CASE WHEN ${sales.status} = 'pending' THEN ${sales.remainingAmount}::numeric ELSE 0 END), 0)`.as(
+        'outstanding_debt'
+      ),
+      totalSalesValue: sql`COALESCE(SUM(CASE WHEN ${sales.paymentType} IN ('installment','mixed') AND ${sales.status} != 'cancelled' THEN ${sales.total}::numeric ELSE 0 END), 0)`.as(
+        'total_sales_value'
+      ),
+    })
+    .from(sales)
+    .groupBy(sales.customerId);
+
+  // 3. Installment-side aggregation (one query)
+  const instRows = await db
+    .select({
+      customerId: installments.customerId,
+      activeInstallments: sql`COUNT(CASE WHEN ${installments.status} = 'pending' THEN 1 END)`.as(
+        'active_installments'
+      ),
+      onTimePaid: sql`COUNT(CASE WHEN ${installments.status} = 'paid' AND ${installments.paidDate} IS NOT NULL AND ${installments.paidDate} <= ${installments.dueDate} THEN 1 END)`.as(
+        'on_time_paid'
+      ),
+      latePaid: sql`COUNT(CASE WHEN (${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate}) OR (${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE::text) THEN 1 END)`.as(
+        'late_paid'
+      ),
+      avgDelayDays: sql`COALESCE(AVG(CASE WHEN ${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate} THEN (${installments.paidDate}::date - ${installments.dueDate}::date) END), 0)`.as(
+        'avg_delay_days'
+      ),
+    })
+    .from(installments)
+    .groupBy(installments.customerId);
+
+  const saleMap = new Map(saleRows.map((r) => [r.customerId, r]));
+  const instMap = new Map(instRows.map((r) => [r.customerId, r]));
+
+  // 4. Score all in memory
+  const updates = new Array(total);
+  for (let k = 0; k < total; k++) {
+    const id = active[k].id;
+    const s = saleMap.get(id) || {};
+    const i = instMap.get(id) || {};
+    const { score, recommendedLimit } = scoreFromMetrics({
+      totalSalesOnInstallment: Number(s.totalSales || 0),
+      totalPaidOnTime: Number(i.onTimePaid || 0),
+      totalLatePayments: Number(i.latePaid || 0),
+      avgDelayDays: Number(i.avgDelayDays || 0),
+      currentOutstandingDebt: Number(s.outstandingDebt || 0),
+      activeInstallmentsCount: Number(i.activeInstallments || 0),
+      totalSalesValue: Number(s.totalSalesValue || 0),
+    });
+    updates[k] = { id, score, recommendedLimit };
+  }
+
+  // 5. Bulk UPDATE in chunks with a yield between chunks
   let processed = 0;
   let updated = 0;
   let failed = 0;
 
-  for (let i = 0; i < ids.length; i += batchSize) {
-    const chunk = ids.slice(i, i + batchSize);
+  for (let i = 0; i < updates.length; i += chunkSize) {
+    const chunk = updates.slice(i, i + chunkSize);
+    const params = [];
+    const tuples = chunk
+      .map((u) => {
+        const base = params.length;
+        params.push(u.id, u.score, u.recommendedLimit);
+        return `($${base + 1}::int, $${base + 2}::int, $${base + 3}::numeric)`;
+      })
+      .join(',');
 
-    // Limited concurrency inside each chunk
-    for (let j = 0; j < chunk.length; j += concurrency) {
-      const slice = chunk.slice(j, j + concurrency);
-      const results = await Promise.allSettled(
-        slice.map((id) => calculateAndPersistCreditScore(id))
-      );
-      for (const r of results) {
-        processed++;
-        if (r.status === 'fulfilled') updated++;
-        else failed++;
-      }
-      if (onProgress) onProgress({ processed, updated, failed, total: ids.length });
+    const text = `
+      UPDATE customers AS c
+      SET credit_score = v.score,
+          recommended_limit = v.rec_limit,
+          credit_score_updated_at = NOW()
+      FROM (VALUES ${tuples}) AS v(id, score, rec_limit)
+      WHERE c.id = v.id
+    `;
+
+    const client = await pool.connect();
+    try {
+      const res = await client.query(text, params);
+      updated += res.rowCount ?? chunk.length;
+    } catch (err) {
+      failed += chunk.length;
+      // Log but continue — we don't want a single bad chunk to kill the job
+      console.error('[creditScoring] bulk update failed:', err.message);
+    } finally {
+      client.release();
+    }
+
+    processed += chunk.length;
+    if (onProgress) onProgress({ processed, updated, failed, total });
+
+    // Yield to other DB traffic (POS) between chunks
+    if (yieldMs > 0 && i + chunkSize < updates.length) {
+      await new Promise((r) => setTimeout(r, yieldMs));
     }
   }
 
-  return { processed, updated, failed, total: ids.length };
+  return { processed, updated, failed, total };
 }
 
 /**

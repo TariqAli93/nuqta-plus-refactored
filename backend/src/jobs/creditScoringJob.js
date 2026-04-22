@@ -10,7 +10,7 @@ import auditService from '../services/auditService.js';
  * The job is batched + concurrency-limited inside recalculateAllScores to
  * keep POS response time unaffected (see perf-benchmark.js).
  */
-export async function runCreditScoringJob({ logger, batchSize, concurrency } = {}) {
+export async function runCreditScoringJob({ logger, chunkSize, yieldMs } = {}) {
   const log = logger || console;
   const startedAt = Date.now();
   log.info?.('[creditScoringJob] starting');
@@ -18,8 +18,8 @@ export async function runCreditScoringJob({ logger, batchSize, concurrency } = {
   let result;
   try {
     result = await recalculateAllScores({
-      batchSize: batchSize ?? Number(process.env.CREDIT_JOB_BATCH_SIZE) ?? 100,
-      concurrency: concurrency ?? Number(process.env.CREDIT_JOB_CONCURRENCY) ?? 4,
+      chunkSize: chunkSize ?? Number(process.env.CREDIT_JOB_CHUNK_SIZE) ?? 500,
+      yieldMs: yieldMs ?? Number(process.env.CREDIT_JOB_YIELD_MS) ?? 25,
     });
     const durationMs = Date.now() - startedAt;
     log.info?.(
