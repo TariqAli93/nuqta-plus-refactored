@@ -154,6 +154,15 @@
               ></v-text-field>
             </v-col>
             <v-col cols="12" md="3">
+              <v-text-field
+                v-model.number="formData.lowStockThreshold"
+                label="عتبة التنبيه (منخفض المخزون)"
+                type="number"
+                hint="يُستخدم للتنبيه عن المخزون المنخفض في كل مخزن"
+                persistent-hint
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" md="3">
               <v-select
                 v-model="formData.status"
                 :items="statusOptions"
@@ -265,6 +274,7 @@ const formData = ref({
   currency: settingsStore.settings?.defaultCurrency || 'IQD',
   stock: settingsStore.settings?.defaultStock || 0,
   minStock: settingsStore.settings?.defaultMinStock || 0,
+  lowStockThreshold: settingsStore.settings?.defaultMinStock || 0,
   status: settingsStore.settings?.defaultStatus || 'available',
 });
 

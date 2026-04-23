@@ -114,7 +114,7 @@ export class SaleController {
   }
 
   async restoreSale(request, reply) {
-    const sale = await saleService.restoreSale(request.params.id);
+    const sale = await saleService.restoreSale(request.params.id, request.user.id);
     return reply.send({
       success: true,
       data: sale,

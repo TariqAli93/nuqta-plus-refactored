@@ -21,6 +21,21 @@ export function useNavigationMenu() {
       to: '/products',
       permission: 'view:products',
     },
+    {
+      title: 'المخزون',
+      icon: 'mdi-warehouse',
+      to: '/inventory',
+      permission: null,
+      group: {
+        items: [
+          { title: 'نظرة عامة', icon: 'mdi-chart-box-outline', to: '/inventory', permission: null },
+          { title: 'حركات المخزون', icon: 'mdi-history', to: '/inventory/movements', permission: null },
+          { title: 'نقل بين المخازن', icon: 'mdi-transfer', to: '/inventory/transfer', permission: null },
+          { title: 'منخفض المخزون', icon: 'mdi-alert', to: '/inventory/low-stock', permission: null },
+          { title: 'الفروع والمخازن', icon: 'mdi-store', to: '/inventory/settings', permission: 'view:products' },
+        ],
+      },
+    },
     { title: 'التصنيفات', icon: 'mdi-shape', to: '/categories', permission: 'view:categories' },
     {
       title: 'التقارير',

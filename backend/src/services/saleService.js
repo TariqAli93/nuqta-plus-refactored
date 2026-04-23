@@ -8,6 +8,9 @@ import {
   payments,
   installments,
   users,
+  warehouses,
+  branches,
+  productStock,
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -18,6 +21,7 @@ import alertBus from '../events/alertBus.js';
 import { hasPermission } from '../auth/permissionMatrix.js';
 import { getCustomerCreditSnapshot } from './creditScoringService.js';
 import auditService from './auditService.js';
+import { InventoryService } from './inventoryService.js';
 
 // Threshold below which a customer is considered "high risk" for an alert
 const HIGH_RISK_SCORE_THRESHOLD = 50;
@@ -132,6 +136,43 @@ function n(val) {
   return Number(val);
 }
 
+/**
+ * Resolve the branch + warehouse pair for a sale. If the caller omitted them,
+ * fall back to the first active warehouse (keeps the single-warehouse flow
+ * working transparently). Throws if nothing is configured yet.
+ */
+async function resolveBranchWarehouse({ branchId, warehouseId }) {
+  const db = await getDb();
+
+  if (warehouseId) {
+    const [wh] = await db
+      .select({ id: warehouses.id, branchId: warehouses.branchId, isActive: warehouses.isActive })
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId))
+      .limit(1);
+    if (!wh) throw new ValidationError('Warehouse not found');
+    if (!wh.isActive) throw new ValidationError('Warehouse is inactive');
+    if (branchId && branchId !== wh.branchId) {
+      throw new ValidationError('Warehouse does not belong to the specified branch');
+    }
+    return { branchId: wh.branchId, warehouseId: wh.id };
+  }
+
+  // Fall back to the first active warehouse
+  const [fallback] = await db
+    .select({ id: warehouses.id, branchId: warehouses.branchId })
+    .from(warehouses)
+    .where(eq(warehouses.isActive, true))
+    .orderBy(warehouses.id)
+    .limit(1);
+  if (!fallback) {
+    throw new ValidationError(
+      'No active warehouse configured — create a branch/warehouse before recording sales'
+    );
+  }
+  return { branchId: fallback.branchId, warehouseId: fallback.id };
+}
+
 export class SaleService {
   async create(saleData, user) {
     // Backward-compat: callers previously passed userId (number). Normalise.
@@ -185,12 +226,20 @@ export class SaleService {
       paymentType: saleData.paymentType,
     });
 
+    // Resolve branch + warehouse. Keeps existing callers working without changes.
+    const { branchId, warehouseId } = await resolveBranchWarehouse({
+      branchId: saleData.branchId,
+      warehouseId: saleData.warehouseId,
+    });
+
     const newSaleId = await withTransaction(async (tx) => {
       const [newSale] = await tx
         .insert(sales)
         .values({
           invoiceNumber,
           customerId,
+          branchId,
+          warehouseId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
           tax: String(totals.tax),
@@ -208,6 +257,7 @@ export class SaleService {
         })
         .returning();
 
+      const stockItems = [];
       for (const item of saleData.items) {
         const [product] = await tx
           .select()
@@ -217,12 +267,6 @@ export class SaleService {
 
         if (!product) {
           throw new NotFoundError(`Product with ID ${item.productId} not found`);
-        }
-
-        if (product.stock < item.quantity) {
-          throw new ValidationError(
-            `Insufficient stock for product: ${product.name}. Available: ${product.stock}, Required: ${item.quantity}`
-          );
         }
 
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
@@ -238,15 +282,17 @@ export class SaleService {
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
         });
 
-        // Atomic stock decrement — safe under concurrent access
-        await tx
-          .update(products)
-          .set({
-            stock: sql`${products.stock} - ${item.quantity}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(products.id, item.productId));
+        stockItems.push({ productId: item.productId, quantity: item.quantity });
       }
+
+      // Per-warehouse stock deduction via inventoryService.
+      // Throws ValidationError on insufficient stock and rolls back the tx.
+      await InventoryService.applySaleStockMovement(tx, {
+        saleId: newSale.id,
+        warehouseId,
+        items: stockItems,
+        userId,
+      });
 
       if (paidAmount > 0) {
         await tx.insert(payments).values({
@@ -408,6 +454,10 @@ export class SaleService {
         customerId: sales.customerId,
         customerName: customers.name,
         customerPhone: customers.phone,
+        branchId: sales.branchId,
+        branchName: branches.name,
+        warehouseId: sales.warehouseId,
+        warehouseName: warehouses.name,
         subtotal: sales.subtotal,
         discount: sales.discount,
         tax: sales.tax,
@@ -427,6 +477,8 @@ export class SaleService {
       .from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
       .leftJoin(users, eq(sales.createdBy, users.id))
+      .leftJoin(branches, eq(sales.branchId, branches.id))
+      .leftJoin(warehouses, eq(sales.warehouseId, warehouses.id))
       .where(eq(sales.id, id))
       .limit(1);
 
@@ -595,7 +647,7 @@ export class SaleService {
     return await this.getById(saleId);
   }
 
-  async cancel(id, _userId) {
+  async cancel(id, userId) {
     const sale = await this.getById(id);
 
     if (sale.status === 'cancelled') {
@@ -603,18 +655,15 @@ export class SaleService {
     }
 
     const result = await withTransaction(async (tx) => {
-      // Atomic stock restore
-      for (const item of sale.items) {
-        if (item.productId) {
-          await tx
-            .update(products)
-            .set({
-              stock: sql`${products.stock} + ${item.quantity}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(products.id, item.productId));
-        }
-      }
+      // Per-warehouse stock restore via inventoryService (records sale_cancel
+      // movement). Legacy sales with no warehouseId are skipped safely.
+      await InventoryService.restoreSaleStockMovement(tx, {
+        saleId: sale.id,
+        warehouseId: sale.warehouseId,
+        items: sale.items.filter((i) => i.productId),
+        userId,
+        movementType: 'sale_cancel',
+      });
 
       if (sale.customerId && sale.remainingAmount > 0) {
         await tx
@@ -851,7 +900,7 @@ export class SaleService {
     return sale;
   }
 
-  async restoreSale(saleId) {
+  async restoreSale(saleId, userId) {
     const sale = await this.getById(saleId);
 
     if (!sale) {
@@ -863,17 +912,15 @@ export class SaleService {
     }
 
     const result = await withTransaction(async (tx) => {
-      // Atomic stock decrement
-      for (const item of sale.items) {
-        if (item.productId) {
-          await tx
-            .update(products)
-            .set({
-              stock: sql`${products.stock} - ${item.quantity}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(products.id, item.productId));
-        }
+      if (sale.warehouseId) {
+        await InventoryService.applySaleStockMovement(tx, {
+          saleId: sale.id,
+          warehouseId: sale.warehouseId,
+          items: sale.items
+            .filter((i) => i.productId)
+            .map((i) => ({ productId: i.productId, quantity: i.quantity })),
+          userId,
+        });
       }
 
       if (sale.customerId && sale.remainingAmount > 0) {
@@ -948,6 +995,9 @@ export class SaleService {
     if (saleData.customerId !== undefined && saleData.customerId !== null) {
       draftValues.customerId = saleData.customerId;
     }
+
+    if (saleData.branchId) draftValues.branchId = saleData.branchId;
+    if (saleData.warehouseId) draftValues.warehouseId = saleData.warehouseId;
 
     const [newDraft] = await db.insert(sales).values(draftValues).returning();
 
@@ -1048,6 +1098,11 @@ export class SaleService {
       paymentType: saleData.paymentType || draft.paymentType,
     });
 
+    const { branchId, warehouseId } = await resolveBranchWarehouse({
+      branchId: saleData.branchId || draft.branchId,
+      warehouseId: saleData.warehouseId || draft.warehouseId,
+    });
+
     const updatedSaleId = await withTransaction(async (tx) => {
       await tx.delete(saleItems).where(eq(saleItems.saleId, draftId));
 
@@ -1055,6 +1110,8 @@ export class SaleService {
         .update(sales)
         .set({
           customerId: saleData.customerId || draft.customerId,
+          branchId,
+          warehouseId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
           tax: String(totals.tax),
@@ -1073,6 +1130,7 @@ export class SaleService {
         .where(eq(sales.id, draftId))
         .returning();
 
+      const stockItems = [];
       for (const item of saleData.items) {
         const [product] = await tx
           .select()
@@ -1082,12 +1140,6 @@ export class SaleService {
 
         if (!product) {
           throw new ValidationError(`Product with ID ${item.productId} not found`);
-        }
-
-        if (product.stock < item.quantity) {
-          throw new ValidationError(
-            `Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`
-          );
         }
 
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
@@ -1103,15 +1155,15 @@ export class SaleService {
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
         });
 
-        // Atomic stock decrement
-        await tx
-          .update(products)
-          .set({
-            stock: sql`${products.stock} - ${item.quantity}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(products.id, item.productId));
+        stockItems.push({ productId: item.productId, quantity: item.quantity });
       }
+
+      await InventoryService.applySaleStockMovement(tx, {
+        saleId: updatedSale.id,
+        warehouseId,
+        items: stockItems,
+        userId,
+      });
 
       if (paidAmount > 0) {
         const customerId = saleData.customerId || draft.customerId || null;

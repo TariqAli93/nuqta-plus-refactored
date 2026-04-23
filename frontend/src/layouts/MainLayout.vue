@@ -103,6 +103,8 @@
 
         <v-spacer></v-spacer>
 
+        <BranchWarehouseSelector v-if="!isMobile" class="mx-3" />
+
         <v-text-field
           v-if="!isMobile"
           class="cursor-pointer ml-3"
@@ -232,6 +234,7 @@ import { useTheme, useDisplay } from 'vuetify';
 import { useAuthStore } from '@/stores/auth';
 import { useAlertStore } from '@/stores/alert';
 import QuickSearch from '@/components/QuickSearch.vue';
+import BranchWarehouseSelector from '@/components/BranchWarehouseSelector.vue';
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { useNavigationMenu } from '@/composables/useNavigationMenu';
 

@@ -1,4 +1,14 @@
-import { pgTable, serial, text, integer, boolean, numeric, timestamp } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  serial,
+  text,
+  integer,
+  boolean,
+  numeric,
+  timestamp,
+  uniqueIndex,
+  index,
+} from 'drizzle-orm/pg-core';
 
 // ── Users ─────────────────────────────────────────────────────────────────
 export const users = pgTable('users', {
@@ -61,17 +71,93 @@ export const products = pgTable('products', {
   unit: text('unit').default('piece'),
   supplier: text('supplier'),
   status: text('status').notNull().default('available'),
+  // Inventory: per-warehouse low-stock threshold. Falls back to minStock when null.
+  lowStockThreshold: integer('low_stock_threshold').default(0),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   createdBy: integer('created_by').references(() => users.id),
 });
 
+// ── Branches ──────────────────────────────────────────────────────────────
+export const branches = pgTable('branches', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  address: text('address'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ── Warehouses ────────────────────────────────────────────────────────────
+export const warehouses = pgTable('warehouses', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  branchId: integer('branch_id')
+    .notNull()
+    .references(() => branches.id),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ── Product Stock (per warehouse) ─────────────────────────────────────────
+export const productStock = pgTable(
+  'product_stock',
+  {
+    id: serial('id').primaryKey(),
+    productId: integer('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    warehouseId: integer('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id, { onDelete: 'cascade' }),
+    quantity: integer('quantity').notNull().default(0),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    productWarehouseIdx: uniqueIndex('product_stock_product_warehouse_idx').on(
+      t.productId,
+      t.warehouseId
+    ),
+  })
+);
+
+// ── Stock Movements ───────────────────────────────────────────────────────
+export const stockMovements = pgTable(
+  'stock_movements',
+  {
+    id: serial('id').primaryKey(),
+    productId: integer('product_id')
+      .notNull()
+      .references(() => products.id),
+    warehouseId: integer('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    // 'sale' | 'sale_cancel' | 'sale_return' | 'transfer_in' | 'transfer_out'
+    //  | 'manual_adjustment_in' | 'manual_adjustment_out' | 'opening_balance'
+    movementType: text('movement_type').notNull(),
+    quantityChange: integer('quantity_change').notNull(),
+    quantityBefore: integer('quantity_before').notNull(),
+    quantityAfter: integer('quantity_after').notNull(),
+    referenceType: text('reference_type'), // 'sale' | 'transfer' | 'adjustment' | null
+    referenceId: integer('reference_id'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow(),
+    createdBy: integer('created_by').references(() => users.id),
+  },
+  (t) => ({
+    warehouseIdx: index('stock_movements_warehouse_idx').on(t.warehouseId),
+    productIdx: index('stock_movements_product_idx').on(t.productId),
+    createdAtIdx: index('stock_movements_created_at_idx').on(t.createdAt),
+  })
+);
+
 // ── Sales ─────────────────────────────────────────────────────────────────
 export const sales = pgTable('sales', {
   id: serial('id').primaryKey(),
   invoiceNumber: text('invoice_number').notNull().unique(),
   customerId: integer('customer_id').references(() => customers.id),
+  branchId: integer('branch_id').references(() => branches.id),
+  warehouseId: integer('warehouse_id').references(() => warehouses.id),
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
   discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),
   tax: numeric('tax', { precision: 18, scale: 4 }).default('0'),

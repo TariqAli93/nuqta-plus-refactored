@@ -80,6 +80,13 @@ const PERMISSION_MATRIX = {
   'audit:read': ['admin'],
   'audit:delete': ['admin'],
   'view:audit': ['admin'],
+
+  // Inventory permissions
+  'inventory:read': ['admin', 'manager', 'cashier', 'viewer'],
+  'inventory:adjust': ['admin', 'manager'],
+  'inventory:transfer': ['admin', 'manager'],
+  'inventory:manage': ['admin', 'manager'], // branch/warehouse management
+  'view:inventory': ['admin', 'manager', 'cashier', 'viewer'],
 };
 
 /**

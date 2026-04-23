@@ -94,9 +94,18 @@
           />
         </template>
         <template #[`item.stock`]="{ item }">
-          <v-chip :color="item.stock <= item.minStock ? 'error' : 'success'" size="small">
-            {{ item.stock }}
-          </v-chip>
+          <div class="flex items-center gap-1">
+            <v-chip
+              :color="isLowStock(item) ? 'error' : 'success'"
+              size="small"
+              :title="`المتوفر في المخزن المحدد: ${resolvedStock(item)}`"
+            >
+              {{ resolvedStock(item) }}
+            </v-chip>
+            <span v-if="item.totalStock != null" class="text-caption text-medium-emphasis">
+              / {{ item.totalStock }} إجمالي
+            </span>
+          </div>
         </template>
         <template #[`item.sellingPrice`]="{ item }">
           {{ formatNumber(item.sellingPrice) }} {{ item.currency }}
@@ -154,10 +163,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useProductStore } from '@/stores/product';
 import { useCategoryStore } from '@/stores/category';
 import { useAuthStore } from '@/stores/auth';
+import { useInventoryStore } from '@/stores/inventory';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
@@ -170,6 +180,7 @@ import { useNotificationStore } from '@/stores/notification';
 const productStore = useProductStore();
 const categoryStore = useCategoryStore();
 const authStore = useAuthStore();
+const inventoryStore = useInventoryStore();
 
 const userRole = computed(() => authStore.user?.role);
 const canManageProducts = computed(() =>
@@ -226,11 +237,30 @@ const formatNumber = (value) => {
   });
 };
 
+const resolvedStock = (item) => {
+  if (inventoryStore.selectedWarehouseId && item.warehouseStock != null) {
+    return item.warehouseStock;
+  }
+  return item.totalStock != null ? item.totalStock : item.stock;
+};
+
+const isLowStock = (item) => {
+  const qty = resolvedStock(item);
+  const threshold =
+    item.lowStockThreshold && item.lowStockThreshold > 0
+      ? item.lowStockThreshold
+      : item.minStock || 0;
+  return qty <= threshold;
+};
+
+const currentWarehouseId = () => inventoryStore.selectedWarehouseId || undefined;
+
 const handleSearch = () => {
   productStore.pagination.page = 1;
   productStore.fetch({
     search: search.value,
     categoryId: selectedCategory.value,
+    warehouseId: currentWarehouseId(),
     page: 1,
     limit: productStore.pagination.limit,
   });
@@ -259,6 +289,7 @@ const changePage = (page) => {
   productStore.fetch({
     search: search.value ?? '',
     categoryId: selectedCategory.value ?? null,
+    warehouseId: currentWarehouseId(),
     page: pageNum,
     limit: productStore.pagination.limit,
   });
@@ -271,6 +302,7 @@ const changeItemsPerPage = (limit) => {
   productStore.fetch({
     search: search.value,
     categoryId: selectedCategory.value,
+    warehouseId: currentWarehouseId(),
     page: 1,
     limit: limitNum,
   });
@@ -328,13 +360,24 @@ const handleDelete = async () => {
 };
 
 onMounted(async () => {
+  // Ensure inventory store has branches/warehouses so the per-warehouse column works
+  if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
+  if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
+
   await productStore.fetch({
     page: 1,
     limit: productStore.pagination.limit,
+    warehouseId: currentWarehouseId(),
   });
 
   // Fetch all categories for the dropdown
   const { data } = await categoryStore.fetchCategories();
   categories.value = data || [];
 });
+
+// React to warehouse selection changes
+watch(
+  () => inventoryStore.selectedWarehouseId,
+  () => handleSearch()
+);
 </script>

@@ -1,8 +1,9 @@
 import { getDb, saveDatabase } from '../db.js';
-import { products, categories } from '../models/index.js';
-import { NotFoundError, ConflictError } from '../utils/errors.js';
+import { products, categories, productStock, warehouses } from '../models/index.js';
+import { NotFoundError, ConflictError, ValidationError } from '../utils/errors.js';
 import { eq, like, or, and, desc, lte, sql, inArray } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
+import inventoryService, { InventoryService } from './inventoryService.js';
 
 export class ProductService {
   async create(productData, userId) {
@@ -20,6 +21,12 @@ export class ProductService {
       }
     }
 
+    // Extract opening stock (supports either a single warehouseId or the first
+    // active warehouse) — the legacy `stock` field is written to products.stock
+    // for backward-compat and as an opening_balance movement.
+    const openingQty = Number(productData.stock || 0);
+    const openingWarehouseId = productData.openingWarehouseId || null;
+
     const [newProduct] = await db
       .insert(products)
       .values({
@@ -27,6 +34,36 @@ export class ProductService {
         createdBy: userId,
       })
       .returning();
+
+    // Ensure per-warehouse stock rows exist for the new product
+    await inventoryService.ensureProductStockRows(newProduct.id);
+
+    if (openingQty > 0) {
+      let targetWarehouseId = openingWarehouseId;
+      if (!targetWarehouseId) {
+        const [wh] = await db
+          .select({ id: warehouses.id })
+          .from(warehouses)
+          .where(eq(warehouses.isActive, true))
+          .orderBy(warehouses.id)
+          .limit(1);
+        targetWarehouseId = wh?.id || null;
+      }
+      if (targetWarehouseId) {
+        await InventoryService.withTransaction((tx) =>
+          InventoryService.applyStockChangeTx(tx, {
+            productId: newProduct.id,
+            warehouseId: targetWarehouseId,
+            quantityChange: openingQty,
+            movementType: 'opening_balance',
+            referenceType: 'product',
+            referenceId: newProduct.id,
+            notes: 'Opening balance on product creation',
+            userId,
+          })
+        );
+      }
+    }
 
     saveDatabase();
     alertBus.emit('alerts.changed', 'product.created');
@@ -36,10 +73,23 @@ export class ProductService {
 
   async getAll(filters = {}) {
     const db = await getDb();
-    const { page = 1, limit = 10, search, categoryId } = filters;
-    
+    const { page = 1, limit = 10, search, categoryId, warehouseId } = filters;
+
     // Normalize search - treat empty strings as undefined
     const normalizedSearch = search && search.trim() ? search.trim() : undefined;
+
+    // Per-warehouse stock sub-select — returns 0 when no row exists yet.
+    const warehouseStockSelect = warehouseId
+      ? sql`COALESCE((
+          SELECT ps.quantity FROM product_stock ps
+          WHERE ps.product_id = ${products.id} AND ps.warehouse_id = ${Number(warehouseId)}
+        ), 0)`
+      : sql`0`;
+
+    // Total stock across all warehouses (ignored if warehouseId provided to save cost, still cheap).
+    const totalStockSelect = sql`COALESCE((
+      SELECT SUM(ps.quantity) FROM product_stock ps WHERE ps.product_id = ${products.id}
+    ), 0)`;
 
     // Build base query
     let baseQuery = db
@@ -52,8 +102,11 @@ export class ProductService {
         costPrice: products.costPrice,
         sellingPrice: products.sellingPrice,
         currency: products.currency,
-        stock: products.stock,
+        stock: products.stock, // legacy field — keep for backward compat
+        warehouseStock: warehouseStockSelect.as('warehouseStock'),
+        totalStock: totalStockSelect.as('totalStock'),
         minStock: products.minStock,
+        lowStockThreshold: products.lowStockThreshold,
         unit: products.unit,
         supplier: products.supplier,
         isActive: products.isActive,
@@ -213,7 +266,14 @@ export class ProductService {
     return updated;
   }
 
-  async getLowStock() {
+  async getLowStock(warehouseId) {
+    // If a warehouseId is provided, delegate to inventoryService which joins
+    // with product_stock and applies the per-warehouse threshold.
+    if (warehouseId) {
+      return await inventoryService.getLowStockProducts(Number(warehouseId));
+    }
+
+    // Legacy fallback: use products.stock vs minStock
     const db = await getDb();
     const lowStockProducts = await db
       .select()

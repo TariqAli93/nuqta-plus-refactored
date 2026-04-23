@@ -10,6 +10,10 @@ import {
   installments,
   currencySettings,
   settings,
+  branches,
+  warehouses,
+  productStock,
+  stockMovements,
 } from './models/index.js';
 import { hashPassword } from './utils/helpers.js';
 import { sql } from 'drizzle-orm';
@@ -135,6 +139,33 @@ async function seed() {
       'Settings'
     ) && console.log('  ✓ Settings inserted');
 
+    // ========== BRANCHES & WAREHOUSES ==========
+    console.log('→ Branches & warehouses...');
+    let insertedBranches = await insertIfEmpty(
+      branches,
+      [{ name: 'الفرع الرئيسي', address: 'بغداد - المركز', isActive: true }],
+      'Branches'
+    );
+    if (insertedBranches) {
+      console.log(`  ✓ ${insertedBranches.length} branches inserted`);
+    } else {
+      insertedBranches = await db.select().from(branches);
+    }
+    const mainBranch = insertedBranches.find((b) => b.name === 'الفرع الرئيسي') || insertedBranches[0];
+
+    let insertedWarehouses = await insertIfEmpty(
+      warehouses,
+      [{ name: 'المخزن الرئيسي', branchId: mainBranch.id, isActive: true }],
+      'Warehouses'
+    );
+    if (insertedWarehouses) {
+      console.log(`  ✓ ${insertedWarehouses.length} warehouses inserted`);
+    } else {
+      insertedWarehouses = await db.select().from(warehouses);
+    }
+    const mainWarehouse =
+      insertedWarehouses.find((w) => w.name === 'المخزن الرئيسي') || insertedWarehouses[0];
+
     // ========== CATEGORIES ==========
     console.log('→ Categories...');
     let insertedCats = await insertIfEmpty(categories, categoryData.map((c) => ({ ...c, createdBy: 1 })), 'Categories');
@@ -170,6 +201,39 @@ async function seed() {
       console.log(`  ✓ ${insertedProducts.length} products inserted`);
     } else {
       insertedProducts = await db.select().from(products);
+    }
+
+    // ========== PRODUCT STOCK (seed main warehouse opening balance) ==========
+    console.log('→ Seeding product stock per warehouse...');
+    if ((await countTable(productStock)) === 0) {
+      const stockRows = insertedProducts.map((p) => ({
+        productId: p.id,
+        warehouseId: mainWarehouse.id,
+        quantity: Number(p.stock || 0),
+      }));
+      if (stockRows.length) {
+        await db.insert(productStock).values(stockRows).onConflictDoNothing();
+        const openingMovements = stockRows
+          .filter((r) => r.quantity > 0)
+          .map((r) => ({
+            productId: r.productId,
+            warehouseId: r.warehouseId,
+            movementType: 'opening_balance',
+            quantityChange: r.quantity,
+            quantityBefore: 0,
+            quantityAfter: r.quantity,
+            referenceType: 'seed',
+            referenceId: null,
+            notes: 'Opening balance from seed',
+            createdBy: 1,
+          }));
+        if (openingMovements.length) {
+          await db.insert(stockMovements).values(openingMovements);
+        }
+        console.log(`  ✓ ${stockRows.length} stock rows + ${openingMovements.length} opening movements`);
+      }
+    } else {
+      console.log('  ↩️ Product stock already exists, skipping');
     }
 
     // ========== CUSTOMERS ==========
@@ -246,6 +310,8 @@ async function seed() {
             .values({
               invoiceNumber: `INV-${invoiceCounter}`,
               customerId: customer.id,
+              branchId: mainBranch.id,
+              warehouseId: mainWarehouse.id,
               subtotal: String(subtotal),
               discount: String(discount),
               total: String(total.toFixed(2)),
@@ -321,6 +387,8 @@ async function seed() {
             .values({
               invoiceNumber: `INV-${invoiceCounter}`,
               customerId: customer.id,
+              branchId: mainBranch.id,
+              warehouseId: mainWarehouse.id,
               subtotal: String(subtotal),
               discount: String(discount),
               total: String(total.toFixed(2)),

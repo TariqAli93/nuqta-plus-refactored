@@ -27,6 +27,11 @@ import Users from '@/views/users/Users.vue';
 import Forbidden from '@/views/errors/Forbidden.vue'; // 👈 صفحة 403
 import Profile from '@/views/Profile.vue';
 import About from '@/views/About.vue';
+import Inventory from '@/views/inventory/Inventory.vue';
+import StockMovements from '@/views/inventory/StockMovements.vue';
+import StockTransfer from '@/views/inventory/StockTransfer.vue';
+import LowStock from '@/views/inventory/LowStock.vue';
+import BranchesWarehouses from '@/views/inventory/BranchesWarehouses.vue';
 
 const routes = [
   {
@@ -118,6 +123,11 @@ const routes = [
         name: 'Notifications',
         component: Notifications,
       },
+      { path: 'inventory', name: 'Inventory', component: Inventory },
+      { path: 'inventory/movements', name: 'StockMovements', component: StockMovements },
+      { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer },
+      { path: 'inventory/low-stock', name: 'LowStock', component: LowStock },
+      { path: 'inventory/settings', name: 'BranchesWarehouses', component: BranchesWarehouses, meta: { requiresManageProducts: true } },
       { path: 'users', name: 'Users', component: Users, meta: { requiresViewUsers: true } },
       { path: 'profile', name: 'Profile', component: Profile }, // 👈 صفحة الملف الشخصي
       { path: 'settings', name: 'Settings', component: Settings },

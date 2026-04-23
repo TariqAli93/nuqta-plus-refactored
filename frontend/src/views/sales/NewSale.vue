@@ -507,7 +507,13 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
-import { useSaleStore, useProductStore, useNotificationStore, useSettingsStore } from '@/stores';
+import {
+  useSaleStore,
+  useProductStore,
+  useNotificationStore,
+  useSettingsStore,
+  useInventoryStore,
+} from '@/stores';
 import CustomerSelector from '@/components/CustomerSelector.vue';
 import CreditScoreCard from '@/components/CreditScoreCard.vue';
 import { useKeyboardShortcuts, createPageShortcuts } from '@/composables/useKeyboardShortcuts';
@@ -519,6 +525,7 @@ const saleStore = useSaleStore();
 const productStore = useProductStore();
 const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
+const inventoryStore = useInventoryStore();
 
 const form = ref(null);
 const barcode = ref('');
@@ -943,11 +950,19 @@ const submitSale = async () => {
   try {
     let saleResponse;
 
+    // Attach the currently selected branch + warehouse to the sale payload.
+    // Falls back silently on the backend if the user hasn't picked one yet.
+    const payload = {
+      ...sale.value,
+      branchId: inventoryStore.selectedBranchId || undefined,
+      warehouseId: inventoryStore.selectedWarehouseId || undefined,
+    };
+
     // إذا كانت هناك مسودة، أكملها بدلاً من إنشاء بيع جديد
     if (currentDraftId.value) {
-      saleResponse = await saleStore.completeDraft(currentDraftId.value, sale.value);
+      saleResponse = await saleStore.completeDraft(currentDraftId.value, payload);
     } else {
-      saleResponse = await saleStore.createSale(sale.value);
+      saleResponse = await saleStore.createSale(payload);
     }
 
     saleCompleted.value = true; // تم حفظ البيع بنجاح
@@ -1013,6 +1028,8 @@ const saveDraft = async () => {
     const draftData = {
       ...sale.value,
       customerId: sale.value.customerId || null,
+      branchId: inventoryStore.selectedBranchId || undefined,
+      warehouseId: inventoryStore.selectedWarehouseId || undefined,
     };
 
     const response = await saleStore.createDraft(draftData);

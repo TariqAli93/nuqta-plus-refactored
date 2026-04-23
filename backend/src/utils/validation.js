@@ -50,11 +50,49 @@ export const productSchema = z.object({
   currency: z.enum(['USD', 'IQD'], {
     errorMap: () => ({ message: 'Currency must be USD or IQD' }),
   }),
-  stock: z.number().int().nonnegative('Stock cannot be negative'),
+  stock: z.number().int().nonnegative('Stock cannot be negative').optional().default(0),
   minStock: z.number().int().nonnegative().optional(),
+  lowStockThreshold: z.number().int().nonnegative().optional(),
   unit: z.string().optional(),
   status: z.enum(['available', 'out_of_stock', 'discontinued']).optional(),
 });
+
+// ── Inventory schemas ─────────────────────────────────────────────────────
+export const branchSchema = z.object({
+  name: z.string().min(2, 'Branch name must be at least 2 characters'),
+  address: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const warehouseSchema = z.object({
+  name: z.string().min(2, 'Warehouse name must be at least 2 characters'),
+  branchId: z.number().int().positive('branchId is required'),
+  isActive: z.boolean().optional(),
+});
+
+export const stockAdjustmentSchema = z.object({
+  productId: z.number().int().positive(),
+  warehouseId: z.number().int().positive(),
+  quantityChange: z
+    .number()
+    .int()
+    .refine((v) => v !== 0, 'Quantity change cannot be zero'),
+  reason: z.string().min(2, 'Reason is required'),
+  allowNegative: z.boolean().optional(),
+});
+
+export const stockTransferSchema = z
+  .object({
+    fromWarehouseId: z.number().int().positive(),
+    toWarehouseId: z.number().int().positive(),
+    productId: z.number().int().positive(),
+    quantity: z.number().int().positive(),
+    notes: z.string().optional(),
+  })
+  .refine((d) => d.fromWarehouseId !== d.toWarehouseId, {
+    message: 'Source and destination warehouses must be different',
+    path: ['toWarehouseId'],
+  });
 
 // Category schemas
 export const categorySchema = z.object({
@@ -72,6 +110,8 @@ export const saleItemSchema = z.object({
 
 export const saleSchema = z.object({
   customerId: z.union([z.number().int().positive(), z.null()]).optional(),
+  branchId: z.number().int().positive().optional(),
+  warehouseId: z.number().int().positive().optional(),
   currency: z.enum(['USD', 'IQD'], {
     errorMap: () => ({ message: 'Currency must be USD or IQD' }),
   }),

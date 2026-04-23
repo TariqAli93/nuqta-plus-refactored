@@ -6,6 +6,7 @@ import { useNotificationStore } from './notification';
 import { useAuthStore } from './auth';
 import { useCategoryStore } from './category';
 import { useSettingsStore } from './settings';
+import { useInventoryStore } from './inventory';
 
 export {
   useSaleStore,
@@ -15,4 +16,5 @@ export {
   useAuthStore,
   useCategoryStore,
   useSettingsStore,
+  useInventoryStore,
 };
