@@ -51,8 +51,8 @@
       <v-card>
         <v-card-title>فرع جديد</v-card-title>
         <v-card-text>
-          <v-text-field v-model="branchForm.name" label="الاسم" density="comfortable" />
-          <v-text-field v-model="branchForm.address" label="العنوان" density="comfortable" />
+          <v-text-field v-model="branchForm.name" label="الاسم" density="comfortable" class="mb-2" />
+          <v-text-field v-model="branchForm.address" label="العنوان" density="comfortable" class="mb-2" />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -67,7 +67,7 @@
       <v-card>
         <v-card-title>مخزن جديد</v-card-title>
         <v-card-text>
-          <v-text-field v-model="warehouseForm.name" label="الاسم" density="comfortable" />
+          <v-text-field v-model="warehouseForm.name" label="الاسم" density="comfortable" class="mb-2" />
           <v-select
             v-model="warehouseForm.branchId"
             :items="inventoryStore.branches"
@@ -75,6 +75,7 @@
             item-value="id"
             label="الفرع"
             density="comfortable"
+            class="mb-2"
           />
         </v-card-text>
         <v-card-actions>

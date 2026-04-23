@@ -3,8 +3,8 @@
     <v-card class="mb-4">
       <div class="flex items-center justify-space-between pa-3">
         <div class="font-semibold text-h6 text-primary">نقل مخزون بين المخازن</div>
-        <v-btn variant="text" prepend-icon="mdi-arrow-right" :to="{ name: 'Inventory' }">
-          رجوع
+        <v-btn color="primary" @click="router.back()">
+          <v-icon>mdi-arrow-left</v-icon>
         </v-btn>
       </div>
     </v-card>
