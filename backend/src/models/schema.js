@@ -24,6 +24,10 @@ export const customers = pgTable('customers', {
   notes: text('notes'),
   totalPurchases: numeric('total_purchases', { precision: 18, scale: 4 }).default('0'),
   totalDebt: numeric('total_debt', { precision: 18, scale: 4 }).default('0'),
+  // Credit scoring (populated by daily creditScoringJob)
+  creditScore: integer('credit_score'),
+  creditScoreUpdatedAt: timestamp('credit_score_updated_at'),
+  recommendedLimit: numeric('recommended_limit', { precision: 18, scale: 4 }),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

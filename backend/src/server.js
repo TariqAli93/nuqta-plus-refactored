@@ -29,6 +29,7 @@ import alertRoutes from './routes/alertRoutes.js';
 import alertWsRoutes from './routes/alertWsRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
 import resetRoutes from './routes/resetRoutes.js';
+import jobRoutes from './routes/jobRoutes.js';
 
 // Debug features - only in development
 const isProduction = config.server.env === 'production';
@@ -122,6 +123,7 @@ const start = async () => {
     await fastify.register(alertWsRoutes, { prefix: '/api/alerts' });
     await fastify.register(auditRoutes, { prefix: '/api/audit' });
     await fastify.register(resetRoutes, { prefix: '/api/reset' });
+    await fastify.register(jobRoutes, { prefix: '/api/jobs' });
     // Only register debug routes in development
     if (!isProduction) {
       const { default: debugRoutes } = await import('./routes/debugRoutes.js');
@@ -159,6 +161,14 @@ const start = async () => {
       }
     } catch (error) {
       fastify.log.warn('Failed to delete old drafts on startup:', error.message);
+    }
+
+    // Register background jobs (daily credit scoring, etc.)
+    try {
+      const { registerDefaultJobs } = await import('./jobs/scheduler.js');
+      registerDefaultJobs(fastify);
+    } catch (error) {
+      fastify.log.warn('Failed to register background jobs:', error.message);
     }
 
     // Start listening

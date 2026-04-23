@@ -15,6 +15,81 @@ import { generateInvoiceNumber, calculateSaleTotals } from '../utils/helpers.js'
 import { eq, desc, and, or, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
 import settingsService from './settingsService.js';
 import alertBus from '../events/alertBus.js';
+import { hasPermission } from '../auth/permissionMatrix.js';
+import { getCustomerCreditSnapshot } from './creditScoringService.js';
+import auditService from './auditService.js';
+
+// Threshold below which a customer is considered "high risk" for an alert
+const HIGH_RISK_SCORE_THRESHOLD = 50;
+
+/**
+ * Enforce the customer's recommended credit limit for installment/mixed sales.
+ *
+ * If the sale total exceeds recommendedLimit:
+ *   - user with `sales.override_credit_limit` → allowed; logged to audit trail
+ *   - otherwise → ValidationError (reject)
+ *
+ * Also logs an audit entry when a high-risk customer (score <= threshold) is
+ * used in a new installment sale, and emits a real-time alert.
+ *
+ * @returns {{snapshot, exceeded, highRisk}}
+ */
+async function enforceCreditLimit({ customerId, total, user, paymentType }) {
+  if (!customerId) return { snapshot: null, exceeded: false, highRisk: false };
+  if (paymentType !== 'installment' && paymentType !== 'mixed') {
+    return { snapshot: null, exceeded: false, highRisk: false };
+  }
+
+  const snapshot = await getCustomerCreditSnapshot(customerId);
+  if (!snapshot) return { snapshot: null, exceeded: false, highRisk: false };
+
+  const limit = snapshot.recommendedLimit;
+  const score = snapshot.creditScore;
+  const exceeded = limit != null && Number(total) > Number(limit);
+  const highRisk =
+    score != null && score <= HIGH_RISK_SCORE_THRESHOLD;
+
+  if (exceeded) {
+    const canOverride = user && hasPermission('sales.override_credit_limit', user.role);
+    if (!canOverride) {
+      throw new ValidationError(
+        `Sale total (${total}) exceeds customer's recommended credit limit (${limit}). An override permission is required.`
+      );
+    }
+    // Override allowed — log to audit trail
+    await auditService.log({
+      userId: user.id,
+      username: user.username,
+      action: 'sales:credit_limit_override',
+      resource: 'customers',
+      resourceId: customerId,
+      details: {
+        saleTotal: Number(total),
+        recommendedLimit: Number(limit),
+        creditScore: score,
+      },
+    });
+  }
+
+  if (highRisk) {
+    await auditService.log({
+      userId: user?.id || null,
+      username: user?.username || null,
+      action: 'sales:high_risk_approved',
+      resource: 'customers',
+      resourceId: customerId,
+      details: {
+        saleTotal: Number(total),
+        recommendedLimit: limit != null ? Number(limit) : null,
+        creditScore: score,
+        threshold: HIGH_RISK_SCORE_THRESHOLD,
+      },
+    });
+    alertBus.emit('alerts.changed', 'customer.high_risk_sale');
+  }
+
+  return { snapshot, exceeded, highRisk };
+}
 
 /**
  * Run a callback inside a PostgreSQL transaction.
@@ -58,7 +133,10 @@ function n(val) {
 }
 
 export class SaleService {
-  async create(saleData, userId) {
+  async create(saleData, user) {
+    // Backward-compat: callers previously passed userId (number). Normalise.
+    const actingUser = typeof user === 'object' && user !== null ? user : { id: user };
+    const userId = actingUser.id;
     const currencySettings = await settingsService.getCurrencySettings();
 
     if (!saleData.items || saleData.items.length === 0) {
@@ -97,6 +175,15 @@ export class SaleService {
     if (saleData.paymentType === 'installment' && !customerId) {
       throw new ValidationError('Customer is required for installment payments');
     }
+
+    // Enforce credit-limit policy before any DB writes.
+    // Throws ValidationError when the limit is exceeded and caller cannot override.
+    await enforceCreditLimit({
+      customerId,
+      total: finalTotal,
+      user: actingUser,
+      paymentType: saleData.paymentType,
+    });
 
     const newSaleId = await withTransaction(async (tx) => {
       const [newSale] = await tx
@@ -914,7 +1001,9 @@ export class SaleService {
     return deleted.length;
   }
 
-  async completeDraft(draftId, saleData, userId) {
+  async completeDraft(draftId, saleData, user) {
+    const actingUser = typeof user === 'object' && user !== null ? user : { id: user };
+    const userId = actingUser.id;
     const draft = await this.getById(draftId);
     if (draft.status !== 'draft') {
       throw new ValidationError('Sale is not a draft');
@@ -950,6 +1039,14 @@ export class SaleService {
 
     const exchangeRate =
       saleData.exchangeRate !== undefined ? saleData.exchangeRate : draft.exchangeRate;
+
+    const draftCustomerId = saleData.customerId || draft.customerId || null;
+    await enforceCreditLimit({
+      customerId: draftCustomerId,
+      total: finalTotal,
+      user: actingUser,
+      paymentType: saleData.paymentType || draft.paymentType,
+    });
 
     const updatedSaleId = await withTransaction(async (tx) => {
       await tx.delete(saleItems).where(eq(saleItems.saleId, draftId));

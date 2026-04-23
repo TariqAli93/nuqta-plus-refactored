@@ -13,6 +13,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "migrate:from-sqlite": "node src/scripts/migrate-sqlite-to-pg.js",
+    "bench:credit-job": "node src/scripts/perf-benchmark.js",
+    "job:credit-scoring": "node -e \"import('./src/jobs/creditScoringJob.js').then(m => m.runCreditScoringJob()).then(r => { console.log(r); process.exit(0); }).catch(e => { console.error(e); process.exit(1); })\"",
     "lint": "eslint src",
     "format": "prettier --write src"
   },

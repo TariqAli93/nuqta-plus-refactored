@@ -228,6 +228,14 @@
             </v-card-text>
           </v-card>
 
+          <!-- Credit Score (shown for installment sales with a selected customer) -->
+          <CreditScoreCard
+            v-if="sale.paymentType === 'installment' && sale.customerId"
+            :customer-id="sale.customerId"
+            :sale-total="totalWithInterest"
+            :currency="sale.currency"
+          />
+
           <!-- Payment Section -->
           <v-card class="mb-4" elevation="1">
             <v-card-title class="d-flex align-center ga-2 pa-4">
@@ -284,6 +292,8 @@
               </v-row>
             </v-card-text>
           </v-card>
+
+          
 
           <!-- Installment Details -->
           <v-expand-transition>
@@ -499,6 +509,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
 import { useSaleStore, useProductStore, useNotificationStore, useSettingsStore } from '@/stores';
 import CustomerSelector from '@/components/CustomerSelector.vue';
+import CreditScoreCard from '@/components/CreditScoreCard.vue';
 import { useKeyboardShortcuts, createPageShortcuts } from '@/composables/useKeyboardShortcuts';
 import FormFieldHelp from '@/components/FormFieldHelp.vue';
 
