@@ -3,7 +3,7 @@ import { branchSchema } from '../utils/validation.js';
 
 export class BranchController {
   async getAll(request, reply) {
-    const data = await branchService.getAll();
+    const data = await branchService.getAll(request.user);
     return reply.send({ success: true, data });
   }
 

@@ -1,12 +1,15 @@
 import { getDb } from '../db.js';
 import { branches, warehouses } from '../models/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, inArray, sql } from 'drizzle-orm';
+import { branchFilterFor } from './scopeService.js';
 
 export class BranchService {
-  async getAll() {
+  async getAll(actingUser = null) {
     const db = await getDb();
-    return await db
+    const allowed = branchFilterFor(actingUser);
+
+    let q = db
       .select({
         id: branches.id,
         name: branches.name,
@@ -17,6 +20,12 @@ export class BranchService {
       })
       .from(branches)
       .orderBy(desc(branches.createdAt));
+
+    if (allowed !== null) {
+      if (allowed.length === 0) return [];
+      q = q.where(inArray(branches.id, allowed));
+    }
+    return await q;
   }
 
   async getById(id) {

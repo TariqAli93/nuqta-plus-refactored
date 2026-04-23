@@ -17,7 +17,12 @@ export const users = pgTable('users', {
   password: text('password').notNull(),
   fullName: text('full_name').notNull(),
   phone: text('phone'),
-  role: text('role').notNull().default('cashier'), // 'admin', 'cashier', 'manager', 'viewer'
+  // Roles: 'admin' (legacy full), 'global_admin', 'branch_admin',
+  //        'manager', 'cashier', 'viewer'
+  role: text('role').notNull().default('cashier'),
+  // Branch binding — NULL means "unassigned" (only valid for admin/global_admin)
+  assignedBranchId: integer('assigned_branch_id'),
+  assignedWarehouseId: integer('assigned_warehouse_id'),
   isActive: boolean('is_active').default(true),
   lastLoginAt: timestamp('last_login_at'),
   createdAt: timestamp('created_at').defaultNow(),
@@ -148,6 +153,39 @@ export const stockMovements = pgTable(
     warehouseIdx: index('stock_movements_warehouse_idx').on(t.warehouseId),
     productIdx: index('stock_movements_product_idx').on(t.productId),
     createdAtIdx: index('stock_movements_created_at_idx').on(t.createdAt),
+  })
+);
+
+// ── Warehouse Transfer Requests ───────────────────────────────────────────
+// Approval-gated transfer between warehouses. Stock only moves when approved.
+export const warehouseTransfers = pgTable(
+  'warehouse_transfers',
+  {
+    id: serial('id').primaryKey(),
+    branchId: integer('branch_id')
+      .notNull()
+      .references(() => branches.id),
+    fromWarehouseId: integer('from_warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    toWarehouseId: integer('to_warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    productId: integer('product_id')
+      .notNull()
+      .references(() => products.id),
+    quantity: integer('quantity').notNull(),
+    status: text('status').notNull().default('pending'), // 'pending' | 'approved' | 'rejected'
+    requestedBy: integer('requested_by').references(() => users.id),
+    approvedBy: integer('approved_by').references(() => users.id),
+    approvedAt: timestamp('approved_at'),
+    rejectionReason: text('rejection_reason'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index('warehouse_transfers_status_idx').on(t.status),
+    branchIdx: index('warehouse_transfers_branch_idx').on(t.branchId),
   })
 );
 

@@ -1,110 +1,140 @@
 /**
- * Permission Matrix
- * Maps legacy permission strings to allowed roles
- * This provides backward compatibility for the old permission-based RBAC system
- * while using the simplified role-based system.
+ * Permission Matrix — single source of truth for RBAC.
  *
  * Roles:
- * - admin: Full access to everything
- * - manager: Can manage sales, products, customers, categories (no user/settings management)
- * - cashier: Can create sales, read data, but cannot delete or manage users
- * - viewer: Read-only access
+ * - global_admin: Cross-branch access. Can switch branch/warehouse context,
+ *                 manage feature flags, approve any transfer.
+ * - admin: Legacy full-access role. Treated as global_admin for authorization.
+ * - branch_admin: Admin for one branch. Can approve transfers inside their branch.
+ * - manager: Manages sales, products, customers inside their branch.
+ * - cashier: Creates sales, reads data; cannot delete or manage users.
+ * - viewer: Read-only.
  */
 
+// ── Role groups ───────────────────────────────────────────────────────────
+// Keep role lists named so they stay consistent and easy to audit.
+export const ROLES = Object.freeze({
+  GLOBAL_ADMIN: 'global_admin',
+  ADMIN: 'admin',
+  BRANCH_ADMIN: 'branch_admin',
+  MANAGER: 'manager',
+  CASHIER: 'cashier',
+  VIEWER: 'viewer',
+});
+
+const GLOBAL = [ROLES.GLOBAL_ADMIN, ROLES.ADMIN];
+const BRANCH_ADMIN = [...GLOBAL, ROLES.BRANCH_ADMIN];
+const MANAGER = [...BRANCH_ADMIN, ROLES.MANAGER];
+const CASHIER = [...MANAGER, ROLES.CASHIER];
+const ALL = [...CASHIER, ROLES.VIEWER];
+
 const PERMISSION_MATRIX = {
-  // Sales permissions
-  'sales:create': ['admin', 'manager', 'cashier'],
-  'sales:read': ['admin', 'manager', 'cashier', 'viewer'],
-  'sales:update': ['admin', 'manager', 'cashier'], // Cashiers can add payments, managers/admins can restore
-  'sales:delete': ['admin', 'manager'], // Only managers and admins can cancel/delete sales
-  // Bypass the recommended credit limit on an installment sale
-  'sales.override_credit_limit': ['admin', 'manager'],
+  // ── Sales ────────────────────────────────────────────────────────────────
+  'sales:create': CASHIER,
+  'sales:read': ALL,
+  'sales:update': CASHIER,
+  'sales:delete': MANAGER,
+  'sales.override_credit_limit': MANAGER,
 
-  // Products permissions
-  'products:create': ['admin', 'manager'],
-  'products:read': ['admin', 'manager', 'cashier', 'viewer'],
-  'products:update': ['admin', 'manager'],
-  'products:delete': ['admin', 'manager'],
+  // ── Products ─────────────────────────────────────────────────────────────
+  'products:create': MANAGER,
+  'products:read': ALL,
+  'products:update': MANAGER,
+  'products:delete': [...GLOBAL, ROLES.MANAGER], // skip branch_admin for delete
 
-  // Customers permissions
-  'customers:create': ['admin', 'manager', 'cashier'],
-  'customers:read': ['admin', 'manager', 'cashier', 'viewer'],
-  'customers:update': ['admin', 'manager', 'cashier'],
-  'customers:delete': ['admin', 'manager'],
+  // ── Customers ────────────────────────────────────────────────────────────
+  'customers:create': CASHIER,
+  'customers:read': ALL,
+  'customers:update': CASHIER,
+  'customers:delete': MANAGER,
 
-  // Categories permissions
-  'categories:create': ['admin', 'manager'],
-  'categories:read': ['admin', 'manager', 'cashier', 'viewer'],
-  'categories:update': ['admin', 'manager'],
-  'categories:delete': ['admin', 'manager'],
+  // ── Categories ───────────────────────────────────────────────────────────
+  'categories:create': MANAGER,
+  'categories:read': ALL,
+  'categories:update': MANAGER,
+  'categories:delete': [...GLOBAL, ROLES.MANAGER],
 
-  // Frontend view permissions (mapped to backend permissions)
-  'view:dashboard': ['admin', 'manager', 'cashier', 'viewer'],
-  'view:sales': ['admin', 'manager', 'cashier', 'viewer'],
-  'view:products': ['admin', 'manager', 'cashier', 'viewer'],
-  'view:customers': ['admin', 'manager', 'cashier', 'viewer'],
-  'view:categories': ['admin', 'manager', 'cashier', 'viewer'],
-  'view:reports': ['admin', 'manager', 'cashier', 'viewer'],
-  'view:users': ['admin'],
-  'view:settings': ['admin'],
-  'view:roles': ['admin'], // Legacy - only admin can view (though route may be removed)
-  'view:permissions': ['admin'], // Legacy - only admin can view (though route may be removed)
+  // ── Frontend view permissions ───────────────────────────────────────────
+  'view:dashboard': ALL,
+  'view:sales': ALL,
+  'view:products': ALL,
+  'view:customers': ALL,
+  'view:categories': ALL,
+  'view:reports': ALL,
+  'view:inventory': ALL,
+  'view:users': BRANCH_ADMIN,
+  'view:settings': GLOBAL,
+  'view:roles': GLOBAL,
+  'view:permissions': GLOBAL,
+  'view:audit': GLOBAL,
 
-  // Frontend action permissions
-  'create:sales': ['admin', 'manager', 'cashier'],
-  'manage:sales': ['admin', 'manager'],
-  'delete:sales': ['admin', 'manager'],
-  'create:products': ['admin', 'manager'],
-  'manage:products': ['admin', 'manager'],
-  'create:customers': ['admin', 'manager', 'cashier'],
-  'manage:customers': ['admin', 'manager'],
-  'update:customers': ['admin', 'manager', 'cashier'],
-  'update:products': ['admin', 'manager'],
-  'read:reports': ['admin', 'manager', 'cashier', 'viewer'],
+  // ── Frontend action aliases (kept for backward compat) ──────────────────
+  'create:sales': CASHIER,
+  'manage:sales': MANAGER,
+  'delete:sales': MANAGER,
+  'create:products': MANAGER,
+  'manage:products': MANAGER,
+  'create:customers': CASHIER,
+  'manage:customers': MANAGER,
+  'update:customers': CASHIER,
+  'update:products': MANAGER,
+  'read:reports': ALL,
 
-  // User management (admin only)
-  'users:create': ['admin'],
-  'users:read': ['admin'],
-  'users:update': ['admin'],
-  'users:delete': ['admin'],
-  'users:manage': ['admin'],
+  // ── User management ──────────────────────────────────────────────────────
+  // Branch admins manage users inside their branch; global admins manage all.
+  'users:create': BRANCH_ADMIN,
+  'users:read': BRANCH_ADMIN,
+  'users:update': BRANCH_ADMIN,
+  'users:delete': GLOBAL,
+  'users:manage': BRANCH_ADMIN,
 
-  // Settings (admin only)
-  'settings:read': ['admin'],
-  'settings:update': ['admin'],
-  'settings:manage': ['admin'],
-  'settings:create': ['admin'],
-  'settings:delete': ['admin'],
+  // ── Settings ─────────────────────────────────────────────────────────────
+  // Administrative settings require global admin.
+  'settings:read': GLOBAL,
+  'settings:update': GLOBAL,
+  'settings:manage': GLOBAL,
+  'settings:create': GLOBAL,
+  'settings:delete': GLOBAL,
+  // Public-read settings (currency, company info) — needed everywhere in the UI.
+  'settings:read_public': ALL,
 
-  // Audit log (admin only)
-  'audit:read': ['admin'],
-  'audit:delete': ['admin'],
-  'view:audit': ['admin'],
+  // ── Audit log ────────────────────────────────────────────────────────────
+  'audit:read': GLOBAL,
+  'audit:delete': GLOBAL,
 
-  // Inventory permissions
-  'inventory:read': ['admin', 'manager', 'cashier', 'viewer'],
-  'inventory:adjust': ['admin', 'manager'],
-  'inventory:transfer': ['admin', 'manager'],
-  'inventory:manage': ['admin', 'manager'], // branch/warehouse management
-  'view:inventory': ['admin', 'manager', 'cashier', 'viewer'],
+  // ── Inventory ────────────────────────────────────────────────────────────
+  'inventory:read': ALL,
+  'inventory:adjust': MANAGER,
+  // Cashiers create transfer *requests* (those go to the approval queue).
+  'inventory:transfer': CASHIER,
+  // Branch/warehouse management — only admins of the branch or above.
+  'inventory:manage': BRANCH_ADMIN,
+
+  // ── Branch / warehouse scope ─────────────────────────────────────────────
+  manage_all_branches: GLOBAL,
+  switch_branch_context: GLOBAL,
+  switch_warehouse_context: GLOBAL,
+  approve_warehouse_transfer: BRANCH_ADMIN,
+  manage_feature_toggles: GLOBAL,
 };
 
+/** Any role that grants full cross-branch access. */
+export function isGlobalRole(role) {
+  return role === ROLES.GLOBAL_ADMIN || role === ROLES.ADMIN;
+}
+
 /**
- * Check if a role has a specific permission
- * @param {string} permission - Permission string (e.g., 'sales:create')
- * @param {string} role - User role ('admin', 'manager', 'cashier', 'viewer')
- * @returns {boolean} True if role has permission
+ * Check if a role has a specific permission.
  */
 export function hasPermission(permission, role) {
   if (!permission || !role) return false;
 
-  // Admin has all permissions
-  if (role === 'admin') return true;
+  // Global admins have everything.
+  if (isGlobalRole(role)) return true;
 
-  // Check permission matrix
   const allowedRoles = PERMISSION_MATRIX[permission];
   if (!allowedRoles) {
-    // Unknown permission - deny by default (fail secure)
+    // Unknown permission — deny by default (fail secure).
     console.warn(`Unknown permission: ${permission}`);
     return false;
   }
@@ -113,39 +143,27 @@ export function hasPermission(permission, role) {
 }
 
 /**
- * Get all permissions for a role
- * @param {string} role - User role
- * @returns {Array<string>} Array of permission strings
+ * Get all permissions for a role.
  */
 export function getRolePermissions(role) {
   if (!role) return [];
+  if (isGlobalRole(role)) return Object.keys(PERMISSION_MATRIX);
 
-  // Admin has all permissions
-  if (role === 'admin') {
-    return Object.keys(PERMISSION_MATRIX);
-  }
-
-  // Return permissions where role is included
   return Object.keys(PERMISSION_MATRIX).filter((permission) =>
     PERMISSION_MATRIX[permission].includes(role)
   );
 }
 
 /**
- * Check if permission string matches a pattern (for manage:* style checks)
- * @param {string} permission - Permission to check
- * @param {string} pattern - Pattern like 'manage:sales' or 'manage:*'
- * @returns {boolean}
+ * Pattern helpers kept for backward compat with existing callers.
  */
 export function matchesPermissionPattern(permission, pattern) {
   if (permission === pattern) return true;
 
-  // Handle manage:* pattern
   if (pattern === 'manage:*') {
     return permission.startsWith('manage:') || permission.includes(':manage');
   }
 
-  // Handle manage:<resource> pattern
   if (pattern.startsWith('manage:')) {
     const resource = pattern.split(':')[1];
     return permission.includes(`:${resource}`) || permission.startsWith(`${resource}:`);

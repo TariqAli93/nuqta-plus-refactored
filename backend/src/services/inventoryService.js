@@ -10,7 +10,7 @@ import {
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import { eq, and, desc, sql, lte } from 'drizzle-orm';
+import { eq, and, desc, sql, lte, inArray } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
 
 /**
@@ -375,6 +375,7 @@ export class InventoryService {
     const db = await getDb();
     const {
       warehouseId,
+      warehouseIds,
       productId,
       movementType,
       page = 1,
@@ -383,6 +384,9 @@ export class InventoryService {
 
     const conds = [];
     if (warehouseId) conds.push(eq(stockMovements.warehouseId, warehouseId));
+    if (!warehouseId && Array.isArray(warehouseIds) && warehouseIds.length > 0) {
+      conds.push(inArray(stockMovements.warehouseId, warehouseIds));
+    }
     if (productId) conds.push(eq(stockMovements.productId, productId));
     if (movementType) conds.push(eq(stockMovements.movementType, movementType));
 

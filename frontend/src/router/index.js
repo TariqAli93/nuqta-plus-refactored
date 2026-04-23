@@ -32,6 +32,8 @@ import StockMovements from '@/views/inventory/StockMovements.vue';
 import StockTransfer from '@/views/inventory/StockTransfer.vue';
 import LowStock from '@/views/inventory/LowStock.vue';
 import BranchesWarehouses from '@/views/inventory/BranchesWarehouses.vue';
+import TransferRequests from '@/views/inventory/TransferRequests.vue';
+import FeatureFlags from '@/views/settings/FeatureFlags.vue';
 
 const routes = [
   {
@@ -127,7 +129,9 @@ const routes = [
       { path: 'inventory/movements', name: 'StockMovements', component: StockMovements },
       { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer },
       { path: 'inventory/low-stock', name: 'LowStock', component: LowStock },
+      { path: 'inventory/transfers', name: 'TransferRequests', component: TransferRequests },
       { path: 'inventory/settings', name: 'BranchesWarehouses', component: BranchesWarehouses, meta: { requiresManageProducts: true } },
+      { path: 'settings/feature-flags', name: 'FeatureFlags', component: FeatureFlags, meta: { requiresGlobalAdmin: true } },
       { path: 'users', name: 'Users', component: Users, meta: { requiresViewUsers: true } },
       { path: 'profile', name: 'Profile', component: Profile }, // 👈 صفحة الملف الشخصي
       { path: 'settings', name: 'Settings', component: Settings },
@@ -197,6 +201,9 @@ router.beforeEach(async (to, from, next) => {
       return next({ name: 'Forbidden' });
     }
     if (to.meta.requiresWrite && !uiAccess.canWrite(userRole)) {
+      return next({ name: 'Forbidden' });
+    }
+    if (to.meta.requiresGlobalAdmin && !authStore.isGlobalAdmin) {
       return next({ name: 'Forbidden' });
     }
   }

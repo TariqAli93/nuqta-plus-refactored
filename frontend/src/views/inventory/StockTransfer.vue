@@ -82,6 +82,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
+import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
 import api from '@/plugins/axios';
 
@@ -129,17 +130,27 @@ const loadFromStock = async () => {
   }));
 };
 
+const authStore = useAuthStore();
 const submit = async () => {
   submitting.value = true;
   try {
-    await inventoryStore.transferStock({
+    const payload = {
       fromWarehouseId: form.fromWarehouseId,
       toWarehouseId: form.toWarehouseId,
       productId: form.productId,
       quantity: form.quantity,
       notes: form.notes || undefined,
-    });
-    router.push({ name: 'Inventory' });
+    };
+
+    // Global admins move stock immediately; everyone else submits a request
+    // that goes through the approval queue.
+    if (authStore.isGlobalAdmin) {
+      await inventoryStore.transferStock(payload);
+      router.push({ name: 'Inventory' });
+    } else {
+      await inventoryStore.requestTransfer(payload);
+      router.push({ name: 'TransferRequests' });
+    }
   } catch {
     /* notification already handled */
   } finally {

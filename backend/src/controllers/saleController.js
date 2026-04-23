@@ -1,6 +1,7 @@
 import { SaleService } from '../services/saleService.js';
 import { saleSchema } from '../utils/validation.js';
 import { CurrencyConversionService } from '../services/currencyConversionService.js';
+import { enforceBranchScope } from '../services/scopeService.js';
 
 const saleService = new SaleService();
 const currencyService = new CurrencyConversionService();
@@ -25,7 +26,7 @@ export class SaleController {
    * Get all sales with filters
    */
   async getAll(request, reply) {
-    const result = await saleService.getAll(request.query);
+    const result = await saleService.getAll(request.query, request.user);
     return reply.send({
       success: true,
       data: result.data,
@@ -35,6 +36,7 @@ export class SaleController {
 
   async getById(request, reply) {
     const sale = await saleService.getById(request.params.id);
+    enforceBranchScope(request.user, sale.branchId);
     return reply.send({
       success: true,
       data: sale,
@@ -42,6 +44,8 @@ export class SaleController {
   }
 
   async cancel(request, reply) {
+    const existing = await saleService.getById(request.params.id);
+    enforceBranchScope(request.user, existing.branchId);
     const sale = await saleService.cancel(request.params.id, request.user.id);
     return reply.send({
       success: true,
@@ -60,7 +64,7 @@ export class SaleController {
   }
 
   async getSalesReport(request, reply) {
-    const report = await saleService.getSalesReport(request.query);
+    const report = await saleService.getSalesReport(request.query, request.user);
     return reply.send({
       success: true,
       data: report,
@@ -114,6 +118,8 @@ export class SaleController {
   }
 
   async restoreSale(request, reply) {
+    const existing = await saleService.getById(request.params.id);
+    enforceBranchScope(request.user, existing.branchId);
     const sale = await saleService.restoreSale(request.params.id, request.user.id);
     return reply.send({
       success: true,

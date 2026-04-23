@@ -22,6 +22,7 @@ import { hasPermission } from '../auth/permissionMatrix.js';
 import { getCustomerCreditSnapshot } from './creditScoringService.js';
 import auditService from './auditService.js';
 import { InventoryService } from './inventoryService.js';
+import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './scopeService.js';
 
 // Threshold below which a customer is considered "high risk" for an alert
 const HIGH_RISK_SCORE_THRESHOLD = 50;
@@ -137,11 +138,19 @@ function n(val) {
 }
 
 /**
- * Resolve the branch + warehouse pair for a sale. If the caller omitted them,
- * fall back to the first active warehouse (keeps the single-warehouse flow
- * working transparently). Throws if nothing is configured yet.
+ * Resolve the branch + warehouse pair for a sale.
+ *
+ * Preference order:
+ *   1. An explicit warehouseId passed in (validated against branchId if given).
+ *   2. The branch-bound user's assignedWarehouseId.
+ *   3. The first active warehouse inside the user's assigned branch.
+ *   4. The first active warehouse overall (legacy single-warehouse flow).
+ *
+ * Without step 3, a branch-bound user with no assigned warehouse would have
+ * sales silently routed to the main warehouse of another branch — the bug
+ * that kept non-main branches from selling.
  */
-async function resolveBranchWarehouse({ branchId, warehouseId }) {
+async function resolveBranchWarehouse({ branchId, warehouseId, actingUser }) {
   const db = await getDb();
 
   if (warehouseId) {
@@ -158,7 +167,28 @@ async function resolveBranchWarehouse({ branchId, warehouseId }) {
     return { branchId: wh.branchId, warehouseId: wh.id };
   }
 
-  // Fall back to the first active warehouse
+  // Prefer a warehouse inside the user's assigned branch when the caller is
+  // branch-bound. Picks an active warehouse there; if there's only one this
+  // is deterministic.
+  const preferredBranchId = branchId || actingUser?.assignedBranchId || null;
+  if (preferredBranchId) {
+    const [wh] = await db
+      .select({ id: warehouses.id, branchId: warehouses.branchId })
+      .from(warehouses)
+      .where(
+        and(eq(warehouses.branchId, preferredBranchId), eq(warehouses.isActive, true))
+      )
+      .orderBy(warehouses.id)
+      .limit(1);
+    if (wh) return { branchId: wh.branchId, warehouseId: wh.id };
+    if (branchId || actingUser?.assignedBranchId) {
+      throw new ValidationError(
+        'No active warehouse found for the assigned branch — ask an admin to create one'
+      );
+    }
+  }
+
+  // Legacy fallback: first active warehouse anywhere
   const [fallback] = await db
     .select({ id: warehouses.id, branchId: warehouses.branchId })
     .from(warehouses)
@@ -227,10 +257,17 @@ export class SaleService {
     });
 
     // Resolve branch + warehouse. Keeps existing callers working without changes.
+    // If the caller is branch-bound, force their assigned branch so a client
+    // that tries to spoof branchId/warehouseId in the payload cannot escape.
     const { branchId, warehouseId } = await resolveBranchWarehouse({
-      branchId: saleData.branchId,
-      warehouseId: saleData.warehouseId,
+      branchId: actingUser?.assignedBranchId || saleData.branchId,
+      warehouseId: actingUser?.assignedWarehouseId || saleData.warehouseId,
+      actingUser,
     });
+
+    // Final scope check — throws if the resolved warehouse is outside the
+    // acting user's branch/warehouse scope (defensive).
+    await enforceWarehouseScope(actingUser, warehouseId);
 
     const newSaleId = await withTransaction(async (tx) => {
       const [newSale] = await tx
@@ -368,7 +405,7 @@ export class SaleService {
     return await this.getById(newSaleId);
   }
 
-  async getAll(filters = {}) {
+  async getAll(filters = {}, actingUser = null) {
     const db = await getDb();
     const { page = 1, limit = 10, status, startDate, endDate } = filters;
 
@@ -388,6 +425,18 @@ export class SaleService {
 
     if (filters.customer) {
       conditions.push(eq(sales.customerId, filters.customer));
+    }
+
+    // Branch scope — non-global-admins only see their branch. Global admins
+    // may pass `branchId` explicitly to filter.
+    const allowedBranches = branchFilterFor(actingUser);
+    if (allowedBranches === null && filters.branchId) {
+      conditions.push(eq(sales.branchId, Number(filters.branchId)));
+    } else if (allowedBranches !== null) {
+      if (allowedBranches.length === 0) {
+        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+      }
+      conditions.push(eq(sales.branchId, allowedBranches[0]));
     }
 
     // Get total count
@@ -700,7 +749,7 @@ export class SaleService {
     return result;
   }
 
-  async getSalesReport(filters = {}) {
+  async getSalesReport(filters = {}, actingUser = null) {
     const db = await getDb();
     const { startDate, endDate, currency } = filters;
 
@@ -716,6 +765,17 @@ export class SaleService {
       ...(end ? [lte(createdDate, end)] : []),
     ];
     if (currency) conds.push(eq(sales.currency, currency));
+
+    const allowedBranches = branchFilterFor(actingUser);
+    if (allowedBranches !== null) {
+      if (allowedBranches.length === 0) {
+        // Nothing to report for a user with no assigned branch
+        return { salesUSD: 0, paidUSD: 0, profitUSD: 0, salesIQD: 0, paidIQD: 0, profitIQD: 0, count: 0 };
+      }
+      conds.push(eq(sales.branchId, allowedBranches[0]));
+    } else if (filters.branchId) {
+      conds.push(eq(sales.branchId, Number(filters.branchId)));
+    }
 
     const salesData = await db
       .select()
@@ -1099,8 +1159,9 @@ export class SaleService {
     });
 
     const { branchId, warehouseId } = await resolveBranchWarehouse({
-      branchId: saleData.branchId || draft.branchId,
-      warehouseId: saleData.warehouseId || draft.warehouseId,
+      branchId: actingUser?.assignedBranchId || saleData.branchId || draft.branchId,
+      warehouseId: actingUser?.assignedWarehouseId || saleData.warehouseId || draft.warehouseId,
+      actingUser,
     });
 
     const updatedSaleId = await withTransaction(async (tx) => {

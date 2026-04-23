@@ -9,11 +9,22 @@ export const useAuthStore = defineStore('auth', {
     token: localStorage.getItem('token') || null,
     isAuthenticated: false,
     isFirstRun: false,
+    scope: null,
+    featureFlags: {},
   }),
 
   getters: {
     currentUser: (state) => state.user,
     userRole: (state) => state.user?.role || null,
+    isGlobalAdmin: (state) =>
+      state.user?.role === 'global_admin' || state.user?.role === 'admin',
+    canSwitchBranch: (state) => state.scope?.canSwitchBranch === true,
+    canSwitchWarehouse: (state) => state.scope?.canSwitchWarehouse === true,
+    assignedBranchId: (state) =>
+      state.scope?.branchId ?? state.user?.assignedBranchId ?? null,
+    allowedBranchIds: (state) => state.scope?.allowedBranchIds || [],
+    allowedWarehouseIds: (state) => state.scope?.allowedWarehouseIds || [],
+    isFeatureEnabled: (state) => (flag) => state.featureFlags?.[flag] !== false,
 
     /**
      * Check if user has a specific permission
@@ -91,9 +102,14 @@ export const useAuthStore = defineStore('auth', {
         this.token = response.data.token;
         this.user = response.data.user;
         this.isAuthenticated = true;
+        this.scope = response.data.scope || null;
+        this.featureFlags = response.data.featureFlags || {};
 
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
+        if (this.scope) localStorage.setItem('scope', JSON.stringify(this.scope));
+        if (this.featureFlags)
+          localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
 
         // Update axios default headers with new token
         api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
@@ -142,8 +158,13 @@ export const useAuthStore = defineStore('auth', {
         const response = await api.get('/auth/profile');
 
         if (response.data) {
-          this.user = response.data;
-          localStorage.setItem('user', JSON.stringify(response.data));
+          const { scope, featureFlags, ...userOnly } = response.data;
+          this.user = userOnly;
+          this.scope = scope || null;
+          this.featureFlags = featureFlags || {};
+          localStorage.setItem('user', JSON.stringify(userOnly));
+          if (scope) localStorage.setItem('scope', JSON.stringify(scope));
+          if (featureFlags) localStorage.setItem('featureFlags', JSON.stringify(featureFlags));
         }
 
         return response;
@@ -155,6 +176,14 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /**
+     * Persist updated feature flags returned from the feature-flags API.
+     */
+    setFeatureFlags(flags) {
+      this.featureFlags = flags || {};
+      localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
+    },
+
+    /**
      * Logout user and clear session
      */
     logout() {
@@ -163,9 +192,13 @@ export const useAuthStore = defineStore('auth', {
       this.user = null;
       this.token = null;
       this.isAuthenticated = false;
+      this.scope = null;
+      this.featureFlags = {};
 
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      localStorage.removeItem('scope');
+      localStorage.removeItem('featureFlags');
 
       // Remove authorization header
       delete api.defaults.headers.common['Authorization'];

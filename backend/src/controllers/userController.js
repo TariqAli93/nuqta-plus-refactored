@@ -3,31 +3,48 @@ import { z } from 'zod';
 
 const userService = new UserService();
 
+const ROLE_ENUM = z.enum([
+  'global_admin',
+  'admin',
+  'branch_admin',
+  'manager',
+  'cashier',
+  'viewer',
+]);
+
 const createUserSchema = z.object({
   username: z.string().min(3),
   password: z.string().min(8),
   fullName: z.string().min(2),
   phone: z.string().optional(),
-  role: z.enum(['admin', 'cashier', 'manager', 'viewer']).default('cashier'),
+  role: ROLE_ENUM.default('cashier'),
+  assignedBranchId: z.union([z.number().int().positive(), z.null()]).optional(),
+  assignedWarehouseId: z.union([z.number().int().positive(), z.null()]).optional(),
 });
 
 const updateUserSchema = z.object({
   fullName: z.string().min(2).optional(),
   phone: z.string().optional(),
-  role: z.enum(['admin', 'cashier', 'manager', 'viewer']).optional(),
+  role: ROLE_ENUM.optional(),
   isActive: z.boolean().optional(),
+  assignedBranchId: z.union([z.number().int().positive(), z.null()]).optional(),
+  assignedWarehouseId: z.union([z.number().int().positive(), z.null()]).optional(),
 });
 
 export class UserController {
   async list(request, reply) {
-    const { page = 1, limit = 10, search, role, isActive } = request.query || {};
-    const result = await userService.list({
-      page: Number(page),
-      limit: Number(limit),
-      search,
-      role: role || undefined,
-      isActive: typeof isActive !== 'undefined' ? isActive === 'true' : undefined,
-    });
+    const { page = 1, limit = 10, search, role, isActive, branchId } = request.query || {};
+    const result = await userService.list(
+      {
+        page: Number(page),
+        limit: Number(limit),
+        search,
+        role: role || undefined,
+        isActive: typeof isActive !== 'undefined' ? isActive === 'true' : undefined,
+        branchId: branchId ? Number(branchId) : undefined,
+      },
+      request.user
+    );
     return reply.send({ success: true, data: result });
   }
 

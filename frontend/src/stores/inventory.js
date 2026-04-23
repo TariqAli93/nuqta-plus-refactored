@@ -160,6 +160,48 @@ export const useInventoryStore = defineStore('inventory', {
       }
     },
 
+    // ── Warehouse transfer requests ─────────────────────────────────────────
+    async fetchTransfers(filters = {}) {
+      const response = await api.get('/warehouse-transfers', { params: filters });
+      return response?.data || [];
+    },
+
+    async requestTransfer(payload) {
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await api.post('/warehouse-transfers', payload);
+        notificationStore.success('تم إرسال طلب النقل للموافقة');
+        return response.data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'فشل إرسال طلب النقل');
+        throw error;
+      }
+    },
+
+    async approveTransfer(id) {
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await api.post(`/warehouse-transfers/${id}/approve`);
+        notificationStore.success('تمت الموافقة على النقل');
+        return response.data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'فشل الموافقة');
+        throw error;
+      }
+    },
+
+    async rejectTransfer(id, reason) {
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await api.post(`/warehouse-transfers/${id}/reject`, { reason });
+        notificationStore.success('تم رفض النقل');
+        return response.data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'فشل الرفض');
+        throw error;
+      }
+    },
+
     async fetchMovements(filters = {}) {
       this.loading = true;
       try {

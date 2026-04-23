@@ -20,7 +20,15 @@ export const userSchema = z.object({
     .regex(/[0-9]/, 'Password must contain at least one number'),
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
   phone: z.string().optional(),
-  role: z.enum(['admin', 'cashier', 'manager', 'viewer']).default('cashier'),
+  role: z
+    .enum(['admin', 'global_admin', 'branch_admin', 'cashier', 'manager', 'viewer'])
+    .default('cashier'),
+  assignedBranchId: z
+    .union([z.number().int().positive(), z.null()])
+    .optional(),
+  assignedWarehouseId: z
+    .union([z.number().int().positive(), z.null()])
+    .optional(),
 });
 
 export const loginSchema = z.object({

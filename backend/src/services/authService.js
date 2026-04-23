@@ -6,6 +6,8 @@ import { eq } from 'drizzle-orm';
 import { getRolePermissions } from '../auth/permissionMatrix.js';
 import config from '../config.js';
 import auditService from './auditService.js';
+import { resolveUserScope } from './scopeService.js';
+import featureFlagsService from './featureFlagsService.js';
 
 export class AuthService {
   /**
@@ -228,12 +230,20 @@ export class AuthService {
     const userWithoutPassword = { ...user };
     delete userWithoutPassword.password;
 
+    // Resolve branch scope + feature flags so the frontend can hydrate on login
+    const [scope, featureFlags] = await Promise.all([
+      resolveUserScope(user),
+      featureFlagsService.getFeatureFlags(),
+    ]);
+
     return {
       user: {
         ...userWithoutPassword,
         role: user.role,
         permissions: this.getRolePermissions(user.role),
       },
+      scope,
+      featureFlags,
       token,
     };
   }
@@ -262,6 +272,8 @@ export class AuthService {
         phone: users.phone,
         isActive: users.isActive,
         role: users.role,
+        assignedBranchId: users.assignedBranchId,
+        assignedWarehouseId: users.assignedWarehouseId,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -273,6 +285,13 @@ export class AuthService {
     }
 
     user.permissions = this.getRolePermissions(user.role);
+
+    const [scope, featureFlags] = await Promise.all([
+      resolveUserScope(user),
+      featureFlagsService.getFeatureFlags(),
+    ]);
+    user.scope = scope;
+    user.featureFlags = featureFlags;
 
     return user;
   }

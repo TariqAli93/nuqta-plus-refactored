@@ -133,6 +133,7 @@
             item-value="productId"
             label="المنتج"
             density="comfortable"
+            variant="outlined"
             :disabled="!!preselectedProduct"
           />
           <v-row>
@@ -145,6 +146,7 @@
                 ]"
                 label="الحركة"
                 density="comfortable"
+                class="mb-2"
               />
             </v-col>
             <v-col cols="6">
@@ -154,6 +156,7 @@
                 type="number"
                 min="1"
                 density="comfortable"
+                class="mb-2"
               />
             </v-col>
           </v-row>

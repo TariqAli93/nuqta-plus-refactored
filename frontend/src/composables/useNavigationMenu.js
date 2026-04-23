@@ -1,6 +1,7 @@
 import { computed } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import * as uiAccess from '@/auth/uiAccess.js';
+import { hasPermission as rbacHasPermission } from '@/auth/permissionMatrix.js';
 
 /**
  * Composable for managing navigation menu items
@@ -26,11 +27,13 @@ export function useNavigationMenu() {
       icon: 'mdi-warehouse',
       to: '/inventory',
       permission: null,
+      feature: 'inventory',
       group: {
         items: [
           { title: 'نظرة عامة', icon: 'mdi-chart-box-outline', to: '/inventory', permission: null },
           { title: 'حركات المخزون', icon: 'mdi-history', to: '/inventory/movements', permission: null },
-          { title: 'نقل بين المخازن', icon: 'mdi-transfer', to: '/inventory/transfer', permission: null },
+          { title: 'نقل بين المخازن', icon: 'mdi-transfer', to: '/inventory/transfer', permission: null, feature: 'warehouseTransfers' },
+          { title: 'طلبات النقل', icon: 'mdi-check-decagram', to: '/inventory/transfers', permission: null, feature: 'warehouseTransfers' },
           { title: 'منخفض المخزون', icon: 'mdi-alert', to: '/inventory/low-stock', permission: null },
           { title: 'الفروع والمخازن', icon: 'mdi-store', to: '/inventory/settings', permission: 'view:products' },
         ],
@@ -61,6 +64,7 @@ export function useNavigationMenu() {
             permission: 'view:permissions',
           },
           { title: 'الاعدادات', icon: 'mdi-cog', to: '/settings', permission: 'view:settings' },
+          { title: 'إعدادات الميزات', icon: 'mdi-toggle-switch', to: '/settings/feature-flags', permission: 'manage_feature_toggles' },
         ],
       },
     },
@@ -69,25 +73,29 @@ export function useNavigationMenu() {
   ];
 
   /**
-   * Check if a menu item should be visible based on user permissions
+   * Check if a menu item should be visible based on user permissions.
+   * Also honours feature flags — an item with `feature: 'inventory'` is hidden
+   * when the inventory flag is off.
    */
-  const checkPermission = (permission, userRole) => {
+  const checkVisibility = (item, userRole) => {
+    // Feature flag gate
+    if (item.feature && authStore.featureFlags?.[item.feature] === false) return false;
+
+    const permission = item.permission;
     if (!permission) return true;
 
-    // Map old permissions to role checks
+    // Legacy UI access helpers for specific permissions
     if (permission === 'view:users' && !uiAccess.canViewUsers(userRole)) return false;
     if (permission === 'view:settings' && !uiAccess.canManageSettings(userRole)) return false;
-    if (permission === 'view:roles' || permission === 'view:permissions') {
-      // Legacy routes - hide them
-      return false;
-    }
+    if (permission === 'view:roles' || permission === 'view:permissions') return false;
 
-    // All other view permissions are allowed for authenticated users
-    return true;
+    // Fall back to the central permission matrix (covers new perms like
+    // `manage_feature_toggles`, `approve_warehouse_transfer`, …).
+    return rbacHasPermission(permission, userRole);
   };
 
   /**
-   * Filter menu items based on user role and permissions
+   * Filter menu items based on user role, permissions, and feature flags.
    */
   const filteredMenu = computed(() => {
     const userRole = authStore.user?.role;
@@ -95,29 +103,18 @@ export function useNavigationMenu() {
 
     return menuItems
       .map((item) => {
-        // Handle non-group items
         if (!item.group) {
-          // Check both permission
-          if (!checkPermission(item.permission, userRole)) return null;
-          return item;
+          return checkVisibility(item, userRole) ? item : null;
         }
 
-        // Handle group items (sub items)
-        const allowedSubs = item.group.items.filter((sub) => {
-          const hasPermission = checkPermission(sub.permission, userRole);
-          return hasPermission;
-        });
+        // Top-level group visibility respects its own feature flag.
+        if (item.feature && authStore.featureFlags?.[item.feature] === false) return null;
 
-        // If no allowed sub-items, hide the entire group
+        const allowedSubs = item.group.items.filter((sub) => checkVisibility(sub, userRole));
         if (allowedSubs.length === 0) return null;
-
-        // Return group with filtered sub-items
-        return {
-          ...item,
-          group: { items: allowedSubs },
-        };
+        return { ...item, group: { items: allowedSubs } };
       })
-      .filter(Boolean); // Remove null items
+      .filter(Boolean);
   });
 
   /**

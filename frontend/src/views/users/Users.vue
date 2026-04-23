@@ -122,6 +122,27 @@
               required
               variant="outlined"
             />
+            <v-select
+              v-if="!isGlobalRole(form.role)"
+              v-model="form.assignedBranchId"
+              :items="inventoryStore.branches"
+              item-title="name"
+              item-value="id"
+              label="الفرع المعيّن"
+              :rules="[rules.required]"
+              variant="outlined"
+              @update:model-value="onBranchChange"
+            />
+            <v-select
+              v-if="!isGlobalRole(form.role) && form.assignedBranchId"
+              v-model="form.assignedWarehouseId"
+              :items="warehousesForForm"
+              item-title="name"
+              item-value="id"
+              label="المخزن المعيّن (اختياري)"
+              clearable
+              variant="outlined"
+            />
             <v-text-field
               v-if="!form.id"
               v-model="form.password"
@@ -156,6 +177,7 @@
               type="password"
               :rules="[rules.required, rules.minLength]"
               variant="outlined"
+              class="mb-2"
             />
             <v-text-field
               v-model="resetPwInfo.confirmPassword"
@@ -197,13 +219,26 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive } from 'vue';
+import { ref, onMounted, reactive, computed } from 'vue';
 import { useUsersStore } from '@/stores/users';
+import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 
 const store = useUsersStore();
+const inventoryStore = useInventoryStore();
 const notification = useNotificationStore();
+
+const isGlobalRole = (role) => role === 'admin' || role === 'global_admin';
+
+const warehousesForForm = computed(() =>
+  inventoryStore.warehouses.filter((w) => w.branchId === form.assignedBranchId)
+);
+
+const onBranchChange = () => {
+  // Reset warehouse when branch changes so the old selection can't leak.
+  form.assignedWarehouseId = null;
+};
 
 // Delete dialog state
 const deleteDialog = ref(false);
@@ -226,10 +261,12 @@ const statusOptions = [
 
 // Role enum options
 const roleOptions = [
-  { title: 'مدير', value: 'admin' },
-  { title: 'كاشير', value: 'cashier' },
+  { title: 'مدير عام', value: 'global_admin' },
+  { title: 'مدير فرع', value: 'branch_admin' },
   { title: 'مدير متجر', value: 'manager' },
+  { title: 'كاشير', value: 'cashier' },
   { title: 'مشاهد', value: 'viewer' },
+  { title: 'مدير (قديم)', value: 'admin' },
 ];
 
 const showForm = ref(false);
@@ -252,6 +289,8 @@ const form = reactive({
   role: 'cashier',
   password: '',
   isActive: true,
+  assignedBranchId: null,
+  assignedWarehouseId: null,
 });
 const resetPwInfo = reactive({
   newPassword: '',
@@ -265,8 +304,14 @@ function getRoleName(role) {
 }
 
 function openForm(item) {
-  if (item) Object.assign(form, item);
-  else
+  if (item) {
+    Object.assign(form, {
+      ...item,
+      assignedBranchId: item.assignedBranchId ?? null,
+      assignedWarehouseId: item.assignedWarehouseId ?? null,
+      password: '',
+    });
+  } else {
     Object.assign(form, {
       id: null,
       username: '',
@@ -275,7 +320,10 @@ function openForm(item) {
       role: 'cashier',
       password: '',
       isActive: true,
+      assignedBranchId: null,
+      assignedWarehouseId: null,
     });
+  }
   showForm.value = true;
 }
 
@@ -292,12 +340,20 @@ function closeResetPwDialog() {
 }
 
 async function save() {
+  const assignedPayload = isGlobalRole(form.role)
+    ? { assignedBranchId: null, assignedWarehouseId: null }
+    : {
+        assignedBranchId: form.assignedBranchId,
+        assignedWarehouseId: form.assignedWarehouseId || null,
+      };
+
   if (form.id) {
     await store.update(form.id, {
       fullName: form.fullName,
       phone: form.phone,
       role: form.role,
       isActive: form.isActive,
+      ...assignedPayload,
     });
   } else {
     try {
@@ -307,6 +363,7 @@ async function save() {
         phone: form.phone,
         role: form.role,
         password: form.password,
+        ...assignedPayload,
       });
     } catch (error) {
       notification.error(error.message);
@@ -340,6 +397,6 @@ async function resetPw() {
 }
 
 onMounted(async () => {
-  await store.fetch();
+  await Promise.all([store.fetch(), inventoryStore.fetchBranches(), inventoryStore.fetchWarehouses()]);
 });
 </script>

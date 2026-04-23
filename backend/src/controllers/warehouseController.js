@@ -4,10 +4,13 @@ import { warehouseSchema } from '../utils/validation.js';
 export class WarehouseController {
   async getAll(request, reply) {
     const { branchId, activeOnly } = request.query || {};
-    const data = await warehouseService.getAll({
-      branchId: branchId ? Number(branchId) : undefined,
-      activeOnly: activeOnly === 'true' || activeOnly === true,
-    });
+    const data = await warehouseService.getAll(
+      {
+        branchId: branchId ? Number(branchId) : undefined,
+        activeOnly: activeOnly === 'true' || activeOnly === true,
+      },
+      request.user
+    );
     return reply.send({ success: true, data });
   }
 

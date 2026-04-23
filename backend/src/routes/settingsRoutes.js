@@ -67,7 +67,7 @@ export default async function settingsRoutes(fastify) {
         },
       },
     },
-    onRequest: [fastify.authenticate, fastify.authorize('settings:read')],
+    onRequest: [fastify.authenticate, fastify.authorize('settings:read_public')],
     handler: settingsController.getCompanyInfo,
   });
 
@@ -122,7 +122,7 @@ export default async function settingsRoutes(fastify) {
         },
       },
     },
-    onRequest: [fastify.authenticate, fastify.authorize('settings:read')],
+    onRequest: [fastify.authenticate, fastify.authorize('settings:read_public')],
     handler: settingsController.getCurrencySettings,
   });
 

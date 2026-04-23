@@ -1,14 +1,28 @@
 import { getDb } from '../db.js';
 import { warehouses, branches, productStock } from '../models/index.js';
 import { NotFoundError, ConflictError, ValidationError } from '../utils/errors.js';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import inventoryService from './inventoryService.js';
+import { isGlobalAdmin, branchFilterFor } from './scopeService.js';
 
 export class WarehouseService {
-  async getAll({ branchId, activeOnly = false } = {}) {
+  async getAll({ branchId, activeOnly = false } = {}, actingUser = null) {
     const db = await getDb();
     const conds = [];
-    if (branchId) conds.push(eq(warehouses.branchId, Number(branchId)));
+
+    // Branch-bound users only see warehouses in their assigned branch. If they
+    // have an assignedWarehouseId, narrow to that single warehouse.
+    const allowedBranches = branchFilterFor(actingUser);
+    if (allowedBranches !== null) {
+      if (allowedBranches.length === 0) return [];
+      conds.push(eq(warehouses.branchId, allowedBranches[0]));
+      if (actingUser?.assignedWarehouseId) {
+        conds.push(eq(warehouses.id, actingUser.assignedWarehouseId));
+      }
+    } else if (branchId) {
+      conds.push(eq(warehouses.branchId, Number(branchId)));
+    }
+
     if (activeOnly) conds.push(eq(warehouses.isActive, true));
 
     let q = db

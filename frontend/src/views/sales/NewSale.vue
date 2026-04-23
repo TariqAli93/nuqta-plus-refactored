@@ -839,22 +839,24 @@ const updateProductDetails = (item) => {
   const p = products.value.find((prod) => prod.id === item.productId);
   if (!p) return;
 
-  if (p.stock <= 0) {
+  const available = availableStockOf(p);
+
+  if (available <= 0) {
     notify.error('❌ المنتج غير متوفر في المخزون');
     item.productId = null;
     return;
   }
 
-  if (item.quantity > p.stock) {
-    notify.error(`❌ الكمية المطلوبة (${item.quantity}) أكبر من المتوفر في المخزون (${p.stock})`);
-    item.quantity = p.stock;
+  if (item.quantity > available) {
+    notify.error(`❌ الكمية المطلوبة (${item.quantity}) أكبر من المتوفر في المخزون (${available})`);
+    item.quantity = available;
   }
 
   item.unitPriceOriginal = p.sellingPrice;
   item.originalCurrency = p.currency || 'USD';
   item.unitPrice = convertPrice(p.sellingPrice, item.originalCurrency, sale.value.currency);
   item.discount = item.discount || 0;
-  item.availableStock = p.stock;
+  item.availableStock = available;
 };
 
 /* 🔍 التحقق من الكمية */
@@ -863,8 +865,9 @@ const getQuantityError = (item) => {
   if (!products.value || !Array.isArray(products.value)) return [];
   const product = products.value.find((p) => p.id === item.productId);
   if (!product) return [];
-  if (item.quantity > product.stock) {
-    return [`الكمية المتاحة: ${product.stock}`];
+  const available = availableStockOf(product);
+  if (item.quantity > available) {
+    return [`الكمية المتاحة: ${available}`];
   }
   return [];
 };
@@ -888,15 +891,16 @@ const handleBarcodeScan = () => {
   }
   const product = products.value.find((p) => p.barcode === code);
   if (!product) return notify.error('❌ المنتج غير موجود');
-  if (product.stock <= 0) return notify.error('❌ المنتج غير متوفر في المخزون');
+  const available = availableStockOf(product);
+  if (available <= 0) return notify.error('❌ المنتج غير متوفر في المخزون');
 
   const existing = sale.value.items.find((i) => i.productId === product.id);
 
   if (existing) {
     const newQuantity = existing.quantity + 1;
-    if (newQuantity > product.stock) {
+    if (newQuantity > available) {
       return notify.error(
-        `❌ الكمية المطلوبة (${newQuantity}) أكبر من المتوفر في المخزون (${product.stock})`
+        `❌ الكمية المطلوبة (${newQuantity}) أكبر من المتوفر في المخزون (${available})`
       );
     }
     existing.quantity = newQuantity;
@@ -908,7 +912,7 @@ const handleBarcodeScan = () => {
       originalCurrency: product.currency || 'USD',
       unitPrice: convertPrice(product.sellingPrice, product.currency || 'USD', sale.value.currency),
       discount: 0,
-      availableStock: product.stock,
+      availableStock: available,
     });
   }
 
@@ -938,9 +942,10 @@ const submitSale = async () => {
       notify.error(`❌ المنتج غير موجود`);
       return;
     }
-    if (product.stock < item.quantity) {
+    const available = availableStockOf(product);
+    if (available < item.quantity) {
       notify.error(
-        `❌ الكمية المطلوبة من "${product.name}" (${item.quantity}) أكبر من المتوفر في المخزون (${product.stock})`
+        `❌ الكمية المطلوبة من "${product.name}" (${item.quantity}) أكبر من المتوفر في المخزون (${available})`
       );
       return;
     }
@@ -1092,10 +1097,39 @@ shortcuts['f3'] = (e) => {
 useKeyboardShortcuts(shortcuts);
 
 /* ⚙️ تحميل البيانات */
-onMounted(async () => {
-  // تحميل المنتجات
-  const p = await productStore.fetch({ limit: 1000 });
+
+/** Active warehouse the sale will deduct from. Drives the product stock
+ *  column returned from the backend so the UI never shows stock from another
+ *  warehouse while a cashier is ringing up a sale. */
+const activeWarehouseId = computed(() => inventoryStore.selectedWarehouseId);
+
+/** Normalised stock for availability checks. Uses per-warehouse stock when
+ *  a warehouse is selected; falls back to total across warehouses otherwise. */
+const availableStockOf = (product) => {
+  if (!product) return 0;
+  if (activeWarehouseId.value && product.warehouseStock != null) {
+    return Number(product.warehouseStock) || 0;
+  }
+  return Number(product.totalStock ?? product.stock ?? 0);
+};
+
+const loadProducts = async () => {
+  const p = await productStore.fetch({
+    limit: 1000,
+    warehouseId: activeWarehouseId.value || undefined,
+  });
   products.value = p.data;
+};
+
+// Re-fetch products whenever the global admin switches warehouse, so every
+// availability check always reflects the warehouse the sale will land in.
+watch(activeWarehouseId, loadProducts);
+
+onMounted(async () => {
+  // Ensure the inventory store is hydrated so the warehouse id is available
+  if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
+  if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
+  await loadProducts();
 
   // تحميل إعدادات العملة
   try {
@@ -1149,7 +1183,7 @@ onMounted(async () => {
               discount: item.discount || 0,
               unitPriceOriginal: product?.sellingPrice || item.unitPrice,
               originalCurrency: product?.currency || sale.value.currency,
-              availableStock: product?.stock || 0,
+              availableStock: availableStockOf(product),
             };
           });
         }
