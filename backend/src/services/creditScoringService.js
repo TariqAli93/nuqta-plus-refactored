@@ -1,6 +1,10 @@
 import { getDb, getPool } from '../db.js';
 import { customers, sales, installments } from '../models/index.js';
 import { eq, sql } from 'drizzle-orm';
+import {
+  isCreditScoreModelAvailable,
+  predictCreditScore,
+} from './onnxCreditScoringService.js';
 
 /**
  * Rule-based credit scoring.
@@ -50,6 +54,33 @@ export const CREDIT_SCORING_CONFIG = {
   // Thresholds for classifying a payment as late (days past due)
   LATE_PAYMENT_DAY_THRESHOLD: 0,
 };
+
+/**
+ * Compute the recommended credit limit from score, tier, and customer metrics.
+ * Shared by both rule-based and ONNX scoring paths.
+ */
+export function computeRecommendedLimit(score, metrics, cfg = CREDIT_SCORING_CONFIG) {
+  if (metrics.totalSalesOnInstallment === 0) {
+    return cfg.NEW_CUSTOMER_DEFAULT_LIMIT;
+  }
+  const avgSaleValue =
+    metrics.totalSalesValue / Math.max(1, metrics.totalSalesOnInstallment);
+  const tier = Object.values(cfg.TIERS)
+    .sort((a, b) => b.min - a.min)
+    .find((t) => score >= t.min);
+  const multiplier = tier ? tier.multiplier : 0;
+  let limit = avgSaleValue * multiplier;
+  limit = Math.max(0, limit - metrics.currentOutstandingDebt);
+  return Math.round(limit);
+}
+
+/** Map a 0–100 credit score to a 3-level risk label. */
+export function getRiskLevel(score) {
+  if (score == null) return null;
+  if (score >= 70) return 'low';
+  if (score >= 50) return 'medium';
+  return 'high';
+}
 
 /**
  * Gather the raw inputs for a customer's credit score from the database.
@@ -103,6 +134,7 @@ export function scoreFromMetrics(metrics, cfg = CREDIT_SCORING_CONFIG) {
     return {
       score: cfg.NEW_CUSTOMER_DEFAULT_SCORE,
       recommendedLimit: cfg.NEW_CUSTOMER_DEFAULT_LIMIT,
+      modelSource: 'rule-based',
     };
   }
 
@@ -152,21 +184,11 @@ export function scoreFromMetrics(metrics, cfg = CREDIT_SCORING_CONFIG) {
   // Clamp 0..100
   score = Math.max(0, Math.min(100, Math.round(score)));
 
-  // Recommended limit: tier multiplier * avg sale value, reduced by outstanding debt
-  const avgSaleValue =
-    metrics.totalSalesValue / Math.max(1, metrics.totalSalesOnInstallment);
-
-  const tier = Object.values(cfg.TIERS)
-    .sort((a, b) => b.min - a.min)
-    .find((t) => score >= t.min);
-  const multiplier = tier ? tier.multiplier : 0;
-
-  let recommendedLimit = avgSaleValue * multiplier;
-  // Subtract what they already owe — never offer more headroom than their actual risk allows
-  recommendedLimit = Math.max(0, recommendedLimit - metrics.currentOutstandingDebt);
-  recommendedLimit = Math.round(recommendedLimit);
-
-  return { score, recommendedLimit };
+  return {
+    score,
+    recommendedLimit: computeRecommendedLimit(score, metrics, cfg),
+    modelSource: 'rule-based',
+  };
 }
 
 /**
@@ -176,6 +198,22 @@ export function scoreFromMetrics(metrics, cfg = CREDIT_SCORING_CONFIG) {
 export async function calculateCreditScore(customerId) {
   const db = await getDb();
   const metrics = await gatherCustomerMetrics(customerId, db);
+
+  // ONNX model first (skip for new customers — rule-based gives a sensible default)
+  if (isCreditScoreModelAvailable() && metrics.totalSalesOnInstallment > 0) {
+    try {
+      const { score, riskProbability } = await predictCreditScore(metrics);
+      return {
+        score,
+        recommendedLimit: computeRecommendedLimit(score, metrics),
+        riskProbability,
+        modelSource: 'onnx',
+      };
+    } catch (err) {
+      console.error('[creditScoring] ONNX failed, using rules:', err.message);
+    }
+  }
+
   return scoreFromMetrics(metrics);
 }
 
@@ -186,18 +224,18 @@ export async function calculateCreditScore(customerId) {
  */
 export async function calculateAndPersistCreditScore(customerId) {
   const db = await getDb();
-  const { score, recommendedLimit } = await calculateCreditScore(customerId);
+  const result = await calculateCreditScore(customerId);
 
   await db
     .update(customers)
     .set({
-      creditScore: score,
+      creditScore: result.score,
       creditScoreUpdatedAt: new Date(),
-      recommendedLimit: String(recommendedLimit),
+      recommendedLimit: String(result.recommendedLimit),
     })
     .where(eq(customers.id, customerId));
 
-  return { score, recommendedLimit };
+  return result;
 }
 
 /**
@@ -276,13 +314,16 @@ export async function recalculateAllScores({
   const saleMap = new Map(saleRows.map((r) => [r.customerId, r]));
   const instMap = new Map(instRows.map((r) => [r.customerId, r]));
 
-  // 4. Score all in memory
+  // 4. Score all — ONNX model when available, rule-based fallback
+  const useOnnx = isCreditScoreModelAvailable();
   const updates = new Array(total);
+  let onnxScored = 0;
+
   for (let k = 0; k < total; k++) {
     const id = active[k].id;
     const s = saleMap.get(id) || {};
     const i = instMap.get(id) || {};
-    const { score, recommendedLimit } = scoreFromMetrics({
+    const metrics = {
       totalSalesOnInstallment: Number(s.totalSales || 0),
       totalPaidOnTime: Number(i.onTimePaid || 0),
       totalLatePayments: Number(i.latePaid || 0),
@@ -290,7 +331,22 @@ export async function recalculateAllScores({
       currentOutstandingDebt: Number(s.outstandingDebt || 0),
       activeInstallmentsCount: Number(i.activeInstallments || 0),
       totalSalesValue: Number(s.totalSalesValue || 0),
-    });
+    };
+
+    let score, recommendedLimit;
+    if (useOnnx && metrics.totalSalesOnInstallment > 0) {
+      try {
+        const pred = await predictCreditScore(metrics);
+        score = pred.score;
+        recommendedLimit = computeRecommendedLimit(score, metrics);
+        onnxScored++;
+      } catch {
+        ({ score, recommendedLimit } = scoreFromMetrics(metrics));
+      }
+    } else {
+      ({ score, recommendedLimit } = scoreFromMetrics(metrics));
+    }
+
     updates[k] = { id, score, recommendedLimit };
   }
 
@@ -340,7 +396,7 @@ export async function recalculateAllScores({
     }
   }
 
-  return { processed, updated, failed, total };
+  return { processed, updated, failed, total, onnxScored };
 }
 
 /**
@@ -363,11 +419,14 @@ export async function getCustomerCreditSnapshot(customerId) {
     .where(eq(customers.id, customerId))
     .limit(1);
   if (!row) return null;
+  const creditScore = row.creditScore == null ? null : Number(row.creditScore);
   return {
     ...row,
-    creditScore: row.creditScore == null ? null : Number(row.creditScore),
+    creditScore,
     recommendedLimit:
       row.recommendedLimit == null ? null : Number(row.recommendedLimit),
     totalDebt: row.totalDebt == null ? 0 : Number(row.totalDebt),
+    riskLevel: getRiskLevel(creditScore),
+    modelSource: isCreditScoreModelAvailable() ? 'onnx' : 'rule-based',
   };
 }

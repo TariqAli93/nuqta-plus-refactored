@@ -171,6 +171,22 @@ const start = async () => {
       fastify.log.warn('Failed to register background jobs:', error.message);
     }
 
+    // Initialize ONNX credit scoring model (optional — falls back to rules if absent)
+    try {
+      const { initCreditScoreModel, getModelStatus } = await import(
+        './services/onnxCreditScoringService.js'
+      );
+      await initCreditScoreModel();
+      const status = getModelStatus();
+      if (status.available) {
+        fastify.log.info(`ONNX credit model loaded: ${status.modelPath}`);
+      } else {
+        fastify.log.info('ONNX credit model not available — using rule-based scoring');
+      }
+    } catch (error) {
+      fastify.log.warn(`ONNX model init skipped: ${error.message}`);
+    }
+
     // Start listening
     await fastify.listen({
       port: config.server.port,

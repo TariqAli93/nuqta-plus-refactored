@@ -144,5 +144,15 @@ exports.default = async function afterPack(context) {
     );
   }
 
+  // Informational: ONNX runtime and model (optional — not required for app to run)
+  const ortPackaged = fs.existsSync(path.join(target, 'node_modules', 'onnxruntime-node'));
+  const modelPackaged = fs.existsSync(path.join(target, 'models', 'credit-score.onnx'));
+  console.log(
+    `[afterPack] ONNX runtime: ${ortPackaged ? '✓ present' : '– not present (rule-based fallback)'}`
+  );
+  console.log(
+    `[afterPack] ONNX model:   ${modelPackaged ? '✓ present' : '– not present (rule-based fallback)'}`
+  );
+
   console.log('[afterPack] backend packaged and verified (PostgreSQL runtime)');
 };

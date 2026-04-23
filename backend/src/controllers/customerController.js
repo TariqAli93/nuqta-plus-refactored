@@ -3,6 +3,7 @@ import { customerSchema } from '../utils/validation.js';
 import {
   getCustomerCreditSnapshot,
   calculateAndPersistCreditScore,
+  getRiskLevel,
 } from '../services/creditScoringService.js';
 
 const customerService = new CustomerService();
@@ -68,6 +69,9 @@ export class CustomerController {
    */
   async recalculateCreditScore(request, reply) {
     const result = await calculateAndPersistCreditScore(Number(request.params.id));
-    return reply.send({ success: true, data: result });
+    return reply.send({
+      success: true,
+      data: { ...result, riskLevel: getRiskLevel(result.score) },
+    });
   }
 }

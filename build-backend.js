@@ -103,6 +103,22 @@ function installProductionDeps() {
     fail('pg module not found in dist-backend/node_modules — check backend/package.json dependencies');
   }
   log('✓ pg driver installed');
+
+  // Verify onnxruntime-node (optional — app works without it via rule-based fallback)
+  const ortDir = path.join(DIST_DIR, 'node_modules', 'onnxruntime-node');
+  if (fs.existsSync(ortDir)) {
+    log('✓ onnxruntime-node installed (ONNX credit scoring enabled)');
+  } else {
+    warn('onnxruntime-node not found — ONNX credit scoring disabled, rule-based fallback active');
+  }
+
+  // Check for ONNX model file (optional — can be added later without code changes)
+  const modelFile = path.join(DIST_DIR, 'models', 'credit-score.onnx');
+  if (fs.existsSync(modelFile)) {
+    log('✓ ONNX model present: models/credit-score.onnx');
+  } else {
+    log('ℹ No ONNX model at models/credit-score.onnx — rule-based scoring will be used');
+  }
 }
 
 function bundleServiceHost() {
