@@ -1,5 +1,5 @@
 {
-  "id": "f9ec5cf0-a0b9-4f27-bcb2-158e76fb1822",
+  "id": "5bcbfd32-7a04-4568-9e8e-506213298590",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -291,6 +291,24 @@
           "primaryKey": false,
           "notNull": false,
           "default": "'0'"
+        },
+        "credit_score": {
+          "name": "credit_score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credit_score_updated_at": {
+          "name": "credit_score_updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recommended_limit": {
+          "name": "recommended_limit",
+          "type": "numeric(18, 4)",
+          "primaryKey": false,
+          "notNull": false
         },
         "is_active": {
           "name": "is_active",

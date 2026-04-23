@@ -20,12 +20,12 @@ function getTargetDatabaseName() {
     try {
       const url = new URL(process.env.DATABASE_URL);
       // pathname is "/<dbname>"
-      return url.pathname.replace(/^\//, '') || 'nuqtaplus';
+      return url.pathname.replace(/^\//, '') || 'nuqta_db';
     } catch {
-      return 'nuqtaplus';
+      return 'nuqta_db';
     }
   }
-  return process.env.PG_DATABASE || 'nuqtaplus';
+  return process.env.PG_DATABASE || 'nuqta_db';
 }
 
 /**
@@ -43,9 +43,9 @@ function getMaintenanceConfig() {
       return {
         host: url.hostname || '127.0.0.1',
         port: parseInt(url.port || '5432', 10),
-        user: decodeURIComponent(url.username) || 'nuqtaplus',
-        password: decodeURIComponent(url.password) || 'nuqtaplus',
-        database: 'postgres',
+        user: decodeURIComponent(url.username) || 'postgres',
+        password: decodeURIComponent(url.password) || 'root',
+        database: 'nuqta_db',
         ssl: sslOption,
       };
     } catch {
@@ -56,9 +56,9 @@ function getMaintenanceConfig() {
   return {
     host: process.env.PG_HOST || '127.0.0.1',
     port: parseInt(process.env.PG_PORT || '5432', 10),
-    user: process.env.PG_USER || 'nuqtaplus',
-    password: process.env.PG_PASSWORD || 'nuqtaplus',
-    database: 'postgres',
+    user: process.env.PG_USER || 'postgres',
+    password: process.env.PG_PASSWORD || 'root',
+    database: 'nuqta_db',
     ssl: sslOption,
   };
 }

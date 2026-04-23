@@ -71,9 +71,9 @@ export class BackupService {
     } else {
       env.PGHOST = pgConfig.host || '127.0.0.1';
       env.PGPORT = String(pgConfig.port || 5432);
-      env.PGDATABASE = pgConfig.database || 'nuqtaplus';
-      env.PGUSER = pgConfig.user || 'nuqtaplus';
-      env.PGPASSWORD = pgConfig.password || '';
+      env.PGDATABASE = pgConfig.database || 'nuqta_db';
+      env.PGUSER = pgConfig.user || 'postgres';
+      env.PGPASSWORD = pgConfig.password || 'root';
     }
 
     return env;

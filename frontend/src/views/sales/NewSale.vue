@@ -228,6 +228,14 @@
             </v-card-text>
           </v-card>
 
+          <!-- Credit Score (shown for installment sales with a selected customer) -->
+          <CreditScoreCard
+            v-if="sale.paymentType === 'installment' && sale.customerId"
+            :customer-id="sale.customerId"
+            :sale-total="totalWithInterest"
+            :currency="sale.currency"
+          />
+
           <!-- Payment Section -->
           <v-card class="mb-4" elevation="1">
             <v-card-title class="d-flex align-center ga-2 pa-4">
@@ -285,13 +293,7 @@
             </v-card-text>
           </v-card>
 
-          <!-- Credit Score (shown for installment sales with a selected customer) -->
-          <CreditScoreCard
-            v-if="sale.paymentType === 'installment' && sale.customerId"
-            :customer-id="sale.customerId"
-            :sale-total="totalWithInterest"
-            :currency="sale.currency"
-          />
+          
 
           <!-- Installment Details -->
           <v-expand-transition>

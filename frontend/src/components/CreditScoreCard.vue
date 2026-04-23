@@ -180,7 +180,11 @@ const iconColor = computed(() => {
   }
 });
 
-const cardColor = computed(() => (exceedsLimit.value ? 'warning' : undefined));
+const cardColor = computed(() => {
+  if (exceedsLimit.value) return 'warning';
+  if (!hasScore.value) return 'error';
+  return undefined;
+});
 
 const tierLabel = computed(() => {
   switch (tier.value) {
@@ -202,6 +206,9 @@ const exceedsLimit = computed(() => {
   if (limit == null) return false;
   return Number(props.saleTotal || 0) > Number(limit);
 });
+
+
+
 
 defineExpose({ exceedsLimit, snapshot, recalculate });
 
