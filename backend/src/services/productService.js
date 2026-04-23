@@ -111,6 +111,7 @@ export class ProductService {
         supplier: products.supplier,
         isActive: products.isActive,
         createdAt: products.createdAt,
+        categoryId: products.categoryId,
         category: categories.name,
         status: products.status,
       })

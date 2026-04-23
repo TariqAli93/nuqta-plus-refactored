@@ -25,6 +25,7 @@ export function useNavigationMenu() {
       to: '/',
       permission: null,
     },
+    { title: 'نقطة البيع', icon: 'mdi-point-of-sale', to: '/sales/pos', permission: 'create:sales' },
 
     // ── Operations ─────────────────────────────────────────────────────────
     {
@@ -33,6 +34,7 @@ export function useNavigationMenu() {
       to: '/operations',
       group: {
         items: [
+          
           { title: 'المبيعات', icon: 'mdi-cash-register', to: '/sales', permission: 'view:sales' },
           { title: 'العملاء', icon: 'mdi-account-group', to: '/customers', permission: 'view:customers' },
           {

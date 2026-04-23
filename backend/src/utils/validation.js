@@ -41,9 +41,9 @@ export const loginSchema = z.object({
 export const customerSchema = z.object({
   name: z.string().min(2, 'Customer name must be at least 2 characters'),
   phone: z.string().min(1, 'Phone number is required'),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  notes: z.string().optional(),
+  address: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 // Product schemas
@@ -95,7 +95,7 @@ export const stockTransferSchema = z
     toWarehouseId: z.number().int().positive(),
     productId: z.number().int().positive(),
     quantity: z.number().int().positive(),
-    notes: z.string().optional(),
+    notes: z.string().nullable().optional(),
   })
   .refine((d) => d.fromWarehouseId !== d.toWarehouseId, {
     message: 'Source and destination warehouses must be different',
@@ -143,7 +143,7 @@ export const saleSchema = z.object({
   paymentMethod: z.enum(['cash', 'card', 'bank_transfer']).optional(),
   paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional().default(0),
   installmentCount: z.number().int().positive('Installment count must be at least 1').optional(),
-  notes: z.string().optional(),
+  notes: z.string().nullable().optional(),
   interestRate: z
     .number()
     .nonnegative('Interest rate cannot be negative')
@@ -160,7 +160,7 @@ export const paymentSchema = z.object({
   currency: z.enum(['USD', 'IQD']),
   exchangeRate: z.number().positive('Exchange rate must be positive'),
   paymentMethod: z.enum(['cash', 'card', 'bank_transfer']),
-  notes: z.string().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 // Installment schemas
@@ -171,7 +171,7 @@ export const installmentSchema = z.object({
   dueAmount: z.number().positive('Due amount must be positive'),
   currency: z.enum(['USD', 'IQD']),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
-  notes: z.string().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 // Query schemas

@@ -20,6 +20,7 @@ import Categories from '@/views/categories/Categories.vue';
 import Sales from '@/views/sales/Sales.vue';
 import NewSale from '@/views/sales/NewSale.vue';
 import SaleDetails from '@/views/sales/SaleDetails.vue';
+import PosScreen from '@/views/sales/PosScreen.vue';
 import Reports from '@/views/Reports.vue';
 import Settings from '@/views/Settings.vue';
 import Notifications from '@/views/Notifications.vue';
@@ -105,6 +106,12 @@ const routes = [
         component: Categories,
       },
       { path: 'sales', name: 'Sales', component: Sales },
+      {
+        path: 'sales/pos',
+        name: 'PosScreen',
+        component: PosScreen,
+        meta: { requiresCreateSales: true },
+      },
       {
         path: 'sales/new',
         name: 'NewSale',
