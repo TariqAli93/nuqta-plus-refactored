@@ -1,19 +1,31 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3">
+  <v-container max-width="860">
+    <v-card class="mb-4" rounded="xl">
+      <div class="flex items-center justify-space-between pa-4">
         <div>
-          <div class="font-semibold text-h6 text-primary">إعدادات الميزات</div>
+          <div class="font-weight-bold text-h6">إعدادات الميزات</div>
           <div class="text-caption text-medium-emphasis">
-            تفعيل أو تعطيل الوحدات الاختيارية — تظهر أو تختفي تلقائياً من الواجهة
+            فعّل الوحدات التي تحتاجها فقط. الميزات المعطّلة تختفي من الواجهة.
           </div>
         </div>
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-wizard-hat"
+          :to="{ name: 'SetupWizard' }"
+        >
+          معالج الإعداد
+        </v-btn>
       </div>
     </v-card>
 
-    <v-card>
+    <v-card v-for="group in groups" :key="group.title" class="mb-4" rounded="xl">
+      <v-card-title class="d-flex align-center gap-2">
+        <v-icon :color="group.color">{{ group.icon }}</v-icon>
+        <span>{{ group.title }}</span>
+      </v-card-title>
+      <v-divider />
       <v-list lines="two">
-        <v-list-item v-for="item in items" :key="item.key">
+        <v-list-item v-for="item in group.items" :key="item.key">
           <template #prepend>
             <v-icon :color="flags[item.key] ? 'success' : 'grey'">{{ item.icon }}</v-icon>
           </template>
@@ -25,18 +37,26 @@
               color="primary"
               hide-details
               inset
-              :disabled="!canManage"
+              :disabled="!canManage || saving"
               @update:model-value="(val) => toggle(item.key, val)"
             />
           </template>
         </v-list-item>
       </v-list>
     </v-card>
-  </div>
+
+    <v-alert
+      v-if="!canManage"
+      type="info"
+      variant="tonal"
+      density="compact"
+      text="للتغيير تحتاج صلاحية المدير العام."
+    />
+  </v-container>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref, computed } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import api from '@/plugins/axios';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
@@ -49,21 +69,85 @@ const saving = ref(false);
 
 const canManage = computed(() => authStore.hasPermission('manage_feature_toggles'));
 
-const items = [
-  { key: 'installments', title: 'الأقساط', description: 'بيع بالتقسيط وإدارة الدفعات', icon: 'mdi-calendar-clock' },
-  { key: 'creditScore', title: 'تقييم ائتمان العميل', description: 'نظام السكور الائتماني للعملاء', icon: 'mdi-chart-line' },
-  { key: 'inventory', title: 'إدارة المخزون', description: 'تفعيل وحدة المخزون كاملة', icon: 'mdi-warehouse' },
-  { key: 'multiBranch', title: 'تعدد الفروع', description: 'دعم أكثر من فرع', icon: 'mdi-store' },
-  { key: 'multiWarehouse', title: 'تعدد المخازن', description: 'دعم أكثر من مخزن لكل فرع', icon: 'mdi-package-variant' },
-  { key: 'warehouseTransfers', title: 'نقل بين المخازن', description: 'طلبات النقل والموافقة', icon: 'mdi-transfer' },
-  { key: 'alerts', title: 'التنبيهات', description: 'تنبيهات وإشعارات النظام', icon: 'mdi-bell' },
-  { key: 'liveOperations', title: 'العمليات الحيّة', description: 'متابعة العمليات في الوقت الحقيقي', icon: 'mdi-pulse' },
+// Grouped so the page reads like a product settings screen, not a developer flag list.
+const groups = [
+  {
+    title: 'المبيعات',
+    icon: 'mdi-cash-register',
+    color: 'primary',
+    items: [
+      {
+        key: 'installments',
+        title: 'بيع بالأقساط',
+        description: 'تفعيل الدفعات المؤجلة وجدولة الأقساط.',
+        icon: 'mdi-calendar-clock',
+      },
+      {
+        key: 'creditScore',
+        title: 'تقييم العملاء',
+        description: 'نظام السكور الائتماني وتوصية السقف المالي.',
+        icon: 'mdi-chart-line',
+      },
+    ],
+  },
+  {
+    title: 'المخزون',
+    icon: 'mdi-warehouse',
+    color: 'secondary',
+    items: [
+      {
+        key: 'inventory',
+        title: 'إدارة المخزون',
+        description: 'تتبع المخزون لكل منتج، التعديلات اليدوية، والحركات.',
+        icon: 'mdi-package-variant',
+      },
+      {
+        key: 'multiBranch',
+        title: 'تعدد الفروع',
+        description: 'دعم أكثر من فرع وربط المستخدمين بفروع.',
+        icon: 'mdi-store',
+      },
+      {
+        key: 'multiWarehouse',
+        title: 'تعدد المخازن',
+        description: 'أكثر من مخزن لكل فرع مع رصيد مستقل.',
+        icon: 'mdi-warehouse',
+      },
+      {
+        key: 'warehouseTransfers',
+        title: 'نقل بين المخازن',
+        description: 'إنشاء طلبات نقل ومراجعتها قبل تنفيذها.',
+        icon: 'mdi-transfer',
+      },
+    ],
+  },
+  {
+    title: 'التنبيهات والمتابعة',
+    icon: 'mdi-bell',
+    color: 'warning',
+    items: [
+      {
+        key: 'alerts',
+        title: 'التنبيهات',
+        description: 'تنبيهات نظامية لحظية (مبيعات، مخزون، أقساط).',
+        icon: 'mdi-bell',
+      },
+      {
+        key: 'liveOperations',
+        title: 'العمليات الحيّة',
+        description: 'متابعة العمليات الحالية في الوقت الفعلي.',
+        icon: 'mdi-pulse',
+      },
+    ],
+  },
 ];
 
 const load = async () => {
   try {
     const response = await api.get('/feature-flags');
-    Object.assign(flags, response.data || {});
+    const data = response.data || {};
+    const remote = data.flags || data; // tolerate both shapes
+    Object.assign(flags, remote);
     authStore.setFeatureFlags({ ...flags });
   } catch {
     /* handled globally */
@@ -71,8 +155,7 @@ const load = async () => {
 };
 
 const toggle = async (key, value) => {
-  if (!canManage.value) return;
-  if (saving.value) return;
+  if (!canManage.value || saving.value) return;
   const previous = flags[key];
   flags[key] = value;
   saving.value = true;
@@ -80,7 +163,7 @@ const toggle = async (key, value) => {
     const response = await api.put('/feature-flags', { [key]: value });
     Object.assign(flags, response.data || {});
     authStore.setFeatureFlags({ ...flags });
-    notify.success('تم تحديث الإعدادات');
+    notify.success('تم حفظ التغيير');
   } catch {
     flags[key] = previous;
   } finally {

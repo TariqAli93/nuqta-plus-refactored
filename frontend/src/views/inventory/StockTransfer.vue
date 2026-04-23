@@ -9,7 +9,7 @@
       </div>
     </v-card>
 
-    <v-card max-width="720" class="mx-auto">
+    <v-card  class="mx-auto">
       <v-card-text>
         <v-row>
           <v-col cols="12" md="6">

@@ -12,6 +12,15 @@
       </div>
     </v-card>
 
+    <v-alert
+      v-if="!inventoryStore.selectedWarehouseId && !loading"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+    >
+      لم يتم إعداد أي مخزن بعد. أنشئ فرعاً ومخزناً من "الفروع والمخازن" ثم عد إلى هذه الصفحة.
+    </v-alert>
+
     <v-card>
       <v-data-table
         :headers="headers"
@@ -24,7 +33,10 @@
         </template>
         <template #no-data>
           <div class="pa-8 text-center text-medium-emphasis">
-            لا توجد منتجات منخفضة المخزون 🎉
+            <template v-if="inventoryStore.selectedWarehouseId">
+              لا توجد منتجات منخفضة المخزون 🎉
+            </template>
+            <template v-else>اختر مخزناً لعرض قائمة المنخفض.</template>
           </div>
         </template>
       </v-data-table>
@@ -35,8 +47,10 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue';
 import { useInventoryStore } from '@/stores/inventory';
+import { useAuthStore } from '@/stores/auth';
 
 const inventoryStore = useInventoryStore();
+const authStore = useAuthStore();
 const loading = ref(false);
 
 const headers = [
@@ -47,11 +61,46 @@ const headers = [
   { title: 'الحد الأدنى', key: 'lowStockThreshold' },
 ];
 
+/**
+ * Pick a warehouse when the global selector hasn't (yet) picked one — e.g.
+ * the user is branch-bound and the selector component hasn't mounted, or the
+ * localStorage value was cleared. Without this fallback the page silently
+ * shows nothing because `selectedWarehouseId` is null.
+ */
+const ensureWarehouse = () => {
+  if (inventoryStore.selectedWarehouseId) return inventoryStore.selectedWarehouseId;
+
+  const allowed = authStore.allowedWarehouseIds || [];
+  const assigned = authStore.assignedBranchId;
+
+  let candidate = null;
+  if (authStore.user?.assignedWarehouseId) {
+    candidate = authStore.user.assignedWarehouseId;
+  } else if (allowed.length > 0) {
+    candidate = allowed[0];
+  } else {
+    // Global admin / fresh install: fall back to any active warehouse,
+    // preferring one in the currently-selected branch if set.
+    const pool = inventoryStore.warehouses.filter((w) => w.isActive);
+    const inBranch = assigned
+      ? pool.find((w) => w.branchId === assigned)
+      : null;
+    candidate = inBranch?.id || pool[0]?.id || null;
+  }
+
+  if (candidate) inventoryStore.setWarehouse(candidate);
+  return candidate;
+};
+
 const reload = async () => {
-  if (!inventoryStore.selectedWarehouseId) return;
+  const warehouseId = ensureWarehouse();
+  if (!warehouseId) {
+    inventoryStore.lowStock = [];
+    return;
+  }
   loading.value = true;
   try {
-    await inventoryStore.fetchLowStock();
+    await inventoryStore.fetchLowStock(warehouseId);
   } finally {
     loading.value = false;
   }
@@ -60,6 +109,8 @@ const reload = async () => {
 watch(() => inventoryStore.selectedWarehouseId, reload);
 
 onMounted(async () => {
+  // Hydrate branches/warehouses so ensureWarehouse() has data to choose from.
+  if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
   if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
   reload();
 });

@@ -246,11 +246,20 @@
               <v-row>
                 <v-col cols="12" md="4">
                   <v-select
+                    v-if="paymentTypes.length > 1"
                     v-model="sale.paymentType"
                     :items="paymentTypes"
                     item-title="label"
                     item-value="value"
                     label="نوع الفاتورة"
+                    density="comfortable"
+                    variant="outlined"
+                  />
+                  <v-text-field
+                    v-else
+                    model-value="نقدي"
+                    label="نوع الفاتورة"
+                    readonly
                     density="comfortable"
                     variant="outlined"
                   />
@@ -514,6 +523,7 @@ import {
   useSettingsStore,
   useInventoryStore,
 } from '@/stores';
+import { useAuthStore } from '@/stores/auth';
 import CustomerSelector from '@/components/CustomerSelector.vue';
 import CreditScoreCard from '@/components/CreditScoreCard.vue';
 import { useKeyboardShortcuts, createPageShortcuts } from '@/composables/useKeyboardShortcuts';
@@ -526,6 +536,10 @@ const productStore = useProductStore();
 const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
 const inventoryStore = useInventoryStore();
+const authStore = useAuthStore();
+
+/** Honour the `installments` feature flag: when it's off, only cash sales are allowed. */
+const installmentsEnabled = computed(() => authStore.isFeatureEnabled('installments'));
 
 const form = ref(null);
 const barcode = ref('');
@@ -591,13 +605,24 @@ const applySaleCurrencyToItems = () => {
 
 /* 💳 خيارات نوع الدفع */
 const paymentTypes = computed(() => {
-  const types = [
-    { label: 'نقدي', value: 'cash' },
-    { label: 'تقسيط', value: 'installment' },
-  ];
-
+  const types = [{ label: 'نقدي', value: 'cash' }];
+  if (installmentsEnabled.value) {
+    types.push({ label: 'تقسيط', value: 'installment' });
+  }
   return types;
 });
+
+/** If a user lands on NewSale with a stored draft/preference of `installment`
+ *  after installments got disabled, silently downgrade to cash. */
+watch(
+  installmentsEnabled,
+  (on) => {
+    if (!on && sale.value.paymentType === 'installment') {
+      sale.value.paymentType = 'cash';
+    }
+  },
+  { immediate: true }
+);
 
 /* �� حسابات البيع محسّنة */
 const subtotal = computed(() =>

@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', {
     isFirstRun: false,
     scope: null,
     featureFlags: {},
+    setupMode: 'done',
   }),
 
   getters: {
@@ -25,6 +26,9 @@ export const useAuthStore = defineStore('auth', {
     allowedBranchIds: (state) => state.scope?.allowedBranchIds || [],
     allowedWarehouseIds: (state) => state.scope?.allowedWarehouseIds || [],
     isFeatureEnabled: (state) => (flag) => state.featureFlags?.[flag] !== false,
+    needsSetupWizard: (state) =>
+      state.setupMode === 'pending' &&
+      (state.user?.role === 'global_admin' || state.user?.role === 'admin'),
 
     /**
      * Check if user has a specific permission
@@ -104,6 +108,7 @@ export const useAuthStore = defineStore('auth', {
         this.isAuthenticated = true;
         this.scope = response.data.scope || null;
         this.featureFlags = response.data.featureFlags || {};
+        this.setupMode = response.data.setupMode || 'done';
 
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
@@ -158,10 +163,11 @@ export const useAuthStore = defineStore('auth', {
         const response = await api.get('/auth/profile');
 
         if (response.data) {
-          const { scope, featureFlags, ...userOnly } = response.data;
+          const { scope, featureFlags, setupMode, ...userOnly } = response.data;
           this.user = userOnly;
           this.scope = scope || null;
           this.featureFlags = featureFlags || {};
+          this.setupMode = setupMode || 'done';
           localStorage.setItem('user', JSON.stringify(userOnly));
           if (scope) localStorage.setItem('scope', JSON.stringify(scope));
           if (featureFlags) localStorage.setItem('featureFlags', JSON.stringify(featureFlags));

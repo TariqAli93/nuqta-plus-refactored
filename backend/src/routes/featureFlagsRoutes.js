@@ -17,4 +17,14 @@ export default async function featureFlagsRoutes(fastify) {
     handler: controller.update,
     schema: { description: 'Update feature flags', tags: ['settings'], security: [{ bearerAuth: [] }] },
   });
+
+  fastify.post('/setup', {
+    onRequest: [fastify.authenticate, fastify.authorize('manage_feature_toggles')],
+    handler: controller.applySetupPreset,
+    schema: {
+      description: 'Apply a setup wizard preset (simple | installments | multi_branch)',
+      tags: ['settings'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
 }

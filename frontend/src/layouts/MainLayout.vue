@@ -27,7 +27,13 @@
         />
       </router-link>
 
-      <v-list :lines="false" density="comfortable" nav style="margin-top: 65px">
+      <v-list
+        v-model:opened="openedGroups"
+        :lines="false"
+        density="comfortable"
+        nav
+        style="margin-top: 65px"
+      >
         <!-- Main Menu Items -->
         <template v-for="item in filteredMenu" :key="item.title">
           <!-- Non-group items -->
@@ -50,11 +56,11 @@
             </div>
           </v-list-item>
 
-          <!-- Group items -->
+          <!-- Group items — each group has a unique `value` so v-list's
+               `opened` model can toggle them independently. -->
           <v-list-group
             v-else
-            v-model:open="navigationDrawerSubItemsOpen"
-            :value="navigationDrawerSubItemsOpen"
+            :value="item.title"
             :ripple="false"
             fluid
             class="custom-group"
@@ -262,8 +268,29 @@ const getInitialDrawerState = () => {
 const drawer = ref(getInitialDrawerState());
 const isDark = computed(() => theme.global.current.value.dark);
 
-// Navigation drawer sub-items open state
-const navigationDrawerSubItemsOpen = ref(['/users']);
+// Which list-groups are currently expanded. Each entry is the group title
+// (e.g. 'العمليات'), matching the `value` we put on each <v-list-group>.
+const openedGroups = ref([]);
+
+/** Find the group title that contains a sub-item matching `path`, if any. */
+const groupTitleForPath = (path) => {
+  for (const item of filteredMenu.value) {
+    if (!item.group) continue;
+    if (item.group.items.some((sub) => sub.to && path.startsWith(sub.to))) {
+      return item.title;
+    }
+  }
+  return null;
+};
+
+/** Expand the group containing the active route (without collapsing others
+ *  the user already opened). */
+const ensureActiveGroupOpen = () => {
+  const title = groupTitleForPath(route.path);
+  if (title && !openedGroups.value.includes(title)) {
+    openedGroups.value = [...openedGroups.value, title];
+  }
+};
 
 // Quick Search - use event to open search dialog
 const openQuickSearch = () => {
@@ -392,6 +419,9 @@ watch(
     if (isMobile.value && drawer.value) {
       drawer.value = false;
     }
+
+    // Keep the active route's parent group expanded.
+    ensureActiveGroupOpen();
   },
   { immediate: true }
 );
@@ -421,10 +451,8 @@ onMounted(() => {
     alertStore.connectRealtime();
   }
 
-  // Update navigation drawer sub-items open state based on current route
-  if (route.path.startsWith('/users') || route.path.startsWith('/settings')) {
-    navigationDrawerSubItemsOpen.value = [route.path];
-  }
+  // Expand whichever group contains the page we landed on.
+  ensureActiveGroupOpen();
 });
 
 onUnmounted(() => {

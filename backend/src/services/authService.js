@@ -231,9 +231,10 @@ export class AuthService {
     delete userWithoutPassword.password;
 
     // Resolve branch scope + feature flags so the frontend can hydrate on login
-    const [scope, featureFlags] = await Promise.all([
+    const [scope, featureFlags, setupMode] = await Promise.all([
       resolveUserScope(user),
       featureFlagsService.getFeatureFlags(),
+      featureFlagsService.getSetupMode(),
     ]);
 
     return {
@@ -244,6 +245,7 @@ export class AuthService {
       },
       scope,
       featureFlags,
+      setupMode,
       token,
     };
   }
@@ -286,12 +288,14 @@ export class AuthService {
 
     user.permissions = this.getRolePermissions(user.role);
 
-    const [scope, featureFlags] = await Promise.all([
+    const [scope, featureFlags, setupMode] = await Promise.all([
       resolveUserScope(user),
       featureFlagsService.getFeatureFlags(),
+      featureFlagsService.getSetupMode(),
     ]);
     user.scope = scope;
     user.featureFlags = featureFlags;
+    user.setupMode = setupMode;
 
     return user;
   }

@@ -77,7 +77,7 @@ END $$;
 INSERT INTO "settings" ("key", "value", "description")
 VALUES (
   'feature_flags',
-  '{"installments":true,"creditScore":true,"inventory":true,"multiWarehouse":true,"multiBranch":true,"warehouseTransfers":true,"alerts":true,"liveOperations":true}',
+  '{"installments":true,"creditScore":true,"inventory":true,"multiWarehouse":false,"multiBranch":false,"warehouseTransfers":false,"alerts":true,"liveOperations":true}',
   'Feature toggles for optional product modules'
 )
 ON CONFLICT (key) DO NOTHING;

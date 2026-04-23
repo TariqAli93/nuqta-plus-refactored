@@ -74,9 +74,11 @@
 
 <script setup>
 import { onMounted, reactive, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
 import PaginationControls from '@/components/PaginationControls.vue';
 
+const router = useRouter();
 const inventoryStore = useInventoryStore();
 
 const filters = reactive({

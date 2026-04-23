@@ -34,6 +34,7 @@ import LowStock from '@/views/inventory/LowStock.vue';
 import BranchesWarehouses from '@/views/inventory/BranchesWarehouses.vue';
 import TransferRequests from '@/views/inventory/TransferRequests.vue';
 import FeatureFlags from '@/views/settings/FeatureFlags.vue';
+import SetupWizard from '@/views/settings/SetupWizard.vue';
 
 const routes = [
   {
@@ -125,13 +126,14 @@ const routes = [
         name: 'Notifications',
         component: Notifications,
       },
-      { path: 'inventory', name: 'Inventory', component: Inventory },
-      { path: 'inventory/movements', name: 'StockMovements', component: StockMovements },
-      { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer },
-      { path: 'inventory/low-stock', name: 'LowStock', component: LowStock },
-      { path: 'inventory/transfers', name: 'TransferRequests', component: TransferRequests },
-      { path: 'inventory/settings', name: 'BranchesWarehouses', component: BranchesWarehouses, meta: { requiresManageProducts: true } },
+      { path: 'inventory', name: 'Inventory', component: Inventory, meta: { feature: 'inventory' } },
+      { path: 'inventory/movements', name: 'StockMovements', component: StockMovements, meta: { feature: 'inventory' } },
+      { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer, meta: { feature: 'warehouseTransfers' } },
+      { path: 'inventory/low-stock', name: 'LowStock', component: LowStock, meta: { feature: 'inventory' } },
+      { path: 'inventory/transfers', name: 'TransferRequests', component: TransferRequests, meta: { feature: 'warehouseTransfers' } },
+      { path: 'inventory/settings', name: 'BranchesWarehouses', component: BranchesWarehouses, meta: { requiresManageProducts: true, anyFeature: ['multiBranch', 'multiWarehouse'] } },
       { path: 'settings/feature-flags', name: 'FeatureFlags', component: FeatureFlags, meta: { requiresGlobalAdmin: true } },
+      { path: 'setup', name: 'SetupWizard', component: SetupWizard, meta: { requiresGlobalAdmin: true } },
       { path: 'users', name: 'Users', component: Users, meta: { requiresViewUsers: true } },
       { path: 'profile', name: 'Profile', component: Profile }, // 👈 صفحة الملف الشخصي
       { path: 'settings', name: 'Settings', component: Settings },
@@ -205,6 +207,29 @@ router.beforeEach(async (to, from, next) => {
     }
     if (to.meta.requiresGlobalAdmin && !authStore.isGlobalAdmin) {
       return next({ name: 'Forbidden' });
+    }
+
+    // Feature-flag gate: hide entire pages when the flag is off.
+    if (to.meta.feature && authStore.featureFlags?.[to.meta.feature] === false) {
+      return next({ name: 'Dashboard' });
+    }
+    if (
+      Array.isArray(to.meta.anyFeature) &&
+      to.meta.anyFeature.length > 0 &&
+      !to.meta.anyFeature.some((f) => authStore.featureFlags?.[f] !== false)
+    ) {
+      return next({ name: 'Dashboard' });
+    }
+
+    // First-run wizard: redirect a global admin with pending setup to the
+    // wizard route, except when they're already there.
+    if (
+      authStore.needsSetupWizard &&
+      to.name !== 'SetupWizard' &&
+      to.name !== 'Login' &&
+      to.name !== 'Forbidden'
+    ) {
+      return next({ name: 'SetupWizard' });
     }
   }
 

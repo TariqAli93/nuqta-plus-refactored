@@ -4,14 +4,47 @@ import { eq } from 'drizzle-orm';
 import { ValidationError } from '../utils/errors.js';
 
 const SETTINGS_KEY = 'feature_flags';
+const SETUP_MODE_KEY = 'setup_mode';
 
+/** Preset bundles for the first-run wizard. */
+export const SETUP_PRESETS = Object.freeze({
+  simple: {
+    installments: false,
+    creditScore: false,
+    inventory: true,
+    multiBranch: false,
+    multiWarehouse: false,
+    warehouseTransfers: false,
+  },
+  installments: {
+    installments: true,
+    creditScore: true,
+    inventory: true,
+    multiBranch: false,
+    multiWarehouse: false,
+    warehouseTransfers: false,
+  },
+  multi_branch: {
+    installments: true,
+    creditScore: true,
+    inventory: true,
+    multiBranch: true,
+    multiWarehouse: true,
+    warehouseTransfers: true,
+  },
+});
+
+// Defaults chosen so a fresh install feels like a simple single-branch POS.
+// The setup wizard turns on advanced flags when the user asks for them.
 export const DEFAULT_FLAGS = Object.freeze({
   installments: true,
   creditScore: true,
   inventory: true,
-  multiWarehouse: true,
-  multiBranch: true,
-  warehouseTransfers: true,
+  // Advanced — off by default
+  multiBranch: false,
+  multiWarehouse: false,
+  warehouseTransfers: false,
+  // Keep operational features on so alerts keep working out of the box
   alerts: true,
   liveOperations: true,
 });
@@ -76,7 +109,7 @@ export async function updateFeatureFlags(partial, userId) {
   return next;
 }
 
-/** Fastify-style guard: reply 403 if the flag is off. */
+/** Fastify-style guard: throws if the flag is off. */
 export async function requireFeature(flag) {
   const enabled = await isFeatureEnabled(flag);
   if (!enabled) {
@@ -84,10 +117,51 @@ export async function requireFeature(flag) {
   }
 }
 
+/** Read/write the setup wizard state (`"pending" | "done"`). */
+export async function getSetupMode() {
+  const db = await getDb();
+  const [row] = await db.select().from(settings).where(eq(settings.key, SETUP_MODE_KEY)).limit(1);
+  return row?.value || 'pending';
+}
+
+export async function setSetupMode(value, userId) {
+  const db = await getDb();
+  const [row] = await db.select().from(settings).where(eq(settings.key, SETUP_MODE_KEY)).limit(1);
+  if (row) {
+    await db
+      .update(settings)
+      .set({ value, updatedAt: new Date(), updatedBy: userId || null })
+      .where(eq(settings.key, SETUP_MODE_KEY));
+  } else {
+    await db.insert(settings).values({
+      key: SETUP_MODE_KEY,
+      value,
+      description: 'First-run setup wizard state',
+      updatedBy: userId || null,
+    });
+  }
+}
+
+/**
+ * Apply a preset bundle (`simple` | `installments` | `multi_branch`) and mark
+ * setup as done. Returns the resulting flags.
+ */
+export async function applySetupPreset(preset, userId) {
+  const bundle = SETUP_PRESETS[preset];
+  if (!bundle) throw new ValidationError(`Unknown setup preset: ${preset}`);
+  const next = await updateFeatureFlags(bundle, userId);
+  await setSetupMode('done', userId);
+  return next;
+}
+
 export default {
   DEFAULT_FLAGS,
+  SETUP_PRESETS,
   getFeatureFlags,
   isFeatureEnabled,
   updateFeatureFlags,
   requireFeature,
+  getSetupMode,
+  setSetupMode,
+  applySetupPreset,
 };

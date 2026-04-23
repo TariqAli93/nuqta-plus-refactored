@@ -11,7 +11,6 @@
         <div class="flex gap-2 flex-wrap">
           <v-btn
             color="primary"
-            variant="tonal"
             prepend-icon="mdi-transfer"
             size="default"
             :to="{ name: 'StockTransfer' }"
@@ -20,7 +19,6 @@
           </v-btn>
           <v-btn
             color="warning"
-            variant="tonal"
             prepend-icon="mdi-tune"
             size="default"
             :disabled="!inventoryStore.selectedWarehouseId"
@@ -29,15 +27,14 @@
             تعديل يدوي
           </v-btn>
           <v-btn
-            color="secondary"
-            variant="tonal"
+            color="error"
             prepend-icon="mdi-history"
             size="default"
             :to="{ name: 'StockMovements' }"
           >
             حركات المخزون
           </v-btn>
-          <v-btn
+          <!-- <v-btn
             color="error"
             variant="tonal"
             prepend-icon="mdi-alert"
@@ -45,7 +42,7 @@
             :to="{ name: 'LowStock' }"
           >
             منخفض المخزون
-          </v-btn>
+          </v-btn> -->
         </div>
       </div>
     </v-card>

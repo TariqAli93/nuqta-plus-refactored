@@ -1,8 +1,6 @@
 <template>
   <v-container>
-    <div class="d-flex align-center justify-space-between mb-4">
-      <h1 class="text-h4">لوحة التحكم</h1>
-    </div>
+    <RoleHero />
 
     <v-row>
       <v-col cols="12" md="3" :class="$vuetify.display.mdAndUp ? 'sticky-sidebar' : ''">
@@ -201,6 +199,7 @@ import RevenueChart from '@/components/dashboard/RevenueChart.vue';
 import TopProductsChart from '@/components/dashboard/TopProductsChart.vue';
 import SalesStatusChart from '@/components/dashboard/SalesStatusChart.vue';
 import AlertsPanel from '@/components/AlertsPanel.vue';
+import RoleHero from '@/components/dashboard/RoleHero.vue';
 
 const saleStore = useSaleStore();
 const productStore = useProductStore();

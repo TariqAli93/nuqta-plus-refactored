@@ -1,47 +1,47 @@
 <template>
-  <div v-if="showSwitcher" class="flex items-center gap-2">
-    <v-select
-      v-if="authStore.canSwitchBranch"
-      :model-value="inventoryStore.selectedBranchId"
-      :items="inventoryStore.branches"
-      item-title="name"
-      item-value="id"
-      label="الفرع"
-      density="compact"
-      hide-details
-      variant="outlined"
-      class="branch-select"
-      style="min-width: 140px"
-      :disabled="inventoryStore.branches.length === 0"
-      @update:model-value="onBranchChange"
-    />
-    <v-select
-      v-if="authStore.canSwitchWarehouse || authStore.canSwitchBranch"
-      :model-value="inventoryStore.selectedWarehouseId"
-      :items="visibleWarehouses"
-      item-title="name"
-      item-value="id"
-      label="المخزن"
-      density="compact"
-      hide-details
-      variant="outlined"
-      class="warehouse-select"
-      style="min-width: 160px"
-      :disabled="visibleWarehouses.length === 0"
-      @update:model-value="onWarehouseChange"
-    />
-  </div>
-  <!-- Branch-bound users: show a read-only label instead -->
-  <div
-    v-else-if="inventoryStore.selectedWarehouse || inventoryStore.selectedBranch"
-    class="flex items-center gap-1 text-body-2 text-medium-emphasis"
-  >
-    <v-icon size="18">mdi-store</v-icon>
-    <span>{{ inventoryStore.selectedBranch?.name }}</span>
-    <span v-if="inventoryStore.selectedWarehouse">
-      · {{ inventoryStore.selectedWarehouse.name }}
-    </span>
-  </div>
+  <!-- Nothing to show when multi-branch/multi-warehouse features are off -->
+  <template v-if="shouldRender">
+    <!-- Global admin: switchable dropdowns -->
+    <div v-if="canSwitch" class="flex items-center gap-2 ml-2">
+      <v-select
+        v-if="authStore.canSwitchBranch && authStore.featureFlags?.multiBranch !== false"
+        :model-value="inventoryStore.selectedBranchId"
+        :items="inventoryStore.branches"
+        item-title="name"
+        item-value="id"
+        label="الفرع"
+        density="compact"
+        hide-details
+        variant="outlined"
+        style="min-width: 140px"
+        :disabled="inventoryStore.branches.length === 0"
+        @update:model-value="onBranchChange"
+      />
+      <v-select
+        v-if="
+          (authStore.canSwitchWarehouse || authStore.canSwitchBranch) &&
+          authStore.featureFlags?.multiWarehouse !== false
+        "
+        :model-value="inventoryStore.selectedWarehouseId"
+        :items="visibleWarehouses"
+        item-title="name"
+        item-value="id"
+        label="المخزن"
+        density="compact"
+        hide-details
+        variant="outlined"
+        style="min-width: 160px"
+        :disabled="visibleWarehouses.length === 0"
+        @update:model-value="onWarehouseChange"
+      />
+    </div>
+
+    <!-- Everyone else: read-only context label -->
+    <div v-else class="context-banner flex items-center gap-2 px-3 py-1 rounded ml-2">
+      <v-icon size="18" class="text-medium-emphasis">mdi-store</v-icon>
+      <span class="text-body-2">{{ contextLabel }}</span>
+    </div>
+  </template>
 </template>
 
 <script setup>
@@ -52,9 +52,17 @@ import { useAuthStore } from '@/stores/auth';
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();
 
-// The switcher (dropdowns) is only shown to global admins. Branch-bound users
-// see a read-only context label instead.
-const showSwitcher = computed(
+// Hide the whole widget when the user is on a single-branch single-warehouse
+// setup — there's nothing useful to show.
+const shouldRender = computed(() => {
+  if (authStore.isGlobalAdmin) return true;
+  const multi =
+    authStore.featureFlags?.multiBranch !== false ||
+    authStore.featureFlags?.multiWarehouse !== false;
+  return multi;
+});
+
+const canSwitch = computed(
   () => authStore.canSwitchBranch || authStore.canSwitchWarehouse
 );
 
@@ -64,25 +72,24 @@ const visibleWarehouses = computed(() => {
   return inventoryStore.warehousesForBranch.filter((w) => allowed.includes(w.id));
 });
 
-const onBranchChange = (id) => {
-  inventoryStore.setBranch(id);
-};
+const contextLabel = computed(() => {
+  const b = inventoryStore.selectedBranch?.name;
+  const w = inventoryStore.selectedWarehouse?.name;
+  if (b && w) return `${b} · ${w}`;
+  if (b) return b;
+  if (w) return w;
+  return 'السياق الحالي';
+});
 
-const onWarehouseChange = (id) => {
-  inventoryStore.setWarehouse(id);
-};
+const onBranchChange = (id) => inventoryStore.setBranch(id);
+const onWarehouseChange = (id) => inventoryStore.setWarehouse(id);
 
 onMounted(async () => {
-  // Hydrate branch/warehouse lists for whichever user is logged in.
-  if (inventoryStore.branches.length === 0) {
-    await inventoryStore.fetchBranches();
-  }
-  if (inventoryStore.warehouses.length === 0) {
-    await inventoryStore.fetchWarehouses();
-  }
+  if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
+  if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
 
-  // For branch-bound users, force the selection to match their assignment
-  // and block any saved local-storage selection from leaking context.
+  // Branch-bound users: force the selection to match their assignment so the
+  // Dashboard/POS always reflects the right context.
   if (!authStore.canSwitchBranch && authStore.assignedBranchId) {
     inventoryStore.setBranch(authStore.assignedBranchId);
   }
@@ -102,8 +109,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.branch-select :deep(.v-field),
-.warehouse-select :deep(.v-field) {
-  --v-field-padding-top: 2px;
+.context-banner {
+  background: rgba(var(--v-theme-primary), 0.06);
+  border: 1px solid rgba(var(--v-theme-primary), 0.14);
 }
 </style>
