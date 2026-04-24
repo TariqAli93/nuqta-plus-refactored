@@ -21,7 +21,8 @@
       "Bash(PGPASSWORD=root /c/Program Files/PostgreSQL/18/bin/psql.exe:*)",
       "Bash(ls:*)",
       "Bash(grep -E \"\\\\.js$\")",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npm run *)"
     ]
   }
 }

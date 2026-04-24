@@ -136,30 +136,33 @@
         <span class="cart__handle-bar" />
       </div>
 
+      <!-- Header -->
       <header class="cart__header">
-        <div class="cart__title">
-          <v-icon size="22">mdi-cart-outline</v-icon>
-          <span class="cart__title-text">السلة</span>
-          <span v-if="itemCount > 0" class="cart__badge">{{ itemCount }}</span>
+        <span class="cart__title-text">السلة</span>
+        <div class="cart__header-end">
+          <span v-if="itemCount > 0" class="cart__badge">{{ itemCount }} صنف</span>
+          <v-btn
+            v-if="items.length > 0"
+            size="x-small"
+            variant="text"
+            color="error"
+            class="cart__clear-btn"
+            @click="confirmClear"
+          >
+            تفريغ
+          </v-btn>
         </div>
-        <v-btn
-          v-if="items.length > 0"
-          size="x-small"
-          variant="text"
-          color="error"
-          @click="confirmClear"
-        >
-          تفريغ
-        </v-btn>
       </header>
 
+      <!-- Customer -->
       <div class="cart__customer">
         <CustomerSelector v-model="customerId" :required="false" />
       </div>
 
+      <!-- Lines -->
       <div class="cart__lines" aria-live="polite">
         <div v-if="items.length === 0" class="cart__empty">
-          <v-icon size="56" class="text-medium-emphasis">mdi-cart-outline</v-icon>
+          <v-icon size="48" class="text-medium-emphasis">mdi-cart-outline</v-icon>
           <div class="text-body-1 mt-2 font-weight-medium">السلة فارغة</div>
           <div class="text-caption text-medium-emphasis">
             اختر منتجاً أو امسح باركود لبدء البيع.
@@ -173,321 +176,265 @@
 
         <TransitionGroup v-else name="line-anim" tag="ul" class="cart__lines-list">
           <li
-            v-for="(item, idx) in items"
+            v-for="item in items"
             :key="item.id"
             class="line"
             :class="{ 'line--flash': flashItemId === item.id }"
           >
-            <div class="line__main">
-              <div class="line__name-row">
-                <span class="line__index" aria-hidden="true">{{ idx + 1 }}</span>
-                <span class="line__name" :title="item.name">{{ item.name }}</span>
-              </div>
-              <div class="line__chips">
-                <span class="line__price">{{ formatMoney(item.price, currency) }}</span>
+            <!-- Name + breakdown (clickable to edit) -->
+            <div
+              class="line__info"
+              role="button"
+              tabindex="0"
+              @click="openLineEdit(item)"
+              @keydown.enter.prevent="openLineEdit(item)"
+            >
+              <div class="line__name" :title="item.name">{{ item.name }}</div>
+              <div class="line__breakdown">
+                {{ item.qty }} × {{ formatMoney(Math.max(0, item.price - item.discount), currency) }}
                 <span v-if="item.discount > 0" class="line__chip line__chip--warning">
-                  <v-icon size="11">mdi-tag-outline</v-icon>
-                  − {{ formatMoney(item.discount, currency) }}
+                  <v-icon size="10">mdi-tag-outline</v-icon>
+                  خصم
                 </span>
-                <button
-                  v-if="item.note"
-                  type="button"
-                  class="line__chip line__chip--note"
-                  :title="item.note"
-                  @click="openLineEdit(item)"
-                >
-                  <v-icon size="11">mdi-note-text-outline</v-icon>
-                  {{ truncate(item.note, 16) }}
-                </button>
+                <span v-if="item.note" class="line__chip line__chip--note" :title="item.note">
+                  {{ truncate(item.note, 10) }}
+                </span>
               </div>
             </div>
 
-            <div class="line__qty-col">
-              <div class="qty">
-                <button
-                  type="button"
-                  class="qty__btn"
-                  aria-label="إنقاص"
-                  @click="decQty(item.id)"
-                >
-                  <v-icon size="18">mdi-minus</v-icon>
-                </button>
-                <input
-                  :value="item.qty"
-                  type="number"
-                  min="1"
-                  class="qty__input"
-                  inputmode="numeric"
-                  @blur="(e) => commitQty(item.id, e.target.value)"
-                  @keyup.enter="(e) => { commitQty(item.id, e.target.value); e.target.blur(); }"
-                />
-                <button
-                  type="button"
-                  class="qty__btn"
-                  aria-label="زيادة"
-                  @click="incQty(item.id)"
-                >
-                  <v-icon size="18">mdi-plus</v-icon>
-                </button>
-              </div>
-              <span
-                v-if="item.availableStock > 0 && item.qty >= item.availableStock"
-                class="qty__max"
-                :title="`الحد الأقصى: ${item.availableStock}`"
-              >
-                أقصى
-              </span>
-            </div>
-
-            <div class="line__totals">
-              <div class="line__subtotal">{{ formatMoney(lineSubtotal(item), currency) }}</div>
-              <div
-                v-if="item.qty > 1 || item.discount > 0"
-                class="line__breakdown"
-                aria-hidden="true"
-              >
-                {{ item.qty }}×{{ formatMoney(Math.max(0, item.price - item.discount), currency) }}
-              </div>
-            </div>
-
-            <div class="line__actions">
-              <button
-                type="button"
-                class="line__icon-btn"
-                :aria-label="`خيارات ${item.name}`"
-                @click="openLineEdit(item)"
-              >
-                <v-icon size="18">mdi-dots-horizontal</v-icon>
+            <!-- Qty stepper: + qty − -->
+            <div class="qty">
+              <button type="button" class="qty__btn" aria-label="زيادة" @click="incQty(item.id)">
+                <v-icon size="14">mdi-plus</v-icon>
               </button>
-              <button
-                type="button"
-                class="line__icon-btn line__icon-btn--danger"
-                :aria-label="`إزالة ${item.name}`"
-                @click="removeItem(item.id)"
-              >
-                <v-icon size="18">mdi-close</v-icon>
+              <input
+                :value="item.qty"
+                type="number"
+                min="1"
+                class="qty__input"
+                inputmode="numeric"
+                @blur="(e) => commitQty(item.id, e.target.value)"
+                @keyup.enter="(e) => { commitQty(item.id, e.target.value); e.target.blur(); }"
+              />
+              <button type="button" class="qty__btn" aria-label="إنقاص" @click="decQty(item.id)">
+                <v-icon size="14">mdi-minus</v-icon>
               </button>
             </div>
+
+            <!-- Line subtotal -->
+            <div class="line__subtotal">
+              {{ formatMoney(lineSubtotal(item), currency) }}
+            </div>
+
+            <!-- Remove -->
+            <button
+              type="button"
+              class="line__remove"
+              :aria-label="`إزالة ${item.name}`"
+              @click="removeItem(item.id)"
+            >
+              <v-icon size="15">mdi-close</v-icon>
+            </button>
           </li>
         </TransitionGroup>
       </div>
 
-      <!-- ── Payment bar ────────────────────────────────────── -->
-      <section class="pay" aria-label="الدفع">
-        <!-- Collapsible advanced options -->
-        <div class="pay__advanced" :class="{ 'is-open': advOpen }">
-          <button
-            type="button"
-            class="pay__advanced-toggle"
-            :aria-expanded="advOpen"
-            @click="advOpen = !advOpen"
-          >
-            <v-icon size="16">mdi-tune-variant</v-icon>
-            <span>خيارات الدفع</span>
-            <span v-if="adjSummary" class="pay__advanced-summary">{{ adjSummary }}</span>
-            <v-icon size="16" class="pay__advanced-caret">
-              {{ advOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
-            </v-icon>
-          </button>
-
-          <div v-show="advOpen" class="pay__advanced-body">
-            <div class="pay__row">
-              <span class="pay__row-label">الخصم</span>
-              <v-btn-toggle
-                v-model="saleDiscount.type"
-                density="compact"
-                variant="outlined"
-                mandatory
-                divided
-              >
-                <v-btn value="amount" size="x-small">مبلغ</v-btn>
-                <v-btn value="percent" size="x-small">%</v-btn>
-              </v-btn-toggle>
-              <input
-                :value="saleDiscount.value"
-                type="number"
-                min="0"
-                class="pay__row-input"
-                @change="(e) => (saleDiscount.value = Math.max(0, Number(e.target.value) || 0))"
-              />
-            </div>
-
-            <div class="pay__row">
-              <v-switch
-                v-model="tax.enabled"
-                density="compact"
-                hide-details
-                inset
-                color="primary"
-                label="ضريبة"
-              />
-              <input
-                v-if="tax.enabled"
-                :value="tax.value"
-                type="number"
-                min="0"
-                max="100"
-                class="pay__row-input"
-                @change="(e) => (tax.value = Math.max(0, Number(e.target.value) || 0))"
-              />
-              <span v-if="tax.enabled" class="text-caption">%</span>
-            </div>
-
-            <div class="pay__methods" role="radiogroup" aria-label="طريقة الدفع">
-              <button
-                v-for="m in paymentMethods"
-                :key="m.value"
-                type="button"
-                class="pay__method"
-                :class="{ active: payment.method === m.value }"
-                role="radio"
-                :aria-checked="payment.method === m.value"
-                @click="payment.method = m.value"
-              >
-                <v-icon size="16">{{ m.icon }}</v-icon>
-                {{ m.label }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Compact breakdown: shown inline only when discount/tax in play -->
-        <div
-          v-if="items.length > 0 && (discountValue > 0 || taxValue > 0)"
-          class="pay__breakdown"
+      <!-- ── Payment method tabs ──────────────────────────── -->
+      <div class="pay__methods" role="radiogroup" aria-label="طريقة الدفع">
+        <button
+          v-for="m in paymentMethods"
+          :key="m.value"
+          type="button"
+          class="pay__method"
+          :class="{ active: payment.method === m.value }"
+          role="radio"
+          :aria-checked="payment.method === m.value"
+          @click="payment.method = m.value"
         >
-          <span class="pay__breakdown-item">
-            <span class="text-medium-emphasis">فرعي</span>
-            <span>{{ formatMoney(subtotal, currency) }}</span>
-          </span>
-          <span v-if="discountValue > 0" class="pay__breakdown-item text-warning">
-            <span>خصم</span>
-            <span>− {{ formatMoney(discountValue, currency) }}</span>
-          </span>
-          <span v-if="taxValue > 0" class="pay__breakdown-item">
-            <span class="text-medium-emphasis">ضريبة</span>
-            <span>+ {{ formatMoney(taxValue, currency) }}</span>
-          </span>
-        </div>
+          <v-icon size="20">{{ m.icon }}</v-icon>
+          <span>{{ m.label }}</span>
+        </button>
+      </div>
 
-        <!-- Primary row: total / paid / change -->
-        <div class="pay__primary pay__primary--list" role="list" aria-label="ملخص الدفع">
-          <div class="pay__item pay__item--total" role="listitem">
-            <span class="pay__item-label">الإجمالي</span>
-            <span class="pay__item-value">{{ formatMoney(total, currency) }}</span>
-          </div>
-
-          <div class="pay__item pay__item--paid" role="listitem">
-            <label for="pos-paid" class="pay__item-label">المستلم</label>
-            <div class="paid">
-              <input
-                id="pos-paid"
-                type="number"
-                min="0"
-                step="0.01"
-                inputmode="numeric"
-                class="paid__input"
-                aria-label="المبلغ المستلم"
-                placeholder="0"
-                :value="payment.paidAmount"
-                @input="(e) => setPaid(e.target.value)"
-                @focus="(e) => e.target.select()"
-              />
-              <button
-                type="button"
-                class="paid__full"
-                :disabled="total === 0"
-                title="تعبئة المبلغ بالكامل"
-                @click="applyExact"
-              >
-                كامل
-              </button>
-            </div>
-          </div>
-
-          <div class="pay__item pay__item--change" role="listitem">
-            <span class="pay__item-label">{{ changeLabel }}</span>
-            <span class="pay__item-value" :class="changeStateClass">
-              {{ formatMoney(changeAmount, currency) }}
+      <!-- ── Paid amount + quick actions (makes checkout faster) ──────────── -->
+      <div v-if="items.length > 0" class="pay__paid">
+        <div class="pay__paid-top">
+          <div class="pay__paid-title">
+            <span class="pay__paid-label">المستلم</span>
+            <span class="pay__paid-sub text-caption text-medium-emphasis">
+              {{ changeLabel }}
             </span>
           </div>
-        </div>
 
-        <!-- Quick amounts: appear when a total exists -->
-        <div v-if="total > 0" class="pay__quicks" aria-label="مبالغ سريعة">
-          <div class="pay__quicks-head">
-            <span class="pay__quicks-title">مبالغ سريعة</span>
+          <div class="pay__paid-actions">
+            <button type="button" class="pay__mini" @click="applyExact">بالضبط</button>
+            <button type="button" class="pay__mini" @click="resetPaid">تصفير</button>
             <button
-              v-if="payment.paidAmount > 0"
               type="button"
-              class="quick quick--reset"
-              title="تصفير المبلغ المستلم"
-              @click="resetPaid"
+              class="pay__mini pay__mini--adv"
+              :aria-expanded="adjustmentsOpen"
+              @click="adjustmentsOpen = !adjustmentsOpen"
             >
-              تصفير
-            </button>
-          </div>
-          <div class="pay__quicks-grid">
-            <button
-              v-for="amt in quickAmounts"
-              :key="amt"
-              type="button"
-              class="quick quick--amt"
-              @click="addToPaid(amt)"
-            >
-              +{{ formatMoney(amt, currency) }}
+              خيارات
+              <span v-if="adjSummary" class="pay__mini-hint">{{ adjSummary }}</span>
             </button>
           </div>
         </div>
 
-        <!-- Installment switch (only when relevant) -->
-        <v-switch
-          v-if="authStore.isFeatureEnabled('installments') && remaining > 0"
-          v-model="payment.saveAsInstallment"
-          color="warning"
-          density="compact"
-          hide-details
-          inset
-          :label="
-            customerId
-              ? 'حفظ المتبقي كدَين (أقساط)'
-              : 'اختر عميلاً لحفظ المتبقي كدَين'
-          "
-          :disabled="!customerId"
-          class="pay__installment"
-        />
-
-        <!-- Blocking reason hint -->
-        <div v-if="blockingReason" class="pay__hint">
-          <v-icon size="16">mdi-information-outline</v-icon>
-          {{ blockingReason }}
+        <div class="pay__paid-row">
+          <v-text-field
+            v-model.number="payment.paidAmount"
+            type="number"
+            min="0"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            class="pay__paid-input"
+            :placeholder="currency === 'USD' ? '0.00' : '0'"
+            @blur="(e) => setPaid(e.target.value)"
+          />
+          <div class="pay__delta" :class="changeStateClass">
+            <span class="pay__delta-value">{{ formatMoney(changeAmount, currency) }}</span>
+          </div>
         </div>
 
-        <!-- Actions -->
-        <div class="pay__actions">
-          <v-btn
-            variant="text"
-            size="small"
-            :disabled="items.length === 0 || submitting"
-            @click="onHold"
+        <div v-if="payment.method === 'cash'" class="pay__quick">
+          <button
+            v-for="a in quickAmounts"
+            :key="a"
+            type="button"
+            class="pay__quick-btn"
+            @click="addToPaid(a)"
           >
-            <v-icon start size="18">mdi-content-save-outline</v-icon>
-            مسودة
-          </v-btn>
-          <v-btn
-            size="x-large"
-            color="primary"
-            class="pay__checkout"
-            :loading="submitting"
-            :disabled="!canSubmit"
-            @click="checkout"
-          >
-            <v-icon start size="22">mdi-cash-register</v-icon>
-            دفع وإتمام
-            <span class="pay__hotkey">F9</span>
-          </v-btn>
+            + {{ formatMoney(a, currency) }}
+          </button>
         </div>
-      </section>
+
+        <div v-if="payment.method !== 'cash'" class="pay__refs">
+          <v-text-field
+            v-model="payment.reference"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            label="مرجع العملية (اختياري)"
+          />
+        </div>
+
+        <div class="pay__installment">
+          <label class="pay__installment-row">
+            <input v-model="payment.saveAsInstallment" type="checkbox" />
+            <span>حفظ المتبقي كدَين (يتطلب اختيار عميل)</span>
+          </label>
+        </div>
+
+        <Transition name="line-anim">
+          <div v-if="adjustmentsOpen" class="pay__adjustments">
+            <div class="pay__adjust-grid">
+              <v-text-field
+                v-model.number="saleDiscount.value"
+                type="number"
+                min="0"
+                variant="outlined"
+                density="comfortable"
+                hide-details
+                label="خصم"
+              />
+              <div class="pay__seg">
+                <button
+                  type="button"
+                  class="pay__seg-btn"
+                  :class="{ active: saleDiscount.type === 'amount' }"
+                  @click="saleDiscount.type = 'amount'"
+                >
+                  مبلغ
+                </button>
+                <button
+                  type="button"
+                  class="pay__seg-btn"
+                  :class="{ active: saleDiscount.type === 'percent' }"
+                  @click="saleDiscount.type = 'percent'"
+                >
+                  %
+                </button>
+              </div>
+
+              <v-text-field
+                v-model.number="tax.value"
+                type="number"
+                min="0"
+                variant="outlined"
+                density="comfortable"
+                hide-details
+                :label="tax.type === 'percent' ? 'ضريبة %' : 'ضريبة'"
+                :disabled="!tax.enabled"
+              />
+              <label class="pay__toggle">
+                <input v-model="tax.enabled" type="checkbox" />
+                <span>تفعيل الضريبة</span>
+              </label>
+            </div>
+          </div>
+        </Transition>
+      </div>
+
+      <!-- ── Summary + Total ────────────────────────────── -->
+      <div class="pay__summary">
+        <div
+          v-if="items.length > 0 && (discountValue > 0 || taxValue > 0)"
+          class="pay__summary-rows"
+        >
+          <div class="pay__summary-row">
+            <span class="pay__summary-value">{{ formatMoney(subtotal, currency) }}</span>
+            <span class="pay__summary-label">المجموع الفرعي</span>
+          </div>
+          <div v-if="discountValue > 0" class="pay__summary-row">
+            <span class="pay__summary-value pay__summary-value--discount">
+              {{ formatMoney(discountValue, currency) }} −
+            </span>
+            <span class="pay__summary-label">الخصم</span>
+          </div>
+          <div v-if="taxValue > 0" class="pay__summary-row">
+            <span class="pay__summary-value">{{ formatMoney(taxValue, currency) }}</span>
+            <span class="pay__summary-label">الضريبة (%{{ tax.value }})</span>
+          </div>
+        </div>
+
+        <div class="pay__total-row">
+          <span class="pay__total-value">{{ formatMoney(total, currency) }}</span>
+          <span class="pay__total-label">الإجمالي</span>
+        </div>
+      </div>
+
+      <!-- ── Blocking hint ──────────────────────────────── -->
+      <div v-if="blockingReason" class="pay__hint">
+        <v-icon size="16">mdi-information-outline</v-icon>
+        {{ blockingReason }}
+      </div>
+
+      <!-- ── Actions ────────────────────────────────────── -->
+      <div class="pay__actions">
+        <v-btn
+          variant="outlined"
+          size="large"
+          class="pay__draft-btn"
+          :disabled="items.length === 0 || submitting"
+          @click="onHold"
+        >
+          حفظ كمسودة
+        </v-btn>
+        <v-btn
+          size="large"
+          color="primary"
+          class="pay__checkout"
+          :loading="submitting"
+          :disabled="!canSubmit"
+          @click="checkout"
+        >
+          <v-icon start size="18">mdi-check-circle-outline</v-icon>
+          دفع وإتمام
+          <span class="pay__hotkey">(F9)</span>
+        </v-btn>
+      </div>
     </aside>
 
     <!-- ═══════════════════ Overlays ═══════════════════ -->
@@ -557,7 +504,6 @@ import {
   useSettingsStore,
   useNotificationStore,
 } from '@/stores';
-import { useAuthStore } from '@/stores/auth';
 import { usePosCart } from '@/composables/usePosCart';
 import CustomerSelector from '@/components/CustomerSelector.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
@@ -567,7 +513,6 @@ const productStore = useProductStore();
 const categoryStore = useCategoryStore();
 const inventoryStore = useInventoryStore();
 const settingsStore = useSettingsStore();
-const authStore = useAuthStore();
 const notify = useNotificationStore();
 const router = useRouter();
 
@@ -619,8 +564,8 @@ const products = ref([]);
 const categories = ref([]);
 const loadingProducts = ref(false);
 const cartOpen = ref(false);
-const advOpen = ref(true);       // expanded on desktop, collapsed on mobile (set onMounted)
 const clearDialog = ref(false);
+const adjustmentsOpen = ref(true); // expanded on desktop, collapsed on mobile (set onMounted)
 
 // Per-line edit dialog state
 const lineEditOpen = ref(false);
@@ -675,9 +620,10 @@ watch(searchInput, (v) => {
 
 // ── Payment UI config ──────────────────────────────────────────────────────
 const paymentMethods = [
-  { value: 'cash', label: 'نقدي', icon: 'mdi-cash' },
-  { value: 'card', label: 'بطاقة', icon: 'mdi-credit-card' },
-  { value: 'bank_transfer', label: 'حوالة', icon: 'mdi-bank-transfer' },
+  { value: 'cash',          label: 'نقداً',   icon: 'mdi-cash' },
+  { value: 'card',          label: 'بطاقة',   icon: 'mdi-credit-card-outline' },
+  { value: 'bank_transfer', label: 'تحويل',   icon: 'mdi-bank-transfer' },
+  { value: 'deferred',      label: 'دَمج',    icon: 'mdi-clock-outline' },
 ];
 
 const quickAmounts = computed(() =>
@@ -745,7 +691,6 @@ const changeStateClass = computed(() => {
   return 'is-neutral';
 });
 
-/** Short summary of adjustments shown next to the "خيارات" toggle. */
 const adjSummary = computed(() => {
   const parts = [];
   if (Number(saleDiscount.value) > 0) {
@@ -949,7 +894,7 @@ const onGridKey = (e) => {
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 onMounted(async () => {
-  advOpen.value = !isMobile.value;
+  adjustmentsOpen.value = !isMobile.value;
 
   if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
   if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
@@ -1320,42 +1265,48 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: var(--pos-space-3) var(--pos-space-4);
   border-bottom: 1px solid var(--pos-border);
-}
-
-.cart__title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--pos-space-2);
-  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .cart__title-text {
-  font-size: 0.95rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.cart__header-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pos-space-2);
 }
 
 .cart__badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 8px;
+  padding: 3px 10px;
   border-radius: 999px;
-  background: var(--pos-primary);
-  color: rgb(var(--v-theme-on-primary));
+  background: var(--pos-primary-soft);
+  color: var(--pos-primary);
   font-size: 0.75rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(var(--v-theme-primary), 0.18);
+}
+
+.cart__clear-btn {
+  opacity: 0.7;
 }
 
 .cart__customer {
-  padding: var(--pos-space-2) var(--pos-space-4) 0;
+  padding: var(--pos-space-2) var(--pos-space-4) var(--pos-space-2);
+  border-bottom: 1px solid var(--pos-border);
+  flex-shrink: 0;
 }
 
 .cart__lines {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--pos-space-2) var(--pos-space-3) var(--pos-space-3);
   scrollbar-gutter: stable;
 }
 
@@ -1401,49 +1352,43 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Cart lines list (TransitionGroup target) ── */
+/* ── Cart lines list ── */
 .cart__lines-list {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
-/* ── Line: indexed row with chips + breakdown ──
- * Divider-based rhythm (list), not stacked boxes — reads as one list.
- */
+/* ── Line: 4-col compact row (info | stepper | subtotal | remove) ── */
 .line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 1fr auto auto auto;
   align-items: center;
-  gap: var(--pos-space-3);
-  padding: var(--pos-space-2);
-  border-radius: var(--pos-radius-md);
+  gap: var(--pos-space-2);
+  padding: var(--pos-space-2) var(--pos-space-3);
   position: relative;
   transition: background 0.15s ease;
 
   & + & {
     border-top: 1px solid var(--pos-border);
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
   }
 
   &:hover {
     background: var(--pos-surface-soft);
   }
 
-  /* Flash on add / qty-increase — quick primary pulse */
   &--flash {
     animation: line-flash 0.9s ease-out;
   }
 }
 
 @keyframes line-flash {
-  0%   { background: rgba(var(--v-theme-primary), 0.22); }
-  60%  { background: rgba(var(--v-theme-primary), 0.10); }
+  0%   { background: rgba(var(--v-theme-primary), 0.18); }
+  60%  { background: rgba(var(--v-theme-primary), 0.08); }
   100% { background: transparent; }
 }
 
-/* List enter/leave/move transitions */
+/* List transitions */
 .line-anim-enter-from {
   opacity: 0;
   transform: translateY(-6px);
@@ -1468,78 +1413,48 @@ onUnmounted(() => {
   transition: transform 0.18s ease;
 }
 
-/* ── Line inner layout ── */
-.line__main {
+/* Name + breakdown column */
+.line__info {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+  cursor: pointer;
+  border-radius: var(--pos-radius-sm);
 
-.line__name-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--pos-space-2);
-  min-width: 0;
-}
-
-.line__index {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 4px;
-  border-radius: 6px;
-  background: var(--pos-surface-tint);
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  font-size: 0.7rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  &:focus-visible {
+    outline: 2px solid var(--pos-primary);
+    outline-offset: 2px;
+  }
 }
 
 .line__name {
-  flex: 1;
-  min-width: 0;
   font-weight: 600;
-  font-size: 0.9rem;
-  line-height: 1.25;
+  font-size: 0.88rem;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.line__chips {
-  display: inline-flex;
-  flex-wrap: wrap;
+.line__breakdown {
+  display: flex;
   align-items: center;
-  gap: var(--pos-space-1);
+  flex-wrap: wrap;
+  gap: 4px;
   font-size: 0.72rem;
-}
-
-.line__price {
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  color: rgba(var(--v-theme-on-surface), 0.55);
   font-variant-numeric: tabular-nums;
+  margin-top: 2px;
 }
 
 .line__chip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 8px;
+  gap: 2px;
+  padding: 1px 6px;
   border-radius: 999px;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  background: var(--pos-surface-tint);
-  color: rgba(var(--v-theme-on-surface), 0.75);
   border: none;
   font-family: inherit;
-  max-width: 140px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 
   &--warning {
     background: rgba(var(--v-theme-warning), 0.14);
@@ -1547,109 +1462,46 @@ onUnmounted(() => {
   }
 
   &--note {
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-
-    &:hover {
-      background: var(--pos-primary-soft);
-      color: var(--pos-primary);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--pos-primary);
-      outline-offset: 1px;
-    }
+    background: var(--pos-surface-tint);
+    color: rgba(var(--v-theme-on-surface), 0.7);
+    max-width: 100px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 }
 
-/* Qty cell with optional "أقصى" chip below the stepper */
-.line__qty-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-}
-
-.qty__max {
-  font-size: 0.65rem;
+/* Subtotal column */
+.line__subtotal {
   font-weight: 700;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: rgba(var(--v-theme-warning), 0.14);
-  color: rgb(var(--v-theme-warning));
-  line-height: 1.4;
-  letter-spacing: 0.02em;
-}
-
-/* Totals cell: subtotal + tiny breakdown line */
-.line__totals {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  min-width: 74px;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 68px;
   text-align: end;
 }
 
-.line__subtotal {
-  font-weight: 700;
-  color: var(--pos-primary);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.95rem;
-  line-height: 1.15;
-}
-
-.line__breakdown {
-  font-size: 0.68rem;
-  color: rgba(var(--v-theme-on-surface), 0.5);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.3;
-  margin-top: 1px;
-}
-
-/* Actions stack (⋯ and ×). Hover-reveal on pointer devices, always visible on touch. */
-.line__actions {
-  display: flex;
-  gap: 2px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .line__actions {
-    opacity: 0.35;
-    transition: opacity 0.15s ease;
-  }
-
-  .line:hover .line__actions,
-  .line:focus-within .line__actions,
-  .line--flash .line__actions {
-    opacity: 1;
-  }
-}
-
-.line__icon-btn {
+/* Remove button */
+.line__remove {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
-  background: transparent;
+  border-radius: 50%;
   border: none;
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  background: transparent;
+  color: rgba(var(--v-theme-on-surface), 0.32);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
 
   &:hover {
-    background: var(--pos-surface-tint);
-    color: rgb(var(--v-theme-on-surface));
-  }
-
-  &--danger:hover {
-    background: rgba(var(--v-theme-error), 0.12);
+    background: rgba(var(--v-theme-error), 0.1);
     color: rgb(var(--v-theme-error));
   }
 
   &:focus-visible {
-    outline: 2px solid var(--pos-primary);
+    outline: 2px solid rgb(var(--v-theme-error));
     outline-offset: 1px;
   }
 }
@@ -1665,8 +1517,8 @@ onUnmounted(() => {
 }
 
 .qty__btn {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 999px;
   border: none;
   background: transparent;
@@ -1689,7 +1541,7 @@ onUnmounted(() => {
 }
 
 .qty__input {
-  width: 38px;
+  width: 32px;
   text-align: center;
   padding: 0;
   border: none;
@@ -1697,13 +1549,12 @@ onUnmounted(() => {
   color: inherit;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 
   &:focus-visible {
     outline: none;
   }
 
-  /* Hide number input spinners — we use the stepper buttons instead */
   &::-webkit-outer-spin-button,
   &::-webkit-inner-spin-button {
     -webkit-appearance: none;
@@ -1715,354 +1566,338 @@ onUnmounted(() => {
   }
 }
 
-/* ══════════════════ Payment bar ══════════════════ */
-.pay {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--pos-space-2);
-  padding: var(--pos-space-3) var(--pos-space-4) var(--pos-space-4);
-  border-top: 1px solid var(--pos-border);
-  background: var(--pos-surface);
-}
+/* ══════════════════ Payment section ══════════════════ */
 
-/* ── Advanced options (collapsible) ── */
-.pay__advanced {
-  border-radius: var(--pos-radius-md);
-  background: var(--pos-surface-soft);
-  border: 1px solid var(--pos-border);
-  overflow: hidden;
-}
-
-.pay__advanced-toggle {
-  width: 100%;
-  display: inline-flex;
-  align-items: center;
+/* ── Method tabs: 4-column icon+label grid ── */
+.pay__methods {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--pos-space-2);
   padding: var(--pos-space-2) var(--pos-space-3);
-  background: none;
-  border: none;
-  color: inherit;
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 600;
+  border-top: 1px solid var(--pos-border);
+  flex-shrink: 0;
+}
+
+.pay__paid {
+  padding: 10px 12px 4px;
+  border-top: 1px solid var(--pos-border);
+  flex-shrink: 0;
+}
+
+.pay__paid-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pos-space-2);
+  margin-bottom: 8px;
+}
+
+.pay__paid-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pay__paid-label {
+  font-weight: 800;
+  font-size: 0.88rem;
+}
+
+.pay__paid-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pay__mini {
+  border: 1px solid var(--pos-border);
+  background: var(--pos-surface-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
   cursor: pointer;
-  text-align: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
 
   &:hover {
-    background: var(--pos-surface-tint);
+    background: var(--pos-primary-soft);
+    border-color: rgba(var(--v-theme-primary), 0.25);
   }
 }
 
-.pay__advanced-summary {
-  flex: 1;
-  font-weight: 400;
-  color: rgba(var(--v-theme-on-surface), 0.65);
-  font-size: 0.78rem;
-  margin-inline-start: var(--pos-space-2);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.pay__mini--adv {
+  border-style: dashed;
 }
 
-.pay__advanced-caret {
-  margin-inline-start: auto;
-  color: rgba(var(--v-theme-on-surface), 0.5);
+.pay__mini-hint {
+  margin-inline-start: 6px;
+  opacity: 0.75;
+  font-weight: 600;
 }
 
-.pay__advanced-body {
-  padding: var(--pos-space-2) var(--pos-space-3) var(--pos-space-3);
-  display: flex;
-  flex-direction: column;
+.pay__paid-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: var(--pos-space-2);
+  align-items: center;
+}
+
+.pay__paid-input {
+  min-width: 0;
+}
+
+.pay__delta {
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: var(--pos-radius-md);
+  border: 1px solid var(--pos-border);
+  background: var(--pos-surface-soft);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+
+  &.is-success {
+    border-color: rgba(var(--v-theme-success), 0.35);
+    background: rgba(var(--v-theme-success), 0.08);
+    color: rgb(var(--v-theme-success));
+  }
+
+  &.is-error {
+    border-color: rgba(var(--v-theme-error), 0.35);
+    background: rgba(var(--v-theme-error), 0.08);
+    color: rgb(var(--v-theme-error));
+  }
+}
+
+.pay__delta-value {
+  font-weight: 900;
+}
+
+.pay__quick {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.pay__quick-btn {
+  border: 1px solid var(--pos-border);
+  background: var(--pos-surface-soft);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--pos-primary-soft);
+    border-color: rgba(var(--v-theme-primary), 0.25);
+  }
+}
+
+.pay__refs {
+  margin-top: 8px;
+}
+
+.pay__installment {
+  margin-top: 8px;
+}
+
+.pay__installment-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.78rem;
+  color: rgba(var(--v-theme-on-surface), 0.8);
+
+  input {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.pay__adjustments {
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--pos-border);
 }
 
-.pay__row {
-  display: flex;
+.pay__adjust-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  gap: 8px;
   align-items: center;
-  gap: var(--pos-space-2);
-  flex-wrap: wrap;
 }
 
-.pay__row-label {
-  font-size: 0.82rem;
-  font-weight: 500;
+.pay__seg {
+  display: inline-flex;
+  border: 1px solid var(--pos-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--pos-surface-soft);
 }
 
-.pay__row-input {
-  width: 100px;
-  padding: 6px 8px;
-  text-align: center;
-  border: 1px solid var(--pos-border-strong);
-  border-radius: var(--pos-radius-sm);
-  background: var(--pos-surface);
-  color: inherit;
-  font-variant-numeric: tabular-nums;
+.pay__seg-btn {
+  border: none;
+  background: transparent;
+  padding: 8px 10px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  cursor: pointer;
+  color: rgba(var(--v-theme-on-surface), 0.7);
 
-  &:focus-visible {
-    outline: 2px solid var(--pos-primary);
-    outline-offset: 1px;
-    border-color: var(--pos-primary);
+  &.active {
+    background: var(--pos-primary);
+    color: rgb(var(--v-theme-on-primary));
   }
 }
 
-.pay__methods {
-  display: flex;
-  gap: var(--pos-space-1);
-  flex-wrap: wrap;
+.pay__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: rgba(var(--v-theme-on-surface), 0.8);
+  white-space: nowrap;
+
+  input {
+    width: 16px;
+    height: 16px;
+  }
 }
 
 .pay__method {
-  flex: 1 1 0;
-  min-width: 90px;
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--pos-space-1);
-  padding: 8px 10px;
-  border-radius: var(--pos-radius-sm);
+  gap: 5px;
+  padding: var(--pos-space-2) var(--pos-space-1);
+  min-height: 60px;
+  border-radius: var(--pos-radius-md);
   border: 1px solid var(--pos-border);
-  background: var(--pos-surface);
+  background: var(--pos-surface-soft);
   color: inherit;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
-  &:hover { background: var(--pos-primary-soft); }
+  &:hover {
+    background: var(--pos-primary-soft);
+    color: var(--pos-primary);
+    border-color: rgba(var(--v-theme-primary), 0.25);
+  }
+
   &.active {
     background: var(--pos-primary);
     color: rgb(var(--v-theme-on-primary));
     border-color: var(--pos-primary);
   }
+
   &:focus-visible {
     outline: 2px solid var(--pos-primary);
     outline-offset: 1px;
   }
 }
 
-/* ── Compact breakdown (inline) ── */
-.pay__breakdown {
-  display: flex;
-  gap: var(--pos-space-3);
-  flex-wrap: wrap;
-  padding: 6px var(--pos-space-2);
-  font-size: 0.78rem;
-  font-variant-numeric: tabular-nums;
+/* ── Summary rows ── */
+.pay__summary {
+  padding: var(--pos-space-2) var(--pos-space-4) var(--pos-space-1);
+  flex-shrink: 0;
 }
 
-.pay__breakdown-item {
-  display: inline-flex;
-  gap: 4px;
-}
-
-/* ── Primary row (Total / Paid / Change) ── */
-.pay__primary {
-  padding: var(--pos-space-2);
-  background: var(--pos-surface-soft);
-  border-radius: var(--pos-radius-md);
-  border: 1px solid var(--pos-border);
-}
-
-.pay__primary--list {
+.pay__summary-rows {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding-bottom: var(--pos-space-2);
+  border-bottom: 1px solid var(--pos-border);
+  margin-bottom: var(--pos-space-2);
 }
 
-.pay__item {
-  display: grid;
-  grid-template-columns: 92px 1fr;
+.pay__summary-row {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: var(--pos-space-2);
-  padding: 10px var(--pos-space-2);
-  border-radius: var(--pos-radius-sm);
-  background: var(--pos-surface);
-  border: 1px solid transparent;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
 }
 
-.pay__item-label {
-  font-size: 0.72rem;
-  color: rgba(var(--v-theme-on-surface), 0.62);
+.pay__summary-label {
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.pay__summary-value {
+  font-weight: 600;
+
+  &--discount {
+    color: rgb(var(--v-theme-warning));
+  }
+}
+
+/* ── Total row ── */
+.pay__total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pay__total-label {
+  font-size: 1rem;
   font-weight: 700;
-  white-space: nowrap;
+  color: rgba(var(--v-theme-on-surface), 0.75);
 }
 
-.pay__item-value {
-  font-size: 1.15rem;
+.pay__total-value {
+  font-size: 1.6rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
+  color: var(--pos-primary);
   line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: end;
 }
 
-.pay__item--total .pay__item-value {
-  color: var(--pos-primary);
-}
-
-.pay__item--paid {
-  border-color: rgba(var(--v-theme-primary), 0.16);
-}
-
-.pay__item--change .pay__item-value {
-  &.is-success { color: rgb(var(--v-theme-success)); }
-  &.is-error { color: rgb(var(--v-theme-error)); }
-  &.is-neutral { color: rgba(var(--v-theme-on-surface), 0.6); }
-}
-
-/* ── Paid input group ── */
-.paid {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-}
-
-.paid__input {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--pos-border-strong);
-  border-radius: var(--pos-radius-sm);
-  background: var(--pos-surface);
-  color: inherit;
-  font-size: 1.05rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  text-align: end;
-  direction: ltr;
-
-  &:focus-visible {
-    outline: 2px solid var(--pos-primary);
-    outline-offset: 1px;
-    border-color: var(--pos-primary);
-  }
-
-  &::placeholder {
-    color: rgba(var(--v-theme-on-surface), 0.45);
-    font-weight: 600;
-  }
-}
-
-.paid__full {
-  padding: 0 12px;
-  background: var(--pos-primary-soft);
-  color: var(--pos-primary);
-  border: 1px solid transparent;
-  border-radius: var(--pos-radius-sm);
-  font: inherit;
-  font-weight: 700;
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  min-width: 56px;
-
-  &:hover:not(:disabled) { background: var(--pos-primary-hover); }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
-}
-
-/* ── Quick amounts ── */
-.pay__quicks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 var(--pos-space-2);
-}
-
-.pay__quicks-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--pos-space-2);
-}
-
-.pay__quicks-title {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: rgba(var(--v-theme-on-surface), 0.65);
-}
-
-.pay__quicks-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: 6px;
-}
-
-.quick {
-  background: var(--pos-primary-soft);
-  border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 5px 12px;
-  color: var(--pos-primary);
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-
-  &:hover { background: var(--pos-primary-hover); }
-  &:focus-visible {
-    outline: 2px solid var(--pos-primary);
-    outline-offset: 1px;
-  }
-
-  &--reset {
-    background: transparent;
-    color: rgba(var(--v-theme-on-surface), 0.6);
-    border-color: var(--pos-border);
-
-    &:hover { background: var(--pos-surface-tint); }
-  }
-
-  &--amt {
-    border-color: rgba(var(--v-theme-primary), 0.12);
-  }
-}
-
-.pay__installment {
-  margin: 0;
-}
-
+/* ── Blocking hint ── */
 .pay__hint {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 0.78rem;
   color: rgba(var(--v-theme-on-surface), 0.7);
+  padding: 0 var(--pos-space-4);
+  flex-shrink: 0;
 }
 
+/* ── Actions ── */
 .pay__actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr 2fr;
   gap: var(--pos-space-2);
+  padding: var(--pos-space-2) var(--pos-space-3) var(--pos-space-3);
+  flex-shrink: 0;
+}
+
+.pay__draft-btn {
+  height: 52px !important;
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .pay__checkout {
-  flex: 1;
-  height: 56px;
-  font-size: 1.05rem;
-  font-weight: 800;
+  height: 52px !important;
+  font-size: 1rem !important;
+  font-weight: 800 !important;
   letter-spacing: 0.02em;
   position: relative;
 }
 
 .pay__hotkey {
-  position: absolute;
-  inset-inline-start: 10px;
-  top: 6px;
-  font-size: 0.62rem;
-  opacity: 0.7;
+  font-size: 0.68rem;
+  opacity: 0.75;
   font-weight: 500;
+  margin-inline-start: 4px;
 }
 
 /* ══════════════════ Line-edit dialog ══════════════════ */
@@ -2151,31 +1986,52 @@ onUnmounted(() => {
   }
 
   .cart__lines {
-    max-height: 36vh;
+    max-height: 34vh;
   }
 
-  /* Compact pay bar on mobile */
-  .pay {
-    padding: 10px 12px 12px;
-    gap: 8px;
-  }
-
-  .pay__primary {
-    padding: 8px;
-  }
-
-  .pay__item {
-    grid-template-columns: 82px 1fr;
+  .pay__methods {
+    gap: 6px;
     padding: 8px 10px;
   }
 
-  .pay__item-value {
-    font-size: 1.05rem;
+  .pay__paid {
+    padding: 8px 10px 4px;
   }
 
+  .pay__paid-row {
+    grid-template-columns: 1fr;
+  }
+
+  .pay__delta {
+    min-width: 0;
+    text-align: start;
+  }
+
+  .pay__adjust-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pay__method {
+    min-height: 52px;
+    font-size: 0.68rem;
+  }
+
+  .pay__summary {
+    padding: 8px 12px 4px;
+  }
+
+  .pay__total-value {
+    font-size: 1.35rem;
+  }
+
+  .pay__actions {
+    padding: 8px 10px 12px;
+  }
+
+  .pay__draft-btn,
   .pay__checkout {
-    height: 52px;
-    font-size: 1rem;
+    height: 48px !important;
+    font-size: 0.92rem !important;
   }
 }
 </style>
