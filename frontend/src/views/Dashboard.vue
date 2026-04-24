@@ -187,7 +187,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watchEffect, onUnmounted } from 'vue';
+import { ref, computed, onMounted, watchEffect } from 'vue';
 import { useSaleStore } from '@/stores/sale';
 import { useProductStore } from '@/stores/product';
 import { useCustomerStore } from '@/stores/customer';
@@ -413,7 +413,7 @@ onMounted(async () => {
   await initCurrency();
 
   // مراقبة تغيير البيانات
-  const unwatch = watchEffect(() => {
+  watchEffect(() => {
     if (dashboardData.data.value) {
       recentSales.value = dashboardData.data.value.recentSales;
       stats.value = dashboardData.data.value.stats;
