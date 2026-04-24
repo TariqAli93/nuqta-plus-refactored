@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import {
+  SALE_SOURCES,
+  SALE_SOURCE_POS,
+  SALE_SOURCE_NEW_SALE,
+  SALE_TYPES,
+  SALE_TYPE_CASH,
+  SALE_TYPE_INSTALLMENT,
+  POS_PAYMENT_METHODS,
+  PAYMENT_METHOD_CARD,
+} from '../constants/sales.js';
 
 /**
  * Validation schemas using Zod
@@ -116,42 +126,113 @@ export const saleItemSchema = z.object({
   discount: z.coerce.number().nonnegative('Discount cannot be negative').optional(),
 });
 
-export const saleSchema = z.object({
-  customerId: z.union([z.number().int().positive(), z.null()]).optional(),
-  branchId: z.number().int().positive().optional(),
-  warehouseId: z.number().int().positive().optional(),
-  currency: z.enum(['USD', 'IQD'], {
-    errorMap: () => ({ message: 'Currency must be USD or IQD' }),
-  }),
-  exchangeRate: z.number().positive().optional(),
-  items: z
-    .array(saleItemSchema)
-    .min(1, 'Sale must have at least one item')
-    .refine((items) => items.length > 0, {
-      message: 'Sale cannot have empty items',
+export const saleSchema = z
+  .object({
+    customerId: z.union([z.number().int().positive(), z.null()]).optional(),
+    branchId: z.number().int().positive().optional(),
+    warehouseId: z.number().int().positive().optional(),
+    currency: z.enum(['USD', 'IQD'], {
+      errorMap: () => ({ message: 'Currency must be USD or IQD' }),
     }),
-  discount: z.number().nonnegative('Discount cannot be negative').optional().default(0),
-  tax: z
-    .number()
-    .nonnegative('Tax cannot be negative')
-    .max(100, 'Tax cannot exceed 100%')
-    .optional()
-    .default(0),
-  paymentType: z.enum(['cash', 'installment', 'mixed'], {
-    errorMap: () => ({ message: 'Payment type must be cash, installment, or mixed' }),
-  }),
-  paymentMethod: z.enum(['cash', 'card', 'bank_transfer']).optional(),
-  paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional().default(0),
-  installmentCount: z.number().int().positive('Installment count must be at least 1').optional(),
-  notes: z.string().nullable().optional(),
-  interestRate: z
-    .number()
-    .nonnegative('Interest rate cannot be negative')
-    .max(100, 'Interest rate cannot exceed 100%')
-    .optional()
-    .default(0),
-  interestAmount: z.number().nonnegative().optional(),
-});
+    exchangeRate: z.number().positive().optional(),
+    items: z
+      .array(saleItemSchema)
+      .min(1, 'Sale must have at least one item')
+      .refine((items) => items.length > 0, {
+        message: 'Sale cannot have empty items',
+      }),
+    discount: z.number().nonnegative('Discount cannot be negative').optional().default(0),
+    tax: z
+      .number()
+      .nonnegative('Tax cannot be negative')
+      .max(100, 'Tax cannot exceed 100%')
+      .optional()
+      .default(0),
+    // `paymentType` is the legacy column kept for backwards compatibility with
+    // the sales table. Clients should send `saleType` instead; we accept either.
+    paymentType: z.enum(['cash', 'installment', 'mixed']).optional(),
+    saleSource: z.enum(SALE_SOURCES, {
+      errorMap: () => ({ message: 'saleSource must be POS or NEW_SALE' }),
+    }),
+    saleType: z.enum(SALE_TYPES, {
+      errorMap: () => ({ message: 'saleType must be CASH or INSTALLMENT' }),
+    }),
+    paymentMethod: z.enum(POS_PAYMENT_METHODS).optional(),
+    paymentReference: z
+      .string()
+      .trim()
+      .min(1, 'Card reference cannot be empty')
+      .max(120, 'Card reference is too long')
+      .optional()
+      .nullable(),
+    paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional().default(0),
+    installmentCount: z.number().int().positive('Installment count must be at least 1').optional(),
+    notes: z.string().nullable().optional(),
+    paymentNotes: z.string().nullable().optional(),
+    interestRate: z
+      .number()
+      .nonnegative('Interest rate cannot be negative')
+      .max(100, 'Interest rate cannot exceed 100%')
+      .optional()
+      .default(0),
+    interestAmount: z.number().nonnegative().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // ── POS-originated sales: cash/card only, no deferred balance ───────────
+    if (data.saleSource === SALE_SOURCE_POS) {
+      if (data.saleType !== SALE_TYPE_CASH) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['saleType'],
+          message: 'POS supports cash/card sales only.',
+        });
+      }
+      if (data.paymentMethod && !POS_PAYMENT_METHODS.includes(data.paymentMethod)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentMethod'],
+          message: 'POS supports cash/card sales only.',
+        });
+      }
+      if (data.installmentCount && data.installmentCount > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['installmentCount'],
+          message: 'Installment sales must be created from NewSale.',
+        });
+      }
+    }
+
+    // ── NewSale: installments only ──────────────────────────────────────────
+    if (data.saleSource === SALE_SOURCE_NEW_SALE) {
+      if (data.saleType !== SALE_TYPE_INSTALLMENT) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['saleType'],
+          message: 'NewSale accepts installment sales only.',
+        });
+      }
+      if (!data.customerId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['customerId'],
+          message: 'Customer is required for installment sales.',
+        });
+      }
+    }
+
+    // ── Card payments must carry a non-empty reference ──────────────────────
+    if (data.paymentMethod === PAYMENT_METHOD_CARD) {
+      const ref = typeof data.paymentReference === 'string' ? data.paymentReference.trim() : '';
+      if (!ref) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentReference'],
+          message: 'Card reference number is required.',
+        });
+      }
+    }
+  });
 // Payment schemas
 export const paymentSchema = z.object({
   saleId: z.number().int().positive().optional(),
@@ -159,8 +240,26 @@ export const paymentSchema = z.object({
   amount: z.number().positive('Payment amount must be positive'),
   currency: z.enum(['USD', 'IQD']),
   exchangeRate: z.number().positive('Exchange rate must be positive'),
-  paymentMethod: z.enum(['cash', 'card', 'bank_transfer']),
+  paymentMethod: z.enum(POS_PAYMENT_METHODS),
+  paymentReference: z
+    .string()
+    .trim()
+    .min(1, 'Card reference cannot be empty')
+    .max(120, 'Card reference is too long')
+    .optional()
+    .nullable(),
   notes: z.string().nullable().optional(),
+}).superRefine((data, ctx) => {
+  if (data.paymentMethod === PAYMENT_METHOD_CARD) {
+    const ref = typeof data.paymentReference === 'string' ? data.paymentReference.trim() : '';
+    if (!ref) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paymentReference'],
+        message: 'Card reference number is required.',
+      });
+    }
+  }
 });
 
 // Installment schemas

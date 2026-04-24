@@ -204,7 +204,11 @@ export const sales = pgTable('sales', {
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).default('1'),
   interestRate: numeric('interest_rate', { precision: 8, scale: 4 }).default('0'),
   interestAmount: numeric('interest_amount', { precision: 18, scale: 4 }).default('0'),
-  paymentType: text('payment_type').notNull(), // 'cash', 'installment', 'mixed'
+  paymentType: text('payment_type').notNull(), // 'cash', 'installment', 'mixed' (legacy column)
+  // ── v2 source/type fields ────────────────────────────────────────────────
+  saleSource: text('sale_source'), // 'POS' | 'NEW_SALE'
+  saleType: text('sale_type'),     // 'CASH' | 'INSTALLMENT'
+  // ────────────────────────────────────────────────────────────────────────
   paidAmount: numeric('paid_amount', { precision: 18, scale: 4 }).default('0'),
   remainingAmount: numeric('remaining_amount', { precision: 18, scale: 4 }).default('0'),
   status: text('status').notNull().default('pending'),
@@ -238,6 +242,7 @@ export const payments = pgTable('payments', {
   currency: text('currency').notNull().default('USD'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).default('1'),
   paymentMethod: text('payment_method').notNull(),
+  paymentReference: text('payment_reference'),
   paymentDate: timestamp('payment_date').defaultNow(),
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow(),

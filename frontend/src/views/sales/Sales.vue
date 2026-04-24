@@ -10,7 +10,7 @@
           to="/sales/new"
           aria-label="إنشاء بيع جديد"
         >
-          بيع جديد
+          قسط جديد
         </v-btn>
       </div>
     </v-card>

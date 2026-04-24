@@ -310,13 +310,16 @@
           </button>
         </div>
 
-        <div v-if="payment.method !== 'cash'" class="pay__refs">
+        <div v-if="payment.method === 'card'" class="pay__refs">
           <v-text-field
             v-model="payment.reference"
             variant="outlined"
             density="comfortable"
-            hide-details
-            label="مرجع العملية (اختياري)"
+            :rules="[v => !!v?.trim() || 'رقم مرجع البطاقة مطلوب']"
+            :hint="payment.reference?.trim() ? '' : 'رقم مرجع / وصل البطاقة مطلوب'"
+            persistent-hint
+            label="مرجع البطاقة *"
+            autocomplete="off"
           />
         </div>
 
@@ -619,11 +622,11 @@ watch(searchInput, (v) => {
 });
 
 // ── Payment UI config ──────────────────────────────────────────────────────
+// POS supports cash and card only.  Deferred / bank-transfer are invalid here
+// — instalment sales must go through the NewSale screen instead.
 const paymentMethods = [
-  { value: 'cash',          label: 'نقداً',   icon: 'mdi-cash' },
-  { value: 'card',          label: 'بطاقة',   icon: 'mdi-credit-card-outline' },
-  { value: 'bank_transfer', label: 'تحويل',   icon: 'mdi-bank-transfer' },
-  { value: 'deferred',      label: 'دَمج',    icon: 'mdi-clock-outline' },
+  { value: 'cash', label: 'نقداً',  icon: 'mdi-cash' },
+  { value: 'card', label: 'بطاقة', icon: 'mdi-credit-card-outline' },
 ];
 
 const quickAmounts = computed(() =>

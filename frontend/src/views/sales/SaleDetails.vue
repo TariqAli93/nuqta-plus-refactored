@@ -343,6 +343,7 @@
               <th class="text-center">التاريخ</th>
               <th class="text-center">العملة</th>
               <th class="text-center">بواسطة</th>
+              <th class="text-center">رقم المرجع</th>
               <th class="text-right">ملاحظات</th>
             </tr>
           </thead>
@@ -356,6 +357,12 @@
               <td class="text-center">{{ toYmdWithTime(payment.createdAt) }}</td>
               <td class="text-center">{{ payment.currency }}</td>
               <td class="text-center">{{ payment.createdBy || '-' }}</td>
+              <td class="text-center">
+                <v-chip v-if="payment.paymentReference" size="small" variant="tonal" color="info">
+                  {{ payment.paymentReference }}
+                </v-chip>
+                <span v-else>-</span>
+              </td>
               <td>{{ payment.notes || '-' }}</td>
             </tr>
           </tbody>

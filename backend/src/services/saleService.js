@@ -1,6 +1,10 @@
 import { getDb, getPool, saveDatabase } from '../db.js';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import {
+  SALE_TYPE_INSTALLMENT,
+  saleTypeToPaymentType,
+} from '../constants/sales.js';
+import {
   sales,
   saleItems,
   products,
@@ -217,13 +221,26 @@ export class SaleService {
     const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
     const invoiceNumber = generateInvoiceNumber();
 
+    // ── Normalise saleSource / saleType / paymentType ──────────────────────
+    // New callers send `saleSource` + `saleType`; legacy callers only send
+    // `paymentType`. We accept either and keep both in sync so the DB
+    // column stays backward-compatible.
+    const saleSource = saleData.saleSource || null;
+    const saleType   = saleData.saleType   || null;
+    const paymentType =
+      saleData.paymentType ||
+      (saleType ? saleTypeToPaymentType(saleType) : 'cash');
+
+    const isInstallmentSale =
+      paymentType === 'installment' ||
+      paymentType === 'mixed' ||
+      saleType    === SALE_TYPE_INSTALLMENT;
+    // ───────────────────────────────────────────────────────────────────────
+
     let interestAmount = 0;
     let finalTotal = totals.total;
 
-    if (
-      (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
-      saleData.interestRate > 0
-    ) {
+    if (isInstallmentSale && saleData.interestRate > 0) {
       interestAmount = (totals.total * saleData.interestRate) / 100;
       finalTotal = totals.total + interestAmount;
     }
@@ -243,7 +260,7 @@ export class SaleService {
 
     const customerId = saleData.customerId || null;
 
-    if (saleData.paymentType === 'installment' && !customerId) {
+    if (isInstallmentSale && !customerId) {
       throw new ValidationError('Customer is required for installment payments');
     }
 
@@ -253,7 +270,7 @@ export class SaleService {
       customerId,
       total: finalTotal,
       user: actingUser,
-      paymentType: saleData.paymentType,
+      paymentType,
     });
 
     // Resolve branch + warehouse. Keeps existing callers working without changes.
@@ -283,7 +300,9 @@ export class SaleService {
           total: String(finalTotal),
           currency,
           exchangeRate: String(exchangeRate),
-          paymentType: saleData.paymentType,
+          paymentType,
+          saleSource,
+          saleType,
           paidAmount: String(paidAmount),
           remainingAmount: String(remainingAmount),
           status: remainingAmount <= 0 ? 'completed' : 'pending',
@@ -339,15 +358,13 @@ export class SaleService {
           currency,
           exchangeRate: String(exchangeRate),
           paymentMethod: saleData.paymentMethod || 'cash',
+          paymentReference: saleData.paymentReference || null,
           createdBy: userId,
-          notes: saleData.paymentNotes || 'دفع نقدي عند البيع',
+          notes: saleData.paymentNotes || null,
         });
       }
 
-      if (
-        (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
-        remainingAmount > 0
-      ) {
+      if (isInstallmentSale && remainingAmount > 0) {
         const installmentCount = parseInt(saleData.installmentCount) || 3;
 
         if (installmentCount < 1) {
@@ -633,6 +650,7 @@ export class SaleService {
         currency: paymentData.currency || sale.currency,
         exchangeRate: String(paymentData.exchangeRate || sale.exchangeRate),
         paymentMethod: paymentData.paymentMethod || 'cash',
+        paymentReference: paymentData.paymentReference || null,
         notes: paymentData.notes,
         createdBy: userId,
       });
@@ -1235,15 +1253,17 @@ export class SaleService {
           currency,
           exchangeRate: String(exchangeRate),
           paymentMethod: saleData.paymentMethod || 'cash',
+          paymentReference: saleData.paymentReference || null,
           createdBy: userId,
         });
       }
 
-      if (
-        (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
-        saleData.installments &&
-        saleData.installments.length > 0
-      ) {
+      const draftIsInstallment =
+        saleData.paymentType === 'installment' ||
+        saleData.paymentType === 'mixed' ||
+        saleData.saleType === SALE_TYPE_INSTALLMENT;
+
+      if (draftIsInstallment && saleData.installments && saleData.installments.length > 0) {
         const customerId = saleData.customerId || draft.customerId;
         if (!customerId) {
           throw new ValidationError('Customer ID is required for installment sales');

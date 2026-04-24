@@ -3,6 +3,11 @@ import { useSaleStore } from '@/stores/sale';
 import { useInventoryStore } from '@/stores/inventory';
 import { useSettingsStore } from '@/stores/settings';
 import { useNotificationStore } from '@/stores/notification';
+import {
+  SALE_SOURCE_POS,
+  SALE_TYPE_CASH,
+  PAYMENT_METHOD_CARD,
+} from '@/constants/sales';
 
 /**
  * POS cart + checkout state machine.
@@ -232,6 +237,12 @@ export function usePosCart() {
     const isInstallment = payment.saveAsInstallment && remaining.value > 0;
 
     return {
+      // ── v2 source / type ──────────────────────────────────────────────────
+      saleSource: SALE_SOURCE_POS,
+      saleType:   SALE_TYPE_CASH,
+      // ── legacy field (kept for backend backward-compat) ───────────────────
+      paymentType: 'cash',
+      // ─────────────────────────────────────────────────────────────────────
       customerId: customerId.value || null,
       currency: currency.value,
       items: items.map((i) => ({
@@ -242,11 +253,13 @@ export function usePosCart() {
       })),
       discount: discountValue.value,
       tax: taxPercent,
-      paymentType: isInstallment ? 'installment' : 'cash',
       paidAmount: Math.min(paidAmount.value, total.value),
       paymentMethod: payment.method,
+      paymentReference:
+        payment.method === PAYMENT_METHOD_CARD
+          ? (payment.reference?.trim() || null)
+          : null,
       interestRate: 0,
-      installmentCount: isInstallment ? 3 : undefined,
       notes: notes.value ? String(notes.value) : undefined,
       paymentNotes: payment.notes ? String(payment.notes) : undefined,
       branchId: inventoryStore.selectedBranchId || undefined,
@@ -256,6 +269,11 @@ export function usePosCart() {
 
   const submit = async () => {
     if (!canSubmit.value) return null;
+    // Card payments must carry a non-empty reference before we even hit the API.
+    if (payment.method === PAYMENT_METHOD_CARD && !payment.reference?.trim()) {
+      notify.error('رقم مرجع البطاقة مطلوب');
+      return null;
+    }
     submitting.value = true;
     try {
       const response = await saleStore.createSale(buildPayload());

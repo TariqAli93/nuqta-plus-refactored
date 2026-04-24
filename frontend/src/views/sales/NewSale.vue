@@ -5,7 +5,9 @@
       <v-card-title class="d-flex align-center justify-space-between pa-4">
         <div class="d-flex align-center gap-3">
           <v-icon size="28" color="primary">mdi-cart-plus</v-icon>
-          <span class="text-h5 font-weight-bold">بطاقة بيع جديدة</span>
+          <span class="text-h5 font-weight-bold">
+            بطاقة تقسيط جديدة
+          </span>
         </div>
         <v-btn color="primary" @click="handleCancel">
           <v-icon>mdi-arrow-left</v-icon>
@@ -246,20 +248,12 @@
               <v-row>
                 <v-col cols="12" md="4">
                   <v-select
-                    v-if="paymentTypes.length > 1"
+                    
                     v-model="sale.paymentType"
                     :items="paymentTypes"
                     item-title="label"
                     item-value="value"
                     label="نوع الفاتورة"
-                    density="comfortable"
-                    variant="outlined"
-                  />
-                  <v-text-field
-                    v-else
-                    model-value="نقدي"
-                    label="نوع الفاتورة"
-                    readonly
                     density="comfortable"
                     variant="outlined"
                   />
@@ -528,6 +522,7 @@ import CustomerSelector from '@/components/CustomerSelector.vue';
 import CreditScoreCard from '@/components/CreditScoreCard.vue';
 import { useKeyboardShortcuts, createPageShortcuts } from '@/composables/useKeyboardShortcuts';
 import FormFieldHelp from '@/components/FormFieldHelp.vue';
+import { SALE_SOURCE_NEW_SALE, SALE_TYPE_INSTALLMENT, SALE_TYPE_CASH } from '@/constants/sales';
 
 const router = useRouter();
 const route = useRoute();
@@ -561,7 +556,7 @@ const sale = ref({
   currency: settingsStore.settings?.defaultCurrency || 'IQD',
   items: [],
   discount: 0,
-  paymentType: 'cash',
+  paymentType: 'installment',
   paidAmount: 0,
   installmentCount: 3,
   interestRate: 25,
@@ -604,13 +599,7 @@ const applySaleCurrencyToItems = () => {
 };
 
 /* 💳 خيارات نوع الدفع */
-const paymentTypes = computed(() => {
-  const types = [{ label: 'نقدي', value: 'cash' }];
-  if (installmentsEnabled.value) {
-    types.push({ label: 'تقسيط', value: 'installment' });
-  }
-  return types;
-});
+const paymentTypes = computed(() => [{ label: 'تقسيط', value: 'installment' }]);
 
 /** If a user lands on NewSale with a stored draft/preference of `installment`
  *  after installments got disabled, silently downgrade to cash. */
@@ -618,7 +607,7 @@ watch(
   installmentsEnabled,
   (on) => {
     if (!on && sale.value.paymentType === 'installment') {
-      sale.value.paymentType = 'cash';
+      sale.value.paymentType = 'installment';
     }
   },
   { immediate: true }
@@ -984,6 +973,11 @@ const submitSale = async () => {
     // Falls back silently on the backend if the user hasn't picked one yet.
     const payload = {
       ...sale.value,
+      // ── v2 source / type ────────────────────────────────────────────────
+      saleSource: SALE_SOURCE_NEW_SALE,
+      saleType:
+        sale.value.paymentType === 'installment' ? SALE_TYPE_INSTALLMENT : SALE_TYPE_CASH,
+      // ────────────────────────────────────────────────────────────────────
       branchId: inventoryStore.selectedBranchId || undefined,
       warehouseId: inventoryStore.selectedWarehouseId || undefined,
     };

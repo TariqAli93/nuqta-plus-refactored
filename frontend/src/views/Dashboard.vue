@@ -227,7 +227,7 @@ const recentSales = ref([]);
 const countSales = ref(0);
 
 const quickActions = [
-  { title: 'بيع جديد', icon: 'mdi-plus-circle', to: '/sales/new', permission: 'create:sales' },
+  { title: 'بطاقة الاقساط', icon: 'mdi-plus-circle', to: '/sales/new', permission: 'create:sales' },
   {
     title: 'عميل جديد',
     icon: 'mdi-account-plus',
