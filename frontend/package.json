@@ -4,6 +4,8 @@
   "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
   "main": "./dist-electron/main/main.js",
   "type": "module",
+  "author": "NuqtaPlus Team",
+  "license": "Proprietary",
   "scripts": {
     "dev": "cross-env VITE_TARGET=electron vite",
     "dev:client": "cross-env VITE_TARGET=electron NUQTA_APP_MODE=client vite",

@@ -4,6 +4,8 @@
   "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
   "private": true,
   "type": "module",
+  "author": "NuqtaPlus Team",
+  "license": "Proprietary",
   "scripts": {
     "dev": "cross-env NODE_ENV=development concurrently \"cd backend && pnpm dev\" \"cd frontend && pnpm dev\"",
     "dev:client": "cd frontend && cross-env NODE_ENV=development pnpm dev:client",
@@ -34,8 +36,6 @@
     "vue",
     "fastify"
   ],
-  "author": "nuqtaplus Team",
-  "license": "Proprietary",
   "devDependencies": {
     "concurrently": "^9.1.0",
     "cross-env": "^10.1.0",

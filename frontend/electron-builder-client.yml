@@ -1,25 +1,24 @@
 appId: com.nuqtaplus.client
-productName: "نقطة بلس - عميل"
+productName: 'NuqtaPlus Client'
 asar: true
 
 files:
   - package.json
   - dist-electron/**/*
-  - "!**/*.map"
-  - "!**/.env*"
+  - '!**/*.map'
+  - '!**/.env*'
 
 extraResources:
   - from: dist-electron
     to: dist-electron
     filter:
-      - "**/*"
+      - '**/*'
 
   - from: ./splash.html
     to: dist-electron/dist/splash.html
 
   - from: ./electron/scripts
     to: dist-electron/scripts
-
 
 directories:
   buildResources: build
@@ -43,11 +42,11 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: "نقطة بلس - عميل"
+  shortcutName: 'NuqtaPlus Client'
   installerHeader: build/installer-header.bmp
   installerSidebar: build/installer-sidebar.bmp
   uninstallerIcon: build/icon.ico
-  uninstallDisplayName: "نقطة بلس - عميل"
+  uninstallDisplayName: 'NuqtaPlus Client'
   license: build/license.md
   unicode: true
   include: ../scripts/installer-include.nsh

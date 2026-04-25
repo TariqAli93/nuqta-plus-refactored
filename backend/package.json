@@ -4,6 +4,8 @@
   "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
   "type": "module",
   "main": "src/server.js",
+  "author": "NuqtaPlus Team",
+  "license": "Proprietary",
   "scripts": {
     "dev": "node --watch src/server.js --host",
     "start": "node src/server.js",
