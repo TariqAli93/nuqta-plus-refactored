@@ -355,12 +355,17 @@ const changeItemsPerPage = (limit) => {
   });
 };
 
+const draftRouteFor = (sale) => {
+  // Installment drafts open the full installment form; everything else
+  // (cash/card/etc.) resumes in the quick-pay POS screen.
+  const target = sale?.paymentType === 'installment' ? 'NewSale' : 'PosScreen';
+  return { name: target, query: { draftId: sale.id } };
+};
+
 const viewSale = (_event, { item }) => {
-  // إذا كانت المسودة، انتقل إلى صفحة إكمال البيع
   if (item.status === 'draft') {
-    router.push({ name: 'NewSale', query: { draftId: item.id } });
+    router.push(draftRouteFor(item));
   } else {
-    // للمبيعات الأخرى، انتقل إلى صفحة التفاصيل
     router.push({ name: 'SaleDetails', params: { id: item.id } });
   }
 };
@@ -420,8 +425,9 @@ const confirmRestoreSale = async () => {
 };
 
 const completeDraft = async (id) => {
-  // الانتقال إلى صفحة إكمال المسودة
-  router.push({ name: 'NewSale', query: { draftId: id } });
+  const sale = saleStore.sales.find((s) => s.id === id);
+  if (!sale) return;
+  router.push(draftRouteFor(sale));
 };
 
 const handleExport = () => {

@@ -111,6 +111,7 @@
                 <strong>عدد الأقساط: </strong>
                 <span class="text-info">{{ sale.installments.length }} قسط</span>
               </p>
+
               <!-- الإجمالي النهائي -->
               <v-divider
                 v-if="sale.paymentType === 'installment' && sale.interestAmount > 0"
@@ -421,6 +422,12 @@
             <v-icon class="ml-2">mdi-check</v-icon>
             إضافة الدفعة
           </v-btn>
+
+          <!-- add pay all button -->
+          <v-btn color="secondary" class="mr-3" :loading="loadingPayment" @click="payAll">
+            <v-icon class="ml-2">mdi-cash-multiple</v-icon>
+            دفع المبلغ المتبقي
+          </v-btn>
         </v-form>
       </v-card-text>
     </v-card>
@@ -670,6 +677,37 @@ const handlePaymentAmountInput = (value) => {
   paymentData.value.amount = num;
 };
 
+const payAll = async () => {
+  try {
+    loadingPayment.value = true;
+
+    await saleStore.addPayment({
+      amount: sale.value.remainingAmount,
+      paymentMethod: 'cash',
+      currency: sale.value.currency,
+      notes: '',
+    });
+
+    notificationStore.success('تم دفع المبلغ المتبقي بنجاح');
+
+    const response = await saleStore.fetchSale(params.id);
+    sale.value = response.data;
+
+    loadingPayment.value = false;
+
+    paymentData.value = {
+      amount: null,
+      paymentMethod: 'cash',
+      currency: sale.value.currency,
+      notes: '',
+    };
+  } catch (error) {
+    console.error('Failed to pay all:', error);
+    notificationStore.error('فشل في دفع المبلغ المتبقي');
+  } finally {
+    loadingPayment.value = false;
+  }
+};
 // lifecycle
 onMounted(async () => {
   try {

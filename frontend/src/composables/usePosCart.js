@@ -293,6 +293,66 @@ export function usePosCart() {
     }
   };
 
+  /**
+   * Hydrate the cart from a server-side draft sale record.
+   * Prevents duplicate hydration: a non-empty cart is left untouched.
+   * Skips items whose product cannot be found in the supplied list.
+   *
+   * @param {Object} draft - Sale row returned by the backend (status === 'draft').
+   * @param {Array<Object>} [productList] - Current product catalogue, used to
+   *   resolve names/SKUs/stock so the cart line renders correctly. Optional —
+   *   if omitted, falls back to fields stored on the draft item itself.
+   */
+  const loadDraft = (draft, productList = []) => {
+    if (!draft || !Array.isArray(draft.items)) return false;
+    if (items.length > 0) return false;
+
+    if (draft.currency) currency.value = draft.currency;
+    if (draft.customerId !== undefined) customerId.value = draft.customerId || null;
+    if (draft.notes) notes.value = String(draft.notes);
+
+    const findProduct = (id) =>
+      Array.isArray(productList) ? productList.find((p) => p.id === id) : null;
+
+    for (const it of draft.items) {
+      if (!it?.productId) continue;
+      const product = findProduct(it.productId);
+
+      const name = product?.name || it.productName || `#${it.productId}`;
+      const price = Number(it.unitPrice) || 0;
+      const qty = Math.max(1, Math.floor(Number(it.quantity) || 1));
+      const available = product ? resolveStock(product) : qty;
+
+      items.push({
+        id: nextId(it.productId),
+        productId: it.productId,
+        name,
+        sku: product?.sku || null,
+        barcode: product?.barcode || null,
+        price,
+        originalPrice: Number(product?.sellingPrice) || price,
+        originalCurrency: product?.currency || currency.value,
+        qty: Math.min(qty, available > 0 ? available : qty),
+        discount: Number(it.discount) || 0,
+        note: it.note ? String(it.note) : '',
+        currency: currency.value,
+        availableStock: available,
+      });
+    }
+
+    if (draft.discount) {
+      saleDiscount.type = 'amount';
+      saleDiscount.value = Number(draft.discount) || 0;
+    }
+    if (draft.tax) {
+      tax.enabled = true;
+      tax.type = 'percent';
+      tax.value = Number(draft.tax) || 0;
+    }
+
+    return true;
+  };
+
   return {
     // state
     currency,
@@ -334,6 +394,7 @@ export function usePosCart() {
     resetPaid,
     submit,
     holdAsDraft,
+    loadDraft,
     buildPayload,
   };
 }

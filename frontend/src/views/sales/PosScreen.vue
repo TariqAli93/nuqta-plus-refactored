@@ -30,32 +30,40 @@
           />
         </div>
 
-        <div class="toolbar__chips" role="tablist" aria-label="التصنيفات">
-          <button
-            type="button"
-            class="chip"
-            :class="{ active: selectedCategory === null }"
-            role="tab"
-            :aria-selected="selectedCategory === null"
-            @click="selectedCategory = null"
-          >
-            الكل
-            <span class="chip__count">{{ products.length }}</span>
-          </button>
-          <button
-            v-for="c in categoriesWithCounts"
-            :key="c.id"
-            type="button"
-            class="chip"
-            :class="{ active: selectedCategory === c.id }"
-            role="tab"
-            :aria-selected="selectedCategory === c.id"
-            @click="selectedCategory = c.id"
-          >
-            {{ c.name }}
-            <span class="chip__count">{{ c.count }}</span>
-          </button>
-        </div>
+        <v-slide-group show-arrows>
+          <v-slide-group-item v-for="c in categoriesWithCounts" :key="c.id">
+            <v-btn
+              class="flex items-center justify-between"
+              variant="elevated"
+              :color="selectedCategory === null ? 'primary' : 'secondary'"
+              density="default"
+              @click="selectedCategory = null"
+            >
+              <v-spacer class="mx-1" />
+              <span>الكل</span>
+              <v-spacer class="mx-1" />
+              <v-chip size="small">
+                {{ c.count }}
+              </v-chip>
+            </v-btn>
+
+            <v-divider vertical class="mx-2" />
+
+            <v-btn
+              variant="elevated"
+              :color="selectedCategory === c.id ? 'primary' : 'secondary'"
+              density="compact"
+              @click="selectedCategory = c.id"
+            >
+              <v-spacer class="mx-1" />
+              <span>{{ c.name }}</span>
+              <v-spacer class="mx-1" />
+              <v-chip size="small">
+                {{ c.count }}
+              </v-chip>
+            </v-btn>
+          </v-slide-group-item>
+        </v-slide-group>
       </header>
 
       <div ref="gridRef" class="products__grid" role="grid" aria-live="polite" @keydown="onGridKey">
@@ -142,58 +150,66 @@
           />
         </div>
 
-        <div class="numpad__actions-row">
-          <div class="numpad__keys">
-            <button
-              v-for="k in numpadKeys"
-              :key="k.value"
-              type="button"
-              class="numpad__key"
-              :class="k.cls"
-              :aria-label="k.aria || k.label"
-              @click="onNumpad(k.value)"
-            >
-              <v-icon v-if="k.icon" size="22">{{ k.icon }}</v-icon>
-              <span v-else>{{ k.label }}</span>
-            </button>
-          </div>
-          <div class="grid grid-cols-1 gap-1 w-full">
-            <div class="grid grid-cols-2 gap-2 w-full mb-3">
-              <button
-                v-for="a in quickAmounts"
-                :key="a"
-                type="button"
-                class="numpad__quick-btn"
-                :title="`+ ${formatMoney(a, currency)}`"
-                @click="addToPaid(a)"
+        <v-divider class="my-3" />
+
+        <v-row>
+          <v-col cols="8">
+            <div class="numpad__keys">
+              <v-btn
+                v-for="k in numpadKeys"
+                :key="k.value"
+                variant="elevated"
+                color="secondary"
+                :class="k.cls"
+                :aria-label="k.aria || k.label"
+                @click="onNumpad(k.value)"
               >
-                + {{ shortAmount(a) }}
-              </button>
-              <button
-                type="button"
-                class="numpad__util numpad__util--primary"
-                :disabled="items.length === 0"
-                @click="onFullPayment"
-              >
-                <v-icon size="16">mdi-cash-multiple</v-icon>
-                المبلغ كامل
-              </button>
+                <v-icon v-if="k.icon" size="22">{{ k.icon }}</v-icon>
+                <span v-else>{{ k.label }}</span>
+              </v-btn>
             </div>
+          </v-col>
+          <v-divider vertical />
+          <v-col cols="4">
+            <div class="grid grid-cols-1 gap-1 w-full">
+              <div class="grid grid-cols-2 gap-2 w-full mb-3">
+                <v-btn
+                  v-for="a in quickAmounts"
+                  :key="a"
+                  variant="elevated"
+                  color="secondary"
+                  :title="`+ ${formatMoney(a, currency)}`"
+                  @click="addToPaid(a)"
+                >
+                  <v-icon start size="18">mdi-plus</v-icon>
+                  {{ shortAmount(a) }}
+                </v-btn>
+                <v-btn
+                  variant="elevated"
+                  color="primary"
+                  class="numpad__util numpad__util--primary"
+                  :disabled="items.length === 0"
+                  @click="onFullPayment"
+                >
+                  <v-icon start size="18">mdi-cash-multiple</v-icon>
+                  المبلغ كامل
+                </v-btn>
+              </div>
 
-            <button
-              type="button"
-              class="numpad__util"
-              :disabled="!paidInput"
-              @click="onNumpad('clear')"
-            >
-              <v-icon size="16">mdi-refresh</v-icon>
-              تصفير
-            </button>
-          </div>
-        </div>
+              <v-btn
+                variant="elevated"
+                color="red"
+                :disabled="!paidInput"
+                @click="onNumpad('clear')"
+              >
+                <v-icon start size="18">mdi-refresh</v-icon>
+                تصفير
+              </v-btn>
+            </div>
+          </v-col>
+        </v-row>
 
-        
-
+        <v-divider class="my-3" />
         <!-- Actions -->
         <div class="pay__actions">
           <v-btn
@@ -276,10 +292,22 @@
               <div class="line__name" :title="item.name">
                 <span>{{ item.name }}</span>
                 <div class="flex-row gap-1">
-                  <v-btn variant="text" size="x-small" color="primary" @click.stop="openLineEdit(item)" @keydown.enter.stop="openLineEdit(item)">
+                  <v-btn
+                    variant="text"
+                    size="x-small"
+                    color="primary"
+                    @click.stop="openLineEdit(item)"
+                    @keydown.enter.stop="openLineEdit(item)"
+                  >
                     <v-icon>mdi-dots-vertical</v-icon>
                   </v-btn>
-                  <v-btn variant="text" size="x-small" color="error" @click.stop="removeItem(item.id)" @keydown.enter.stop="removeItem(item.id)">
+                  <v-btn
+                    variant="text"
+                    size="x-small"
+                    color="error"
+                    @click.stop="removeItem(item.id)"
+                    @keydown.enter.stop="removeItem(item.id)"
+                  >
                     <v-icon>mdi-trash-can-outline</v-icon>
                   </v-btn>
                 </div>
@@ -366,68 +394,62 @@
           <span class="cart__total-value">{{ formatMoney(total, currency) }}</span>
         </div>
 
-        <button
-          type="button"
-          class="cart__total-adv"
-          :aria-expanded="adjustmentsOpen"
-          @click="adjustmentsOpen = !adjustmentsOpen"
-        >
-          <v-icon size="14">{{ adjustmentsOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-          <span>خصم وضريبة</span>
-          <span v-if="adjSummary" class="cart__total-adv-hint">{{ adjSummary }}</span>
-        </button>
+        <v-divider class="my-3" />
 
-        <Transition name="line-anim">
-          <div v-if="adjustmentsOpen" class="cart__adjustments">
-            <div class="adj__row">
-              <div class="adj__seg">
-                <button
-                  type="button"
-                  class="adj__seg-btn"
-                  :class="{ active: saleDiscount.type === 'amount' }"
+        <div class="cart__adjustments">
+          <div class="adj__row">
+            <v-number-input
+              v-model.number="saleDiscount.value"
+              type="number"
+              min="0"
+              variant="outlined"
+              density="compact"
+              hide-details
+              control-variant="split"
+              label="خصم"
+            >
+              <template #prepend>
+                <v-btn
+                  :variant="saleDiscount.type === 'amount' ? 'elevated' : 'text'"
+                  size="x-small"
+                  color="primary"
                   @click="saleDiscount.type = 'amount'"
+                  @keydown.enter.stop="saleDiscount.type = 'amount'"
                 >
-                  مبلغ
-                </button>
-                <button
-                  type="button"
-                  class="adj__seg-btn"
-                  :class="{ active: saleDiscount.type === 'percent' }"
+                  <v-icon size="14">mdi-cash</v-icon>
+                </v-btn>
+                <v-btn
+                  :variant="saleDiscount.type === 'percent' ? 'elevated' : 'text'"
+                  size="x-small"
+                  color="primary"
                   @click="saleDiscount.type = 'percent'"
+                  @keydown.enter.stop="saleDiscount.type = 'percent'"
                 >
-                  %
-                </button>
-              </div>
-              <v-text-field
-                v-model.number="saleDiscount.value"
-                type="number"
-                min="0"
-                variant="outlined"
-                density="compact"
-                hide-details
-                label="خصم"
-                class="adj__field"
-              />
-            </div>
-            <div class="adj__row">
-              <label class="adj__toggle">
-                <input v-model="tax.enabled" type="checkbox" />
-                <span>ضريبة</span>
-              </label>
-              <v-text-field
-                v-model.number="tax.value"
-                type="number"
-                min="0"
-                variant="outlined"
-                density="compact"
-                hide-details
-                :label="tax.type === 'percent' ? 'نسبة %' : 'مبلغ'"
-                :disabled="!tax.enabled"
-                class="adj__field"
-              />
-            </div>
+                  <v-icon size="14">mdi-percent</v-icon>
+                </v-btn>
+              </template>
+            </v-number-input>
           </div>
-        </Transition>
+          <div class="adj__row">
+            <v-number-input
+              v-model.number="tax.value"
+              type="number"
+              min="0"
+              variant="outlined"
+              density="compact"
+              hide-details
+              control-variant="split"
+              label="ضريبة"
+              :readonly="!tax.enabled"
+            >
+              <template #prepend>
+                <v-switch v-model="tax.enabled" density="compact" color="primary" hide-details />
+              </template>
+            </v-number-input>
+          </div>
+        </div>
+
+        <v-divider class="my-3" />
 
         <!-- Payment methods -->
         <div class="pay__methods" role="radiogroup" aria-label="طريقة الدفع">
@@ -502,7 +524,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useDisplay } from 'vuetify';
 import {
   useProductStore,
@@ -510,6 +532,7 @@ import {
   useInventoryStore,
   useSettingsStore,
   useNotificationStore,
+  useSaleStore,
 } from '@/stores';
 import { usePosCart } from '@/composables/usePosCart';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
@@ -520,7 +543,13 @@ const categoryStore = useCategoryStore();
 const inventoryStore = useInventoryStore();
 const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
+const saleStore = useSaleStore();
 const router = useRouter();
+const route = useRoute();
+
+// Tracks the draft id we resumed from, so checkout can complete it instead of
+// creating a brand-new sale (and leaving the draft orphaned in the DB).
+const currentDraftId = ref(null);
 
 const { mobile: isMobile } = useDisplay();
 
@@ -542,7 +571,6 @@ const {
   remaining,
   itemCount,
   canSubmit,
-  blockingReason,
   lineSubtotal,
 
   addItem,
@@ -558,6 +586,7 @@ const {
   setPaid,
   submit,
   holdAsDraft,
+  loadDraft,
 } = usePosCart();
 
 // ── Local UI state ─────────────────────────────────────────────────────────
@@ -570,7 +599,6 @@ const categories = ref([]);
 const loadingProducts = ref(false);
 const cartOpen = ref(false);
 const clearDialog = ref(false);
-const adjustmentsOpen = ref(false);
 
 // Numpad: a free-typed string we own as the source of truth for the readout.
 // Sync to/from payment.paidAmount so applyExact / addToPaid still drive it.
@@ -777,17 +805,6 @@ const changeStateClass = computed(() => {
   return '';
 });
 
-const adjSummary = computed(() => {
-  const parts = [];
-  if (Number(saleDiscount.value) > 0) {
-    parts.push(
-      saleDiscount.type === 'percent' ? `خصم ${saleDiscount.value}%` : `خصم ${saleDiscount.value}`
-    );
-  }
-  if (tax.enabled && Number(tax.value) > 0) parts.push(`ضريبة ${tax.value}%`);
-  return parts.join(' • ');
-});
-
 // ── Formatting ─────────────────────────────────────────────────────────────
 const formatMoney = (value, cur) => {
   const n = Number(value || 0);
@@ -871,6 +888,16 @@ const checkout = async () => {
   if (!canSubmit.value) return;
   try {
     const sale = await submit();
+    // If we resumed a draft, remove it now that a real sale has replaced it.
+    // Failure here is non-fatal: the sale already succeeded.
+    if (currentDraftId.value) {
+      try {
+        await saleStore.removeSale(currentDraftId.value);
+      } catch (e) {
+        console.error('Failed to clean up resumed draft:', e);
+      }
+      currentDraftId.value = null;
+    }
     if (sale?.id) {
       notify.success('تم حفظ البيع بنجاح');
       clear();
@@ -888,6 +915,16 @@ const checkout = async () => {
 
 const onHold = async () => {
   try {
+    // Resuming an existing draft? Drop the old row first so we don't fork it
+    // into two competing drafts when the cashier saves again.
+    if (currentDraftId.value) {
+      try {
+        await saleStore.removeSale(currentDraftId.value);
+      } catch (e) {
+        console.error('Failed to remove previous draft:', e);
+      }
+      currentDraftId.value = null;
+    }
     const draft = await holdAsDraft();
     if (draft) {
       notify.success('تم حفظ المسودة');
@@ -993,9 +1030,42 @@ onMounted(async () => {
     /* keep default */
   }
 
+  await hydrateFromDraft();
+
   window.addEventListener('keydown', onKeydown);
   nextTick(() => barcodeRef.value?.focus?.());
 });
+
+// Resume a cash/card draft into the POS cart. Installment drafts are routed
+// to NewSale, so anything that lands here should be a cash-style draft —
+// we still validate to be defensive against stale links.
+const hydrateFromDraft = async () => {
+  const draftId = route.query.draftId ? Number(route.query.draftId) : null;
+  if (!draftId) return;
+  if (items.length > 0) return; // never clobber an in-progress cart
+
+  try {
+    const response = await saleStore.fetchSale(draftId);
+    const draft = response?.data?.data || response?.data || response || null;
+    if (!draft || draft.status !== 'draft') {
+      notify.error('المسودة غير صالحة');
+      return;
+    }
+    if (draft.paymentType === 'installment') {
+      // Wrong screen for this draft — bounce to NewSale instead of mangling it.
+      router.replace({ name: 'NewSale', query: { draftId } });
+      return;
+    }
+    const ok = loadDraft(draft, products.value);
+    if (ok) {
+      currentDraftId.value = draft.id;
+      notify.info('تم تحميل المسودة');
+    }
+  } catch (err) {
+    console.error('Failed to load POS draft:', err);
+    notify.error('فشل تحميل المسودة');
+  }
+};
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown);
@@ -1291,7 +1361,6 @@ onUnmounted(() => {
   line-height: 1.3;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 
   .product--featured & {
@@ -1719,9 +1788,6 @@ onUnmounted(() => {
     -webkit-appearance: none;
     margin: 0;
   }
-  &[type='number'] {
-    -moz-appearance: textfield;
-  }
 }
 
 .line__total {
@@ -1880,7 +1946,6 @@ onUnmounted(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--pos-space-2);
   padding: 8px 0px;
-  border-top: 1px solid var(--pos-border);
   flex-shrink: 0;
 }
 
