@@ -1,5 +1,6 @@
 import branchService from '../services/branchService.js';
 import { branchSchema } from '../utils/validation.js';
+import { enforceBranchScope } from '../services/scopeService.js';
 
 export class BranchController {
   async getAll(request, reply) {
@@ -8,7 +9,9 @@ export class BranchController {
   }
 
   async getById(request, reply) {
-    const data = await branchService.getById(Number(request.params.id));
+    const id = Number(request.params.id);
+    enforceBranchScope(request.user, id);
+    const data = await branchService.getById(id);
     return reply.send({ success: true, data });
   }
 
@@ -19,13 +22,29 @@ export class BranchController {
   }
 
   async update(request, reply) {
+    const id = Number(request.params.id);
+    enforceBranchScope(request.user, id);
     const validated = branchSchema.partial().parse(request.body);
-    const data = await branchService.update(Number(request.params.id), validated);
+    const data = await branchService.update(id, validated);
     return reply.send({ success: true, data, message: 'Branch updated' });
   }
 
   async delete(request, reply) {
-    const data = await branchService.delete(Number(request.params.id));
+    const id = Number(request.params.id);
+    enforceBranchScope(request.user, id);
+    const data = await branchService.delete(id);
     return reply.send({ success: true, data, message: data.message });
+  }
+
+  /**
+   * Resolve the default (or first active) warehouse for a branch.
+   * Used by the frontend to pick the active warehouse after login or branch
+   * switching without making the user choose manually.
+   */
+  async resolveActiveWarehouse(request, reply) {
+    const id = Number(request.params.id);
+    enforceBranchScope(request.user, id);
+    const data = await branchService.resolveActiveWarehouse(id);
+    return reply.send({ success: true, data });
   }
 }

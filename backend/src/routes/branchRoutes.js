@@ -17,6 +17,18 @@ export default async function branchRoutes(fastify) {
     schema: { description: 'Get branch by id', tags: ['inventory'], security: [{ bearerAuth: [] }] },
   });
 
+  // Resolve the active warehouse for a branch — falls back to the first active
+  // warehouse when no default is configured.
+  fastify.get('/:id/active-warehouse', {
+    onRequest: [fastify.authenticate, fastify.authorize('inventory:read')],
+    handler: branchController.resolveActiveWarehouse,
+    schema: {
+      description: 'Resolve default/active warehouse for a branch',
+      tags: ['inventory'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
   fastify.post('/', {
     onRequest: [fastify.authenticate, fastify.authorize('inventory:manage')],
     handler: branchController.create,
