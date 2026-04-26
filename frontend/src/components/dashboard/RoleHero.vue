@@ -23,20 +23,6 @@
         </v-card>
       </v-col>
     </v-row>
-
-    <div v-if="shortcuts.length" class="flex gap-2 mt-4 flex-wrap">
-      <v-btn
-        v-for="s in shortcuts"
-        :key="s.title"
-        :to="s.to"
-        :color="s.color || 'primary'"
-        :variant="s.variant || 'tonal'"
-        :prepend-icon="s.icon"
-        size="default"
-      >
-        {{ s.title }}
-      </v-btn>
-    </div>
   </v-card>
 </template>
 
@@ -62,11 +48,7 @@ const fullName = computed(() => authStore.user?.fullName || authStore.user?.user
  */
 const shouldRender = computed(() => {
   const f = authStore.featureFlags || {};
-  return (
-    f.multiBranch !== false ||
-    f.multiWarehouse !== false ||
-    f.warehouseTransfers !== false
-  );
+  return f.multiBranch !== false || f.multiWarehouse !== false || f.warehouseTransfers !== false;
 });
 
 const greeting = computed(() => {
@@ -165,7 +147,12 @@ const shortcuts = computed(() => {
     list.push({ title: 'بيع جديد', icon: 'mdi-plus-circle', to: '/sales/new', color: 'primary' });
   }
   if (authStore.hasPermission('create:customers')) {
-    list.push({ title: 'عميل جديد', icon: 'mdi-account-plus', to: '/customers/new', variant: 'outlined' });
+    list.push({
+      title: 'عميل جديد',
+      icon: 'mdi-account-plus',
+      to: '/customers/new',
+      variant: 'outlined',
+    });
   }
   if (
     authStore.hasPermission('approve_warehouse_transfer') &&
