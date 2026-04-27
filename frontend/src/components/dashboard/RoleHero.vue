@@ -145,9 +145,9 @@ const kpis = computed(() => {
 // ── Shortcuts per role ─────────────────────────────────────────────────────
 const shortcuts = computed(() => {
   const list = [];
-  // "New sale" hits the installment-sale screen — gate it on the installment
-  // capability, not just create:sales.
-  if (authStore.can('canUseInstallments')) {
+  // "New sale" hits the installment-sale screen — gate on BOTH the
+  // installments feature and the user's capability (defense-in-depth).
+  if (authStore.canUse('installments', 'canUseInstallments')) {
     list.push({ title: 'بيع جديد', icon: 'mdi-plus-circle', to: '/sales/new', color: 'primary' });
   }
   if (authStore.hasPermission('create:customers')) {
@@ -158,7 +158,7 @@ const shortcuts = computed(() => {
       variant: 'outlined',
     });
   }
-  if (authStore.can('canApproveTransfer')) {
+  if (authStore.canUse('inventoryTransfers', 'canApproveTransfer')) {
     list.push({
       title: 'طلبات النقل',
       icon: 'mdi-check-decagram',

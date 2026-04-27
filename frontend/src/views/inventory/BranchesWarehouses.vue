@@ -248,34 +248,33 @@ const warehouseForm = reactive({
 
 const branchFeatureOn = computed(() => authStore.hasFeature('multiBranch'));
 
-// All UI gating reads from `authStore.capabilities` (the global flags from
-// the backend) plus per-row `permissions` blocks the API attaches to each
-// branch/warehouse row. We never re-derive permissions from role here —
-// backend re-validates every mutation regardless of what we send.
-const capabilities = computed(() => authStore.capabilities || {});
-const canCreateBranch = computed(() => capabilities.value.canCreateBranch === true);
-const canCreateWarehouse = computed(() => capabilities.value.canCreateWarehouse === true);
+// All UI gating reads from the auth store's `can()` helper plus per-row
+// `permissions` blocks the API attaches to each branch/warehouse row.
+// We never re-derive permissions from role here — backend re-validates
+// every mutation regardless of what we send.
+const canCreateBranch = computed(() => authStore.can('canCreateBranch'));
+const canCreateWarehouse = computed(() => authStore.can('canCreateWarehouse'));
 
 // Per-branch flags fall back to the global capability when the API hasn't
 // attached a per-row block (e.g., during the brief moment before
 // fetchBranches resolves).
 const canEditBranchMetaFor = (b) =>
-  b?.permissions?.canEditMeta ?? (capabilities.value.canEditBranchMeta === true);
+  b?.permissions?.canEditMeta ?? authStore.can('canEditBranchMeta');
 const canChangeDefaultWarehouseFor = (b) =>
   b?.permissions?.canChangeDefaultWarehouse ??
-  (capabilities.value.canChangeDefaultWarehouse === true);
+  authStore.can('canChangeDefaultWarehouse');
 
 // Form-level flags, computed against the branch currently being edited.
 const editingBranch = computed(
   () => inventoryStore.branches.find((b) => b.id === branchForm.id) || null
 );
 const canEditBranchMeta = computed(() =>
-  branchForm.id ? canEditBranchMetaFor(editingBranch.value) : capabilities.value.canCreateBranch === true
+  branchForm.id ? canEditBranchMetaFor(editingBranch.value) : authStore.can('canCreateBranch')
 );
 const canChangeDefaultWarehouse = computed(() =>
   branchForm.id
     ? canChangeDefaultWarehouseFor(editingBranch.value)
-    : capabilities.value.canChangeDefaultWarehouse === true
+    : authStore.can('canChangeDefaultWarehouse')
 );
 
 // A branch row is "openable" when the user can edit its meta or its default
@@ -348,7 +347,7 @@ const saveBranch = async () => {
 // their own branch (so the dropdown shrinks to a single, locked option). The
 // backend re-checks WAREHOUSE_MOVE_FORBIDDEN.
 const branchOptionsForWarehouse = computed(() => {
-  if (capabilities.value.canViewAllBranches) return inventoryStore.branches;
+  if (authStore.can("canViewAllBranches")) return inventoryStore.branches;
   if (!authStore.assignedBranchId) return [];
   return inventoryStore.branches.filter(
     (b) => Number(b.id) === Number(authStore.assignedBranchId)
@@ -356,7 +355,7 @@ const branchOptionsForWarehouse = computed(() => {
 });
 
 const warehouseBranchHint = computed(() => {
-  if (capabilities.value.canViewAllBranches) return '';
+  if (authStore.can("canViewAllBranches")) return '';
   return 'لا يمكنك نقل المخزن خارج فرعك';
 });
 
@@ -410,7 +409,7 @@ const saveWarehouse = async () => {
       // Only send branchId on edit when the user is allowed to move
       // warehouses across branches. Backend rejects forbidden moves with
       // WAREHOUSE_MOVE_FORBIDDEN regardless.
-      if (branchFeatureOn.value && capabilities.value.canViewAllBranches) {
+      if (branchFeatureOn.value && authStore.can("canViewAllBranches")) {
         payload.branchId = warehouseForm.branchId;
       }
       await inventoryStore.updateWarehouse(warehouseForm.id, payload);

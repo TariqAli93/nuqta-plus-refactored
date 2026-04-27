@@ -116,11 +116,18 @@ api.interceptors.response.use(
     // Build a precise, user-friendly message from backend response
     const buildMessage = (err) => buildArabicErrorMessage(err);
 
-    // Handle 401 Unauthorized
+    // Handle 401 Unauthorized — invalid/expired token. Wipe session state
+    // and bounce to login. We deliberately use clearSessionState() instead
+    // of logout() so the noisy "logged out" toast doesn't fire on a silent
+    // session expiry, and we skip the redirect when the failed call WAS
+    // /auth/session itself (refreshSession already handles the 401).
     if (error.response?.status === 401) {
       const authStore = useAuthStore();
-      authStore.logout();
-      router.push({ name: 'Login' });
+      const isSessionCheck = error.config?.url?.endsWith('/auth/session');
+      authStore.clearSessionState();
+      if (!isSessionCheck && router.currentRoute.value.meta?.requiresAuth) {
+        router.push({ name: 'Login' });
+      }
       notificationStore.error(
         buildMessage(error) || 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى'
       );
@@ -139,12 +146,20 @@ api.interceptors.response.use(
       // FEATURE_DISABLED / CAPABILITY_DENIED → backend just rejected an
       // action that the SPA may still think is available (e.g. another
       // tab disabled it). Refresh the session so menus/buttons/routes
-      // re-evaluate against the latest state.
+      // re-evaluate against the latest state. The refresh latch inside
+      // `refreshSession()` prevents an infinite retry loop if the session
+      // endpoint itself ever started returning 403.
       const code = error.response?.data?.code;
-      if (code === 'FEATURE_DISABLED' || code === 'CAPABILITY_DENIED') {
+      const isSessionCheck = error.config?.url?.endsWith('/auth/session');
+      if (
+        !isSessionCheck &&
+        (code === 'FEATURE_DISABLED' || code === 'CAPABILITY_DENIED')
+      ) {
         try {
           const authStore = useAuthStore();
-          if (authStore.isAuthenticated) authStore.refreshSession();
+          if (authStore.isAuthenticated && !authStore.isHydrating) {
+            authStore.refreshSession({ force: true });
+          }
         } catch {
           /* non-fatal */
         }

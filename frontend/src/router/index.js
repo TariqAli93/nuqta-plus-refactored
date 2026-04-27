@@ -183,18 +183,27 @@ router.beforeEach(async (to, from, next) => {
 
   const authStore = useAuthStore();
 
-  // Wait for auth check if it hasn't been done yet (on initial load)
+  // Hydration gate. Protected routes MUST wait for the canonical
+  // /auth/session payload before evaluating any feature/capability check —
+  // otherwise `can()` and `hasFeature()` would default-deny and bounce
+  // legitimate users to Login or Forbidden on every cold reload.
+  //
+  // Public routes (Login, ServerSetup, Activation) skip the wait so the
+  // unauthenticated UI renders immediately.
   const token = localStorage.getItem('token');
-  if (token && !authStore.isAuthenticated && authStore.user === null) {
-    await authStore.checkAuth();
-  }
-
-  // ✅ تحقق من تحميل المستخدم بعد تسجيل الدخول
-  if (authStore.isAuthenticated && !authStore.user) {
-    try {
-      await authStore.getProfile();
-    } catch {
-      // Silently handle profile fetch failure
+  if (to.meta.requiresAuth) {
+    if (!token) {
+      return next({ name: 'Login' });
+    }
+    if (!authStore.isHydrated) {
+      // refreshSession() de-dupes concurrent callers and only flips
+      // isHydrated after a successful payload — so awaiting it here is
+      // safe even if multiple navigations race.
+      await authStore.refreshSession({ resetInventory: false });
+      // 401 → token cleared by refreshSession via clearSessionState.
+      if (!authStore.isAuthenticated) {
+        return next({ name: 'Login' });
+      }
     }
   }
 

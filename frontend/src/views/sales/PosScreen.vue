@@ -550,7 +550,10 @@ const authStore = useAuthStore();
 
 // Capability-driven UI: the "save as draft" button is only meaningful when
 // the draftInvoices module is enabled AND the user has the capability.
-const canUseDrafts = computed(() => authStore.can('canUseDraftInvoices'));
+// `canUse` collapses both checks into a single helper.
+const canUseDrafts = computed(() =>
+  authStore.canUse('draftInvoices', 'canUseDraftInvoices')
+);
 const router = useRouter();
 const route = useRoute();
 
