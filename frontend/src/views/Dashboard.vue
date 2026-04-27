@@ -232,8 +232,9 @@ const quickActions = [
     icon: 'mdi-plus-circle',
     to: '/sales/new',
     permission: 'create:sales',
-    // Hide the installment-sale shortcut whenever installments are off OR
-    // the user lacks the capability — backend resolves both.
+    // Combined feature + capability gate; defense-in-depth so the shortcut
+    // disappears the moment either side flips false.
+    feature: 'installments',
     capability: 'canUseInstallments',
   },
   {
@@ -253,8 +254,9 @@ const quickActions = [
 
 const isActionAllowed = (action) => {
   if (!action || !userRole.value) return false;
-  // Capability check (backend-issued) takes precedence — it already accounts
-  // for the user's role AND every relevant feature flag.
+  // Combined feature+capability gate (backend-issued, role-aware). Either
+  // half being false hides the action.
+  if (action.feature && !authStore.hasFeature(action.feature)) return false;
   if (action.capability && !authStore.can(action.capability)) return false;
   const perm = action.permission;
   if (!perm) return true; // If no permission specified, allow it

@@ -534,12 +534,14 @@ const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();
 
 /**
- * Use the backend-issued capability instead of the raw feature flag — the
- * capability is already gated on `featureFlags.installments` AND the user's
- * role, so a cashier with installments=false sees no installment UI even
- * if their role would normally allow it.
+ * Combined feature + capability gate via `canUse`. Hides the installment UI
+ * unless BOTH the installments module is enabled and the user has the
+ * `canUseInstallments` capability — defense-in-depth that matches the
+ * server-side `requireFeature('installments')` check on the sale endpoint.
  */
-const installmentsEnabled = computed(() => authStore.can('canUseInstallments'));
+const installmentsEnabled = computed(() =>
+  authStore.canUse('installments', 'canUseInstallments')
+);
 
 const form = ref(null);
 const barcode = ref('');

@@ -258,14 +258,18 @@ const isAdmin = computed(() => authStore.hasPermission(['sales:delete', 'manage:
 const canDelete = computed(() => isAdmin.value);
 
 // Draft-related actions are hidden when the draftInvoices feature is off.
-const canUseDrafts = computed(() => authStore.can('canUseDraftInvoices'));
+const canUseDrafts = computed(() =>
+  authStore.canUse('draftInvoices', 'canUseDraftInvoices')
+);
 // Installment-sale shortcut is hidden when installments are off.
-const canUseInstallments = computed(() => authStore.can('canUseInstallments'));
+const canUseInstallments = computed(() =>
+  authStore.canUse('installments', 'canUseInstallments')
+);
 
 // "New sale" empty-state action is the installment-sale entry point — only
 // surface it when installments are enabled AND the user can use them.
 const emptyStateActions = computed(() => {
-  if (!authStore.can('canUseInstallments')) return [];
+  if (!canUseInstallments.value) return [];
   return [
     { text: 'بيع جديد', icon: 'mdi-plus', to: '/sales/new', color: 'primary' },
   ];

@@ -31,8 +31,10 @@ export function useNavigationMenu() {
       title: 'نقطة البيع',
       icon: 'mdi-point-of-sale',
       to: '/sales/pos',
-      // Capability check is the single rule: backend resolves
-      // featureFlags.pos AND user's role into canUsePOS.
+      // Defense-in-depth: declare BOTH the feature flag and the capability
+      // so the menu item disappears even if a future backend regression
+      // lets the capability stay true while the flag is off.
+      feature: 'pos',
       capability: 'canUsePOS',
     },
 
@@ -93,8 +95,10 @@ export function useNavigationMenu() {
             title: 'نقل بين المخازن',
             icon: 'mdi-transfer',
             to: '/inventory/transfer',
-            // canTransferStock already requires the warehouseTransfers /
-            // inventoryTransfers feature on the backend.
+            // Pair the feature with the capability — this is the
+            // canonical `canUse('inventoryTransfers', 'canTransferStock')`
+            // pattern expressed in the menu item shape.
+            feature: 'inventoryTransfers',
             capability: 'canTransferStock',
           },
           {

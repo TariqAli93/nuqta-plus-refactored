@@ -84,10 +84,12 @@ const shouldRender = computed(() => {
   return authStore.hasFeature('multiBranch') || authStore.hasFeature('multiWarehouse');
 });
 
-// Branch selector visibility comes straight from the backend capability.
-// `canSwitchBranch` is already false when multiBranch is off OR the user
-// is not a global admin, so no extra flag check is needed here.
-const showBranchSelector = computed(() => authStore.can('canSwitchBranch'));
+// Branch selector visibility — combined feature + capability gate so the
+// dropdown disappears the moment EITHER multi-branch is disabled or the
+// user loses their switching capability.
+const showBranchSelector = computed(() =>
+  authStore.canUse('multiBranch', 'canSwitchBranch')
+);
 
 // Warehouse selector shows whenever the user actually has more than one
 // option to pick from — regardless of the `multiWarehouse` feature flag.
