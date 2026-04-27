@@ -88,4 +88,19 @@ export default async function customerRoutes(fastify) {
       security: [{ bearerAuth: [] }],
     },
   });
+
+  fastify.get('/:id/credit-score', {
+    onRequest: [fastify.authenticate, fastify.authorize('customers:read')],
+    handler: customerController.getCreditRiskAssessment,
+    schema: {
+      description:
+        'Hybrid credit-risk assessment: returns probability, level, reasons, and feature breakdown for the customer.',
+      tags: ['customers'],
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'number' } },
+      },
+    },
+  });
 }

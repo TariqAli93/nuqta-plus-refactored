@@ -15,6 +15,7 @@
     "clean": "node scripts/clean.js",
     "fetch:winsw": "node scripts/fetch-winsw.js",
     "train:credit-model": "node scripts/train-credit-model.mjs",
+    "export:credit-dataset": "node scripts/export-credit-dataset.mjs",
     "build:backend": "node build-backend.js",
     "build:frontend": "cd frontend && pnpm run build:win",
     "build:server": "pnpm run clean && pnpm run build:backend && pnpm run build:frontend && pnpm run verify:packaged",

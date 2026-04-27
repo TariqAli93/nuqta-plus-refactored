@@ -4,6 +4,7 @@ import {
   getCustomerCreditSnapshot,
   calculateAndPersistCreditScore,
   getRiskLevel,
+  assessAndLogCreditRisk,
 } from '../services/creditScoringService.js';
 
 const customerService = new CustomerService();
@@ -73,5 +74,20 @@ export class CustomerController {
       success: true,
       data: { ...result, riskLevel: getRiskLevel(result.score) },
     });
+  }
+
+  /**
+   * Hybrid risk assessment for a single customer. Returns the structured
+   * explanation (probability + level + reasons + features) and persists the
+   * call into credit_scores for monitoring. Read-only — does NOT touch the
+   * cached customer.credit_score column (that's the daily job's responsibility).
+   */
+  async getCreditRiskAssessment(request, reply) {
+    const id = Number(request.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ success: false, message: 'Invalid customer id' });
+    }
+    const result = await assessAndLogCreditRisk(id);
+    return reply.send({ success: true, data: result });
   }
 }

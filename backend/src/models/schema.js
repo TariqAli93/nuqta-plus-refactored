@@ -8,6 +8,8 @@ import {
   timestamp,
   uniqueIndex,
   index,
+  jsonb,
+  date,
 } from 'drizzle-orm/pg-core';
 
 // ── Users ─────────────────────────────────────────────────────────────────
@@ -295,6 +297,101 @@ export const settings = pgTable('settings', {
   updatedAt: timestamp('updated_at').defaultNow(),
   updatedBy: integer('updated_by').references(() => users.id),
 });
+
+// ── Credit Events ─────────────────────────────────────────────────────────
+// Append-only history of every payment/installment lifecycle event used to
+// rebuild credit features at any historical point in time. Snapshots are
+// derived from this table — never the other way around.
+//
+// event_type allowed values:
+//   PAYMENT   — installment paid (delay_days >= 0)
+//   LATE      — installment paid after due date
+//   MISSED    — installment overdue & still pending
+//   CREATED   — installment sale opened
+//   CLOSED    — installment sale fully paid / closed
+//   DEFAULTED — manual default flag (admin or rule-engine)
+export const creditEvents = pgTable(
+  'credit_events',
+  {
+    id: serial('id').primaryKey(),
+    customerId: integer('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    saleId: integer('sale_id').references(() => sales.id, { onDelete: 'set null' }),
+    eventType: text('event_type').notNull(),
+    amount: numeric('amount', { precision: 18, scale: 4 }).default('0'),
+    delayDays: integer('delay_days').default(0),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    customerIdx: index('credit_events_customer_idx').on(t.customerId),
+    typeIdx: index('credit_events_type_idx').on(t.eventType),
+    createdAtIdx: index('credit_events_created_at_idx').on(t.createdAt),
+  })
+);
+
+// ── Credit Snapshots ──────────────────────────────────────────────────────
+// Training dataset: one row per (customer_id, snapshot_date). Features must
+// only contain information available BEFORE snapshot_date; the label is
+// computed by looking forward `label_window_days` days. NEVER mix the two —
+// any leakage invalidates the model.
+export const creditSnapshots = pgTable(
+  'credit_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    customerId: integer('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    snapshotDate: date('snapshot_date').notNull(),
+    totalSalesOnInstallment: integer('total_sales_on_installment').default(0),
+    totalPaidOnTime: integer('total_paid_on_time').default(0),
+    totalLatePayments: integer('total_late_payments').default(0),
+    avgDelayDays: numeric('avg_delay_days', { precision: 10, scale: 4 }).default('0'),
+    maxDelayDays: integer('max_delay_days').default(0),
+    currentOutstandingDebt: numeric('current_outstanding_debt', {
+      precision: 18,
+      scale: 4,
+    }).default('0'),
+    activeInstallmentsCount: integer('active_installments_count').default(0),
+    completedInstallmentsCount: integer('completed_installments_count').default(0),
+    labelDefaulted: boolean('label_defaulted').default(false),
+    labelWindowDays: integer('label_window_days').default(90),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    customerIdx: index('credit_snapshots_customer_idx').on(t.customerId),
+    snapshotDateIdx: index('credit_snapshots_snapshot_date_idx').on(t.snapshotDate),
+    labelIdx: index('credit_snapshots_label_idx').on(t.labelDefaulted),
+    customerSnapshotIdx: uniqueIndex('credit_snapshots_customer_date_idx').on(
+      t.customerId,
+      t.snapshotDate
+    ),
+  })
+);
+
+// ── Credit Scores (inference log) ─────────────────────────────────────────
+// One row per scoring call. Used for monitoring, audit, and offline drift /
+// accuracy analysis. Never mutated — only inserted.
+export const creditScores = pgTable(
+  'credit_scores',
+  {
+    id: serial('id').primaryKey(),
+    customerId: integer('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    modelVersion: text('model_version').notNull(),
+    riskProbability: numeric('risk_probability', { precision: 8, scale: 6 }).notNull(),
+    riskLevel: text('risk_level').notNull(), // 'LOW' | 'MEDIUM' | 'HIGH'
+    reasons: jsonb('reasons'),
+    features: jsonb('features'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    customerIdx: index('credit_scores_customer_idx').on(t.customerId),
+    createdAtIdx: index('credit_scores_created_at_idx').on(t.createdAt),
+    versionIdx: index('credit_scores_version_idx').on(t.modelVersion),
+  })
+);
 
 // ── Audit Log ─────────────────────────────────────────────────────────────
 // New table for tracking all important user actions.

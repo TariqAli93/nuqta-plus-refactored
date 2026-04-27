@@ -137,6 +137,43 @@
           </div>
         </div>
 
+        <!-- Hybrid risk assessment (probability + level + reasons) -->
+        <div v-if="assessment" class="credit-risk-block mt-3">
+          <div class="d-flex align-center justify-space-between mb-2">
+            <span class="text-caption text-medium-emphasis">احتمال التعثر</span>
+            <div class="d-flex align-center ga-2">
+              <v-chip
+                :color="riskLevelColor"
+                size="x-small"
+                variant="flat"
+                class="font-weight-bold"
+                label
+              >
+                {{ riskLevelLabel }}
+              </v-chip>
+              <span class="text-caption font-weight-bold">
+                {{ formatPercent(assessment.risk_probability) }}
+              </span>
+            </div>
+          </div>
+          <ul
+            v-if="topReasons.length"
+            class="credit-reasons text-caption pa-0 ma-0"
+            aria-label="أسباب التقييم"
+          >
+            <li
+              v-for="(r, idx) in topReasons"
+              :key="`${r.type}-${idx}`"
+              class="d-flex align-center ga-1 mb-1"
+            >
+              <v-icon size="14" :color="reasonImpactColor(r.impact)">
+                {{ reasonImpactIcon(r.impact) }}
+              </v-icon>
+              <span>{{ reasonLabel(r.type) }}</span>
+            </li>
+          </ul>
+        </div>
+
         <!-- Exceeds limit warning -->
         <v-alert
           v-if="exceedsLimit"
@@ -180,6 +217,7 @@ const props = defineProps({
 const notify = useNotificationStore();
 
 const snapshot = ref(null);
+const assessment = ref(null);
 const loading = ref(false);
 const recalculating = ref(false);
 
@@ -188,14 +226,20 @@ const unwrap = (res) => res?.data ?? res ?? null;
 const fetchSnapshot = async (id) => {
   if (!id) {
     snapshot.value = null;
+    assessment.value = null;
     return;
   }
   loading.value = true;
   try {
-    const res = await api.get(`/customers/${id}/credit`);
-    snapshot.value = unwrap(res);
+    const [snapRes, riskRes] = await Promise.all([
+      api.get(`/customers/${id}/credit`),
+      api.get(`/customers/${id}/credit-score`).catch(() => null),
+    ]);
+    snapshot.value = unwrap(snapRes);
+    assessment.value = riskRes ? unwrap(riskRes) : null;
   } catch {
     snapshot.value = null;
+    assessment.value = null;
   } finally {
     loading.value = false;
   }
@@ -272,7 +316,54 @@ const exceedsLimit = computed(() => {
   return Number(props.saleTotal || 0) > Number(snapshot.value.recommendedLimit);
 });
 
-defineExpose({ exceedsLimit, snapshot, recalculate });
+// ── Hybrid risk-assessment helpers ───────────────────────────────────
+const riskLevelLabel = computed(() => {
+  const levels = { LOW: 'منخفض', MEDIUM: 'متوسط', HIGH: 'مرتفع' };
+  return levels[assessment.value?.risk_level] ?? '-';
+});
+const riskLevelColor = computed(() => {
+  const colors = { LOW: 'success', MEDIUM: 'warning', HIGH: 'error' };
+  return colors[assessment.value?.risk_level] ?? 'grey';
+});
+
+const REASON_LABELS = {
+  late_payments: 'تأخر متكرر في الدفع',
+  severe_delays: 'تأخير حاد في السداد',
+  moderate_delays: 'تأخير متوسط في السداد',
+  minor_delays: 'تأخير بسيط في السداد',
+  high_debt: 'نسبة دين مرتفعة',
+  active_overload: 'عدد كبير من الأقساط النشطة',
+  low_history: 'سجل قصير',
+  invalid_input: 'بيانات غير كافية',
+  metrics_unavailable: 'تعذر جلب البيانات',
+};
+const reasonLabel = (type) => REASON_LABELS[type] ?? type;
+const reasonImpactColor = (impact) =>
+  ({ high: 'error', medium: 'warning', low: 'info' })[impact] ?? 'grey';
+const reasonImpactIcon = (impact) =>
+  ({
+    high: 'mdi-alert-octagon',
+    medium: 'mdi-alert-circle-outline',
+    low: 'mdi-information-outline',
+  })[impact] ?? 'mdi-circle-outline';
+
+const topReasons = computed(() => {
+  const reasons = assessment.value?.reasons;
+  if (!Array.isArray(reasons)) return [];
+  // Show at most 3 — keep the UI minimal & avoid leaking model internals
+  const order = { high: 0, medium: 1, low: 2 };
+  return [...reasons]
+    .sort((a, b) => (order[a.impact] ?? 9) - (order[b.impact] ?? 9))
+    .slice(0, 3);
+});
+
+const formatPercent = (p) => {
+  const n = Number(p);
+  if (!isFinite(n)) return '—';
+  return `${(n * 100).toFixed(1)}%`;
+};
+
+defineExpose({ exceedsLimit, snapshot, assessment, recalculate });
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('ar', {
@@ -365,6 +456,19 @@ const formatDate = (ts) => {
 /* Alert */
 .credit-alert {
   border-inline-start: 3px solid rgb(var(--v-theme-warning));
+}
+
+/* Risk reasons block */
+.credit-risk-block {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+}
+.credit-reasons {
+  list-style: none;
+}
+.credit-reasons li {
+  line-height: 1.4;
 }
 
 /* Loading animation */
