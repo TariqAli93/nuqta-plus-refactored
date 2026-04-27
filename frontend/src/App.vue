@@ -3,6 +3,13 @@
     <!-- شريط التقدم أعلى الصفحة -->
     <UpdateNotification />
     <LoadingProgressBar />
+    <div v-if="authStore.hydrationError">
+      <ErrorState
+        title="خطأ في الاتصال"
+        message="لا يمكن تحميل الجلسة"
+        @retry="authStore.refreshSession({ force: true })"
+      />
+    </div>
 
     <!-- Backend lifecycle gate — transparent pass-through when backend is ready -->
     <BackendGate>
