@@ -37,7 +37,12 @@ async function authPlugin(fastify) {
     }
   });
 
-  // Authorization middleware - checks if user has required permission
+  // Authorization middleware - checks if user has required permission(s).
+  // Accepts a single permission string or an array of permissions. When an
+  // array is provided, the user passes if they hold *any* of them — useful
+  // for endpoints like branch update where branch_admin (inventory:manage)
+  // and branch_manager (branches:set_default_warehouse) both need access
+  // and the service then enforces the stricter per-role field rules.
   fastify.decorate('authorize', function (requiredPermission) {
     return async function (request, reply) {
       // Ensure user is authenticated first
@@ -50,9 +55,12 @@ async function authPlugin(fastify) {
         throw new AuthorizationError('User role not found');
       }
 
-      // Check if user has required permission
-      if (!hasPermission(requiredPermission, userRole)) {
-        throw new AuthorizationError(`Permission denied: ${requiredPermission}`);
+      const required = Array.isArray(requiredPermission)
+        ? requiredPermission
+        : [requiredPermission];
+      const ok = required.some((perm) => hasPermission(perm, userRole));
+      if (!ok) {
+        throw new AuthorizationError(`Permission denied: ${required.join(' or ')}`);
       }
     };
   });

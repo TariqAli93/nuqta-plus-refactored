@@ -261,8 +261,26 @@ export const useInventoryStore = defineStore('inventory', {
         const response = await api.put(`/branches/${id}`, payload);
         await this.fetchBranches();
         notificationStore.success('تم تحديث الفرع');
-        // Re-resolve the active warehouse in case the default just changed.
-        if (this.selectedBranchId === Number(id)) await this.resolveActiveWarehouse();
+        // The branch_manager case: changing the default warehouse for the
+        // user's own branch should also update the cached scope so the next
+        // login (and any /auth/profile reload) reflects the new default.
+        // We refresh the profile asynchronously to keep the UI snappy; if it
+        // fails we still have the optimistic local update.
+        if (this.selectedBranchId === Number(id)) {
+          const auth = useAuthStore();
+          if (
+            !auth.isGlobalAdmin &&
+            Number(auth.assignedBranchId) === Number(id) &&
+            payload?.defaultWarehouseId !== undefined
+          ) {
+            try {
+              await auth.getProfile();
+            } catch {
+              // Non-fatal — local state is already consistent.
+            }
+          }
+          await this.resolveActiveWarehouse();
+        }
         return response.data;
       } catch (error) {
         notificationStore.error(error?.message || 'فشل تحديث الفرع');

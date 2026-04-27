@@ -1,8 +1,30 @@
 import { getDb } from '../db.js';
 import { branches, warehouses } from '../models/index.js';
-import { NotFoundError, ConflictError, ValidationError } from '../utils/errors.js';
+import {
+  NotFoundError,
+  ConflictError,
+  ValidationError,
+  AuthorizationError,
+} from '../utils/errors.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
-import { branchFilterFor } from './scopeService.js';
+import { branchFilterFor, isGlobalAdmin, isBranchAdmin, isBranchManager } from './scopeService.js';
+
+/**
+ * Stable error codes attached to thrown errors so the frontend can render a
+ * field-aware, localized message.
+ */
+export const BRANCH_ERRORS = Object.freeze({
+  BRANCH_CREATE_FORBIDDEN: 'BRANCH_CREATE_FORBIDDEN',
+  BRANCH_DELETE_FORBIDDEN: 'BRANCH_DELETE_FORBIDDEN',
+  BRANCH_ACCESS_DENIED: 'BRANCH_ACCESS_DENIED',
+  DEFAULT_WAREHOUSE_OUTSIDE_BRANCH: 'DEFAULT_WAREHOUSE_OUTSIDE_BRANCH',
+  DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN: 'DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN',
+});
+
+function tag(err, code) {
+  err.code = code;
+  return err;
+}
 
 /**
  * Validate that `warehouseId` exists, is active, and belongs to `branchId`.
@@ -18,7 +40,10 @@ async function assertWarehouseBelongsToBranch(db, warehouseId, branchId) {
     .limit(1);
   if (!wh) throw new ValidationError('Default warehouse not found');
   if (wh.branchId != null && Number(wh.branchId) !== Number(branchId)) {
-    throw new ValidationError('Default warehouse must belong to the same branch');
+    throw tag(
+      new ValidationError('Default warehouse must belong to the same branch'),
+      BRANCH_ERRORS.DEFAULT_WAREHOUSE_OUTSIDE_BRANCH
+    );
   }
   if (wh.isActive === false) {
     throw new ValidationError('Default warehouse must be active');
@@ -96,7 +121,15 @@ export class BranchService {
     };
   }
 
-  async create(data) {
+  async create(data, actingUser = null) {
+    // Branch creation is global-admin only — branch_admin/branch_manager
+    // shouldn't be able to spawn new branches alongside their own.
+    if (actingUser && !isGlobalAdmin(actingUser)) {
+      throw tag(
+        new AuthorizationError('Only global admins can create branches'),
+        BRANCH_ERRORS.BRANCH_CREATE_FORBIDDEN
+      );
+    }
     const db = await getDb();
     const [existing] = await db
       .select()
@@ -129,8 +162,54 @@ export class BranchService {
     return row;
   }
 
-  async update(id, data) {
+  /**
+   * Update branch fields with role-aware filtering.
+   *
+   *  - global_admin / admin: full update (all fields).
+   *  - branch_admin: full update on the branch they're assigned to.
+   *  - branch_manager: only `defaultWarehouseId`, and only on their assigned branch.
+   *  - everyone else: rejected.
+   */
+  async update(id, data, actingUser = null) {
     const db = await getDb();
+
+    if (actingUser) {
+      if (!isGlobalAdmin(actingUser)) {
+        // Both branch_admin and branch_manager are scoped to their branch.
+        if (
+          !actingUser.assignedBranchId ||
+          Number(actingUser.assignedBranchId) !== Number(id)
+        ) {
+          throw tag(
+            new AuthorizationError('You can only modify your assigned branch'),
+            BRANCH_ERRORS.BRANCH_ACCESS_DENIED
+          );
+        }
+        if (isBranchManager(actingUser)) {
+          // Branch managers can ONLY pick the default warehouse — strip any
+          // other fields the caller may have sent.
+          const allowedKeys = ['defaultWarehouseId'];
+          const sentDisallowed = Object.keys(data).filter(
+            (k) => !allowedKeys.includes(k) && data[k] !== undefined
+          );
+          if (sentDisallowed.length > 0) {
+            throw tag(
+              new AuthorizationError(
+                'Branch managers can only update the default warehouse'
+              ),
+              BRANCH_ERRORS.DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN
+            );
+          }
+        } else if (!isBranchAdmin(actingUser)) {
+          // Other branch-scoped roles (manager, cashier, viewer) — denied.
+          throw tag(
+            new AuthorizationError('You do not have permission to update this branch'),
+            BRANCH_ERRORS.BRANCH_ACCESS_DENIED
+          );
+        }
+      }
+    }
+
     if (data.defaultWarehouseId !== undefined && data.defaultWarehouseId !== null) {
       await assertWarehouseBelongsToBranch(db, data.defaultWarehouseId, id);
     }
@@ -150,7 +229,13 @@ export class BranchService {
     return row;
   }
 
-  async delete(id) {
+  async delete(id, actingUser = null) {
+    if (actingUser && !isGlobalAdmin(actingUser)) {
+      throw tag(
+        new AuthorizationError('Only global admins can delete branches'),
+        BRANCH_ERRORS.BRANCH_DELETE_FORBIDDEN
+      );
+    }
     const db = await getDb();
     // Soft-delete only if warehouses are linked. Otherwise allow hard delete.
     const [wh] = await db

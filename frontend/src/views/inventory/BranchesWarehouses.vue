@@ -11,7 +11,15 @@
         <v-card>
           <v-card-title class="flex items-center justify-space-between">
             <span>الفروع</span>
-            <v-btn color="primary" size="small" prepend-icon="mdi-plus" @click="openCreateBranch">
+            <!-- Only global admins can create branches; everyone else can
+                 see the list but the button is hidden. -->
+            <v-btn
+              v-if="canCreateBranch"
+              color="primary"
+              size="small"
+              prepend-icon="mdi-plus"
+              @click="openCreateBranch"
+            >
               فرع جديد
             </v-btn>
           </v-card-title>
@@ -19,7 +27,8 @@
             <v-list-item
               v-for="b in inventoryStore.branches"
               :key="b.id"
-              @click="openEditBranch(b)"
+              :disabled="!canEditBranch(b)"
+              @click="canEditBranch(b) && openEditBranch(b)"
             >
               <v-list-item-title>
                 {{ b.name }}
@@ -54,7 +63,15 @@
         <v-card>
           <v-card-title class="flex items-center justify-space-between">
             <span>المخازن</span>
-            <v-btn color="primary" size="small" prepend-icon="mdi-plus" @click="showWarehouseDialog = true">
+            <!-- Branch managers can't create warehouses — backend enforces
+                 the same rule via inventory:manage. -->
+            <v-btn
+              v-if="canCreateWarehouse"
+              color="primary"
+              size="small"
+              prepend-icon="mdi-plus"
+              @click="showWarehouseDialog = true"
+            >
               مخزن جديد
             </v-btn>
           </v-card-title>
@@ -86,8 +103,23 @@
       <v-card>
         <v-card-title>{{ branchForm.id ? 'تعديل الفرع' : 'فرع جديد' }}</v-card-title>
         <v-card-text>
-          <v-text-field v-model="branchForm.name" label="الاسم" density="comfortable" class="mb-2" />
-          <v-text-field v-model="branchForm.address" label="العنوان" density="comfortable" class="mb-2" />
+          <!-- Name and address are admin-editable only. Branch managers see
+               them as read-only — they're allowed to change the default
+               warehouse, nothing else. -->
+          <v-text-field
+            v-model="branchForm.name"
+            label="الاسم"
+            density="comfortable"
+            class="mb-2"
+            :readonly="!canEditBranchMeta"
+          />
+          <v-text-field
+            v-model="branchForm.address"
+            label="العنوان"
+            density="comfortable"
+            class="mb-2"
+            :readonly="!canEditBranchMeta"
+          />
           <v-select
             v-if="branchForm.id"
             v-model="branchForm.defaultWarehouseId"
@@ -160,6 +192,31 @@ const warehouseForm = reactive({ name: '', branchId: null });
 
 const branchFeatureOn = computed(() => authStore.featureFlags?.multiBranch !== false);
 
+// ── Role-aware capabilities ───────────────────────────────────────────────
+// Branch managers can only edit the default warehouse on their own branch.
+// Branch admins keep full edit on their assigned branch. Global admins do it
+// all. Backend enforces the same rules — these flags only drive the UI.
+const isGlobalAdmin = computed(() => authStore.isGlobalAdmin);
+const role = computed(() => authStore.userRole);
+const isBranchManager = computed(() => role.value === 'branch_manager');
+const isBranchAdmin = computed(() => role.value === 'branch_admin');
+
+const canCreateBranch = computed(() => isGlobalAdmin.value);
+const canCreateWarehouse = computed(
+  () => isGlobalAdmin.value || isBranchAdmin.value
+);
+const canEditBranchMeta = computed(
+  () => isGlobalAdmin.value || isBranchAdmin.value
+);
+
+const canEditBranch = (branch) => {
+  if (isGlobalAdmin.value) return true;
+  if (!branch) return false;
+  // Both branch admin and branch manager can open *their* branch — the
+  // dialog limits which fields they can actually change.
+  return Number(authStore.assignedBranchId) === Number(branch.id);
+};
+
 const warehousesForBranch = (branchId) =>
   inventoryStore.warehouses.filter(
     (w) => w.branchId === branchId && w.isActive !== false
@@ -197,11 +254,16 @@ const saveBranch = async () => {
   savingBranch.value = true;
   try {
     if (branchForm.id) {
-      await inventoryStore.updateBranch(branchForm.id, {
-        name: branchForm.name,
-        address: branchForm.address || undefined,
-        defaultWarehouseId: branchForm.defaultWarehouseId ?? null,
-      });
+      // Branch managers can only update the default warehouse — sending
+      // name/address would be rejected server-side, so we strip them.
+      const payload = isBranchManager.value
+        ? { defaultWarehouseId: branchForm.defaultWarehouseId ?? null }
+        : {
+            name: branchForm.name,
+            address: branchForm.address || undefined,
+            defaultWarehouseId: branchForm.defaultWarehouseId ?? null,
+          };
+      await inventoryStore.updateBranch(branchForm.id, payload);
     } else {
       await inventoryStore.createBranch({
         name: branchForm.name,

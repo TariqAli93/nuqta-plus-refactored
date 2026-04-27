@@ -15,6 +15,13 @@ export const TRANSFER_ERRORS = Object.freeze({
   SOURCE_WAREHOUSE_NOT_ALLOWED: 'SOURCE_WAREHOUSE_NOT_ALLOWED',
   DESTINATION_WAREHOUSE_NOT_ALLOWED: 'DESTINATION_WAREHOUSE_NOT_ALLOWED',
   SAME_SOURCE_AND_DESTINATION: 'SAME_SOURCE_AND_DESTINATION',
+  TRANSFER_OUTSIDE_BRANCH_FORBIDDEN: 'TRANSFER_OUTSIDE_BRANCH_FORBIDDEN',
+});
+
+export const WAREHOUSE_ERRORS = Object.freeze({
+  WAREHOUSE_CREATE_FORBIDDEN: 'WAREHOUSE_CREATE_FORBIDDEN',
+  WAREHOUSE_DELETE_FORBIDDEN: 'WAREHOUSE_DELETE_FORBIDDEN',
+  WAREHOUSE_ACCESS_DENIED: 'WAREHOUSE_ACCESS_DENIED',
 });
 
 function tagError(err, code) {
@@ -94,10 +101,35 @@ export class WarehouseService {
     return row;
   }
 
-  async create(data) {
+  async create(data, actingUser = null) {
     const db = await getDb();
     const flags = await featureFlagsService.getFeatureFlags();
     const branchFeatureOn = flags.multiBranch !== false;
+
+    // Only branch_admin and global admins can create warehouses.
+    // branch_manager (and below) are explicitly blocked, even though the
+    // route guard normally catches this — the redundant check yields a
+    // stable error code for the API.
+    if (actingUser && !isGlobalAdmin(actingUser)) {
+      const role = actingUser.role;
+      if (role !== 'branch_admin') {
+        throw tagError(
+          new AuthorizationError('You do not have permission to create warehouses'),
+          WAREHOUSE_ERRORS.WAREHOUSE_CREATE_FORBIDDEN
+        );
+      }
+      // branch_admin can only create within their assigned branch.
+      if (
+        branchFeatureOn &&
+        data.branchId &&
+        Number(data.branchId) !== Number(actingUser.assignedBranchId)
+      ) {
+        throw tagError(
+          new AuthorizationError('Warehouses can only be created in your assigned branch'),
+          WAREHOUSE_ERRORS.WAREHOUSE_ACCESS_DENIED
+        );
+      }
+    }
 
     if (branchFeatureOn && !data.branchId) {
       throw new ValidationError('branchId is required when multi-branch is enabled');
@@ -150,8 +182,35 @@ export class WarehouseService {
     return row;
   }
 
-  async update(id, data) {
+  async update(id, data, actingUser = null) {
     const db = await getDb();
+
+    // Only branch_admin and global admins can update warehouses (branch
+    // managers must use the branch endpoint to set the default warehouse).
+    if (actingUser && !isGlobalAdmin(actingUser)) {
+      if (actingUser.role !== 'branch_admin') {
+        throw tagError(
+          new AuthorizationError('You do not have permission to update warehouses'),
+          WAREHOUSE_ERRORS.WAREHOUSE_ACCESS_DENIED
+        );
+      }
+      // branch_admin can only update warehouses in their assigned branch.
+      const [wh] = await db
+        .select({ branchId: warehouses.branchId })
+        .from(warehouses)
+        .where(eq(warehouses.id, id))
+        .limit(1);
+      if (
+        wh &&
+        wh.branchId != null &&
+        Number(wh.branchId) !== Number(actingUser.assignedBranchId)
+      ) {
+        throw tagError(
+          new AuthorizationError('Warehouse belongs to a different branch'),
+          WAREHOUSE_ERRORS.WAREHOUSE_ACCESS_DENIED
+        );
+      }
+    }
 
     // If branch is changing, make sure no branch still points at this warehouse
     // as its default. Force the admin to clear the default first to avoid an
@@ -302,7 +361,7 @@ export class WarehouseService {
     if (branchOn && Number(wh.branchId) !== Number(source.branchId)) {
       throw tagError(
         new AuthorizationError('Cross-branch transfers require a global admin'),
-        TRANSFER_ERRORS.DESTINATION_WAREHOUSE_NOT_ALLOWED
+        TRANSFER_ERRORS.TRANSFER_OUTSIDE_BRANCH_FORBIDDEN
       );
     }
     return wh;
@@ -362,8 +421,34 @@ export class WarehouseService {
       .orderBy(desc(warehouses.createdAt));
   }
 
-  async delete(id) {
+  async delete(id, actingUser = null) {
     const db = await getDb();
+
+    // Only branch_admin and global admins can delete warehouses.
+    if (actingUser && !isGlobalAdmin(actingUser)) {
+      if (actingUser.role !== 'branch_admin') {
+        throw tagError(
+          new AuthorizationError('You do not have permission to delete warehouses'),
+          WAREHOUSE_ERRORS.WAREHOUSE_DELETE_FORBIDDEN
+        );
+      }
+      // branch_admin can only delete within their assigned branch.
+      const [wh] = await db
+        .select({ branchId: warehouses.branchId })
+        .from(warehouses)
+        .where(eq(warehouses.id, id))
+        .limit(1);
+      if (
+        wh &&
+        wh.branchId != null &&
+        Number(wh.branchId) !== Number(actingUser.assignedBranchId)
+      ) {
+        throw tagError(
+          new AuthorizationError('Warehouse belongs to a different branch'),
+          WAREHOUSE_ERRORS.WAREHOUSE_ACCESS_DENIED
+        );
+      }
+    }
 
     // Block deletion when this warehouse is still set as a branch default.
     const [defaultFor] = await db

@@ -18,7 +18,7 @@ export const users = pgTable('users', {
   fullName: text('full_name').notNull(),
   phone: text('phone'),
   // Roles: 'admin' (legacy full), 'global_admin', 'branch_admin',
-  //        'manager', 'cashier', 'viewer'
+  //        'branch_manager', 'manager', 'cashier', 'viewer'
   role: text('role').notNull().default('cashier'),
   // Branch binding — NULL means "unassigned" (only valid for admin/global_admin)
   assignedBranchId: integer('assigned_branch_id'),

@@ -31,7 +31,7 @@ export const userSchema = z.object({
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
   phone: z.string().optional(),
   role: z
-    .enum(['admin', 'global_admin', 'branch_admin', 'cashier', 'manager', 'viewer'])
+    .enum(['admin', 'global_admin', 'branch_admin', 'branch_manager', 'cashier', 'manager', 'viewer'])
     .default('cashier'),
   assignedBranchId: z
     .union([z.number().int().positive(), z.null()])

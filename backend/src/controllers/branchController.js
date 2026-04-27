@@ -17,7 +17,7 @@ export class BranchController {
 
   async create(request, reply) {
     const validated = branchSchema.parse(request.body);
-    const data = await branchService.create(validated);
+    const data = await branchService.create(validated, request.user);
     return reply.code(201).send({ success: true, data, message: 'Branch created' });
   }
 
@@ -25,14 +25,14 @@ export class BranchController {
     const id = Number(request.params.id);
     enforceBranchScope(request.user, id);
     const validated = branchSchema.partial().parse(request.body);
-    const data = await branchService.update(id, validated);
+    const data = await branchService.update(id, validated, request.user);
     return reply.send({ success: true, data, message: 'Branch updated' });
   }
 
   async delete(request, reply) {
     const id = Number(request.params.id);
     enforceBranchScope(request.user, id);
-    const data = await branchService.delete(id);
+    const data = await branchService.delete(id, request.user);
     return reply.send({ success: true, data, message: data.message });
   }
 

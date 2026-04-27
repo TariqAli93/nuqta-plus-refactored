@@ -35,8 +35,14 @@ export default async function branchRoutes(fastify) {
     schema: { description: 'Create branch', tags: ['inventory'], security: [{ bearerAuth: [] }] },
   });
 
+  // Either branch admin (inventory:manage) or branch_manager
+  // (branches:set_default_warehouse) may PUT. The service enforces the
+  // stricter per-role rules on which fields are actually changeable.
   fastify.put('/:id', {
-    onRequest: [fastify.authenticate, fastify.authorize('inventory:manage')],
+    onRequest: [
+      fastify.authenticate,
+      fastify.authorize(['inventory:manage', 'branches:set_default_warehouse']),
+    ],
     handler: branchController.update,
     schema: { description: 'Update branch', tags: ['inventory'], security: [{ bearerAuth: [] }] },
   });

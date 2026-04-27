@@ -9,6 +9,9 @@ import featureFlagsService from './featureFlagsService.js';
  *
  * - `global_admin` / legacy `admin`  → full cross-branch access, can switch context.
  * - `branch_admin`                   → bound to users.assignedBranchId.
+ * - `branch_manager`                 → bound to users.assignedBranchId, but
+ *                                      may switch active warehouse within it
+ *                                      and update the branch default warehouse.
  * - `manager` / `cashier` / `viewer` → bound to their assigned branch (and to their
  *                                      assigned warehouse if one is set).
  *
@@ -18,6 +21,7 @@ import featureFlagsService from './featureFlagsService.js';
 
 const GLOBAL_ROLES = new Set(['global_admin', 'admin']);
 const BRANCH_ADMIN_ROLES = new Set(['branch_admin']);
+const BRANCH_MANAGER_ROLES = new Set(['branch_manager']);
 
 export function isGlobalAdmin(user) {
   return !!user && GLOBAL_ROLES.has(user.role);
@@ -25,6 +29,10 @@ export function isGlobalAdmin(user) {
 
 export function isBranchAdmin(user) {
   return !!user && BRANCH_ADMIN_ROLES.has(user.role);
+}
+
+export function isBranchManager(user) {
+  return !!user && BRANCH_MANAGER_ROLES.has(user.role);
 }
 
 /**
@@ -37,6 +45,7 @@ export async function resolveUserScope(user) {
       role: null,
       isGlobalAdmin: false,
       isBranchAdmin: false,
+      isBranchManager: false,
       branchId: null,
       warehouseId: null,
       defaultWarehouseId: null,
@@ -69,6 +78,7 @@ export async function resolveUserScope(user) {
       role: user.role,
       isGlobalAdmin: global_,
       isBranchAdmin: !global_ && isBranchAdmin(user),
+      isBranchManager: !global_ && isBranchManager(user),
       branchId: null,
       warehouseId: fixed || visible[0] || null,
       defaultWarehouseId: null,
@@ -91,6 +101,7 @@ export async function resolveUserScope(user) {
       role: user.role,
       isGlobalAdmin: true,
       isBranchAdmin: false,
+      isBranchManager: false,
       branchId: user.assignedBranchId || null,
       warehouseId: user.assignedWarehouseId || null,
       defaultWarehouseId: null,
@@ -144,6 +155,7 @@ export async function resolveUserScope(user) {
     role: user.role,
     isGlobalAdmin: false,
     isBranchAdmin: isBranchAdmin(user),
+    isBranchManager: isBranchManager(user),
     branchId,
     warehouseId: activeWarehouseId,
     defaultWarehouseId,
@@ -244,6 +256,7 @@ export function branchFilterFor(user) {
 export default {
   isGlobalAdmin,
   isBranchAdmin,
+  isBranchManager,
   resolveUserScope,
   enforceBranchScope,
   enforceWarehouseScope,
