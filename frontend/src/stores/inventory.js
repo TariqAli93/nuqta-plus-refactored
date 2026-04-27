@@ -301,6 +301,32 @@ export const useInventoryStore = defineStore('inventory', {
       }
     },
 
+    async updateWarehouse(id, payload) {
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await api.put(`/warehouses/${id}`, payload);
+        await this.fetchWarehouses();
+        notificationStore.success('تم تحديث المخزن');
+        return response.data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'فشل تحديث المخزن');
+        throw error;
+      }
+    },
+
+    async deleteWarehouse(id) {
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await api.delete(`/warehouses/${id}`);
+        await this.fetchWarehouses();
+        notificationStore.success(response?.message || 'تم حذف المخزن');
+        return response.data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'فشل حذف المخزن');
+        throw error;
+      }
+    },
+
     async fetchWarehouseStock(warehouseId = this.selectedWarehouseId, filters = {}) {
       if (!warehouseId) return [];
       this.loading = true;

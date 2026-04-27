@@ -15,7 +15,7 @@ export class WarehouseController {
   }
 
   async getById(request, reply) {
-    const data = await warehouseService.getById(Number(request.params.id));
+    const data = await warehouseService.getById(Number(request.params.id), request.user);
     return reply.send({ success: true, data });
   }
 

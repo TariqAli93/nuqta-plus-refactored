@@ -70,7 +70,7 @@
               color="primary"
               size="small"
               prepend-icon="mdi-plus"
-              @click="showWarehouseDialog = true"
+              @click="openCreateWarehouse"
             >
               مخزن جديد
             </v-btn>
@@ -92,6 +92,27 @@
               <v-list-item-subtitle>
                 الفرع: {{ w.branchName || '—' }} — {{ w.isActive ? 'نشط' : 'غير نشط' }}
               </v-list-item-subtitle>
+              <!-- Per-item edit/delete buttons. Visibility is driven by the
+                   `permissions` block the backend attaches to each row, so
+                   users never see actions they can't perform — and the
+                   backend re-checks anyway on the actual mutation. -->
+              <template #append>
+                <v-btn
+                  v-if="w.permissions?.canEdit"
+                  icon="mdi-pencil"
+                  size="x-small"
+                  variant="text"
+                  @click="openEditWarehouse(w)"
+                />
+                <v-btn
+                  v-if="w.permissions?.canDelete"
+                  icon="mdi-delete"
+                  size="x-small"
+                  variant="text"
+                  color="error"
+                  @click="confirmDeleteWarehouse(w)"
+                />
+              </template>
             </v-list-item>
           </v-list>
         </v-card>
@@ -143,20 +164,30 @@
       </v-card>
     </v-dialog>
 
-    <!-- Warehouse dialog -->
+    <!-- Warehouse dialog (create + edit) -->
     <v-dialog v-model="showWarehouseDialog" max-width="480">
       <v-card>
-        <v-card-title>مخزن جديد</v-card-title>
+        <v-card-title>{{ warehouseForm.id ? 'تعديل المخزن' : 'مخزن جديد' }}</v-card-title>
         <v-card-text>
           <v-text-field v-model="warehouseForm.name" label="الاسم" density="comfortable" class="mb-2" />
           <v-select
             v-if="branchFeatureOn"
             v-model="warehouseForm.branchId"
-            :items="inventoryStore.branches"
+            :items="branchOptionsForWarehouse"
             item-title="name"
             item-value="id"
             label="الفرع"
             density="comfortable"
+            class="mb-2"
+            :hint="warehouseBranchHint"
+            persistent-hint
+          />
+          <v-switch
+            v-if="warehouseForm.id"
+            v-model="warehouseForm.isActive"
+            label="نشط"
+            density="comfortable"
+            color="primary"
             class="mb-2"
           />
         </v-card-text>
@@ -164,6 +195,22 @@
           <v-spacer />
           <v-btn variant="text" @click="showWarehouseDialog = false">إلغاء</v-btn>
           <v-btn color="primary" :loading="savingWarehouse" @click="saveWarehouse">حفظ</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Warehouse delete confirm -->
+    <v-dialog v-model="showDeleteWarehouseDialog" max-width="420">
+      <v-card>
+        <v-card-title>حذف المخزن</v-card-title>
+        <v-card-text>
+          هل تريد حذف المخزن "{{ deleteTarget?.name }}"؟
+          إذا كان يحتوي على مخزون فسيتم تعطيله بدلًا من الحذف.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="showDeleteWarehouseDialog = false">إلغاء</v-btn>
+          <v-btn color="error" :loading="deletingWarehouse" @click="deleteWarehouseConfirmed">حذف</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -180,8 +227,11 @@ const authStore = useAuthStore();
 
 const showBranchDialog = ref(false);
 const showWarehouseDialog = ref(false);
+const showDeleteWarehouseDialog = ref(false);
 const savingBranch = ref(false);
 const savingWarehouse = ref(false);
+const deletingWarehouse = ref(false);
+const deleteTarget = ref(null);
 
 const branchForm = reactive({
   id: null,
@@ -189,7 +239,12 @@ const branchForm = reactive({
   address: '',
   defaultWarehouseId: null,
 });
-const warehouseForm = reactive({ name: '', branchId: null });
+const warehouseForm = reactive({
+  id: null,
+  name: '',
+  branchId: null,
+  isActive: true,
+});
 
 const branchFeatureOn = computed(() => authStore.featureFlags?.multiBranch !== false);
 
@@ -283,17 +338,83 @@ const saveBranch = async () => {
   }
 };
 
+// Branch options shown in the warehouse dialog. branch_admin can only target
+// their own branch (so the dropdown shrinks to a single, locked option). The
+// backend re-checks WAREHOUSE_MOVE_FORBIDDEN.
+const branchOptionsForWarehouse = computed(() => {
+  if (capabilities.value.canViewAllBranches) return inventoryStore.branches;
+  if (!authStore.assignedBranchId) return [];
+  return inventoryStore.branches.filter(
+    (b) => Number(b.id) === Number(authStore.assignedBranchId)
+  );
+});
+
+const warehouseBranchHint = computed(() => {
+  if (capabilities.value.canViewAllBranches) return '';
+  return 'لا يمكنك نقل المخزن خارج فرعك';
+});
+
+const resetWarehouseForm = () => {
+  warehouseForm.id = null;
+  warehouseForm.name = '';
+  warehouseForm.branchId = null;
+  warehouseForm.isActive = true;
+};
+
+const openCreateWarehouse = () => {
+  resetWarehouseForm();
+  showWarehouseDialog.value = true;
+};
+
+const openEditWarehouse = (w) => {
+  warehouseForm.id = w.id;
+  warehouseForm.name = w.name;
+  warehouseForm.branchId = w.branchId ?? null;
+  warehouseForm.isActive = w.isActive !== false;
+  showWarehouseDialog.value = true;
+};
+
+const confirmDeleteWarehouse = (w) => {
+  deleteTarget.value = w;
+  showDeleteWarehouseDialog.value = true;
+};
+
+const deleteWarehouseConfirmed = async () => {
+  if (!deleteTarget.value) return;
+  deletingWarehouse.value = true;
+  try {
+    await inventoryStore.deleteWarehouse(deleteTarget.value.id);
+    showDeleteWarehouseDialog.value = false;
+    deleteTarget.value = null;
+  } finally {
+    deletingWarehouse.value = false;
+  }
+};
+
 const saveWarehouse = async () => {
   if (!warehouseForm.name) return;
-  if (branchFeatureOn.value && !warehouseForm.branchId) return;
+  if (branchFeatureOn.value && !warehouseForm.branchId && !warehouseForm.id) return;
   savingWarehouse.value = true;
   try {
-    await inventoryStore.createWarehouse({
-      name: warehouseForm.name,
-      branchId: branchFeatureOn.value ? warehouseForm.branchId : null,
-    });
-    warehouseForm.name = '';
-    warehouseForm.branchId = null;
+    if (warehouseForm.id) {
+      const payload = {
+        name: warehouseForm.name,
+        isActive: warehouseForm.isActive,
+      };
+      // Only send branchId on edit when the user is allowed to move
+      // warehouses across branches. Backend rejects forbidden moves with
+      // WAREHOUSE_MOVE_FORBIDDEN regardless.
+      if (branchFeatureOn.value && capabilities.value.canViewAllBranches) {
+        payload.branchId = warehouseForm.branchId;
+      }
+      await inventoryStore.updateWarehouse(warehouseForm.id, payload);
+    } else {
+      await inventoryStore.createWarehouse({
+        name: warehouseForm.name,
+        branchId: branchFeatureOn.value ? warehouseForm.branchId : null,
+      });
+    }
+    resetWarehouseForm();
     showWarehouseDialog.value = false;
   } finally {
     savingWarehouse.value = false;

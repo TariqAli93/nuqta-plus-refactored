@@ -14,8 +14,8 @@ import {
   canCreateWarehouseInBranch,
   canEditWarehouseRow,
   canDeleteWarehouseRow,
+  canMoveWarehouse,
   canViewWarehouseRow,
-  canTransferBetweenWarehouses,
   getAllowedBranchIdsSync,
   isGlobalAdmin,
 } from './permissionService.js';
@@ -101,7 +101,18 @@ export class WarehouseService {
       .orderBy(desc(warehouses.createdAt));
 
     if (conds.length) q = q.where(and(...conds));
-    return await q;
+    const rows = await q;
+
+    // Per-item permissions so the frontend can render Edit/Delete buttons
+    // without re-deriving role logic. Backend remains authoritative — a
+    // direct API call still goes through the policy in update()/delete().
+    return rows.map((row) => ({
+      ...row,
+      permissions: {
+        canEdit: canEditWarehouseRow(actingUser, row),
+        canDelete: canDeleteWarehouseRow(actingUser, row),
+      },
+    }));
   }
 
   async getById(id, actingUser = null) {
@@ -127,7 +138,13 @@ export class WarehouseService {
         PERMISSION_ERRORS.WAREHOUSE_ACCESS_DENIED
       );
     }
-    return row;
+    return {
+      ...row,
+      permissions: {
+        canEdit: canEditWarehouseRow(actingUser, row),
+        canDelete: canDeleteWarehouseRow(actingUser, row),
+      },
+    };
   }
 
   async create(data, actingUser = null) {
@@ -222,11 +239,21 @@ export class WarehouseService {
       );
     }
 
-    // If branch is changing, make sure no branch still points at this warehouse
-    // as its default.
+    // Branch change → goes through the dedicated move policy. branch_admin
+    // can technically pass `canEditWarehouseRow` for their own warehouse but
+    // must still be blocked from re-targeting it to another branch.
     if (data.branchId !== undefined) {
       const newBranchId = data.branchId == null ? null : Number(data.branchId);
-      if (Number(current.branchId) !== newBranchId) {
+      const isMove = Number(current.branchId) !== newBranchId;
+      if (isMove) {
+        if (actingUser) {
+          assertCan(
+            canMoveWarehouse(actingUser, current, newBranchId),
+            'You cannot move this warehouse to another branch',
+            PERMISSION_ERRORS.WAREHOUSE_MOVE_FORBIDDEN
+          );
+        }
+        // Block move when this warehouse is still set as a branch default.
         const [b] = await db
           .select({ id: branches.id, name: branches.name })
           .from(branches)

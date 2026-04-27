@@ -35,6 +35,7 @@ export const PERMISSION_ERRORS = Object.freeze({
   WAREHOUSE_CREATE_FORBIDDEN: 'WAREHOUSE_CREATE_FORBIDDEN',
   WAREHOUSE_UPDATE_FORBIDDEN: 'WAREHOUSE_UPDATE_FORBIDDEN',
   WAREHOUSE_DELETE_FORBIDDEN: 'WAREHOUSE_DELETE_FORBIDDEN',
+  WAREHOUSE_MOVE_FORBIDDEN: 'WAREHOUSE_MOVE_FORBIDDEN',
   WAREHOUSE_ACCESS_DENIED: 'WAREHOUSE_ACCESS_DENIED',
   TRANSFER_OUTSIDE_BRANCH_FORBIDDEN: 'TRANSFER_OUTSIDE_BRANCH_FORBIDDEN',
   DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN: 'DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN',
@@ -126,9 +127,47 @@ export function canEditWarehouseRow(user, warehouseRow) {
   return ownsBranch(user, warehouseRow?.branchId);
 }
 
+/**
+ * Spec-aligned alias for {@link canEditWarehouseRow}. Use this in callers
+ * that talk about "updating" a warehouse — both names map to the same rule
+ * (branch_admin within their branch, or global admin).
+ */
+export const canUpdateWarehouse = canEditWarehouseRow;
+
 /** Delete a warehouse — branch_admin (in own branch) or global. */
 export function canDeleteWarehouseRow(user, warehouseRow) {
   return canEditWarehouseRow(user, warehouseRow);
+}
+
+/**
+ * Spec-aligned alias for {@link canDeleteWarehouseRow}.
+ */
+export const canDeleteWarehouse = canDeleteWarehouseRow;
+
+/**
+ * Move a warehouse from `warehouseRow.branchId` to `targetBranchId`.
+ *
+ *   global admin  → any move (including in/out of branches).
+ *   branch_admin  → may only move within their own branch (effectively a
+ *                   no-op move). Cannot move a warehouse OUT of their branch
+ *                   or move someone else's warehouse INTO their branch.
+ *   anyone else   → no move.
+ *
+ * Targeting `null` (multi-branch off → global warehouse) is a global-admin-
+ * only operation.
+ */
+export function canMoveWarehouse(user, warehouseRow, targetBranchId) {
+  if (!warehouseRow) return false;
+  const currentBranchId = warehouseRow.branchId ?? null;
+  const next = targetBranchId == null ? null : Number(targetBranchId);
+  if (Number(currentBranchId) === Number(next)) {
+    // Not actually a move — just defer to the regular edit check.
+    return canEditWarehouseRow(user, warehouseRow);
+  }
+  if (isGlobalAdmin(user)) return true;
+  if (!isBranchAdmin(user)) return false;
+  // branch_admin: must own both the source AND the destination branch.
+  return ownsBranch(user, currentBranchId) && ownsBranch(user, next);
 }
 
 /**
@@ -372,7 +411,10 @@ export default {
   canCreateWarehouse,
   canCreateWarehouseInBranch,
   canEditWarehouseRow,
+  canUpdateWarehouse,
   canDeleteWarehouseRow,
+  canDeleteWarehouse,
+  canMoveWarehouse,
   canViewWarehouseRow,
   canViewWarehouse,
   canTransferBetweenWarehouses,
