@@ -57,6 +57,12 @@ export const customerSchema = z.object({
 });
 
 // Product schemas
+//
+// Stock quantity is intentionally NOT part of this schema. All stock changes
+// must go through the inventory movement endpoints (`/inventory/adjust`,
+// `/inventory/transfer`, sales flow). The product controller rejects any
+// payload that tries to set quantity-like fields with the explicit
+// `STOCK_UPDATE_NOT_ALLOWED_ON_PRODUCT` error code.
 export const productSchema = z.object({
   name: z.string().min(2, 'Product name must be at least 2 characters'),
   sku: z.string().optional(),
@@ -68,12 +74,29 @@ export const productSchema = z.object({
   currency: z.enum(['USD', 'IQD'], {
     errorMap: () => ({ message: 'Currency must be USD or IQD' }),
   }),
-  stock: z.number().int().nonnegative('Stock cannot be negative').optional().default(0),
+  // minStock / lowStockThreshold are alert thresholds, not stock balances —
+  // they describe the product, so they stay on the product form.
   minStock: z.number().int().nonnegative().optional(),
   lowStockThreshold: z.number().int().nonnegative().optional(),
   unit: z.string().optional(),
+  supplier: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
   status: z.enum(['available', 'out_of_stock', 'discontinued']).optional(),
 });
+
+// Quantity-like keys that must never be accepted on product create/update.
+// Detected at the controller layer so we can return the documented code
+// `STOCK_UPDATE_NOT_ALLOWED_ON_PRODUCT` instead of a generic Zod error.
+export const PRODUCT_FORBIDDEN_STOCK_KEYS = [
+  'stock',
+  'quantity',
+  'qty',
+  'stockQuantity',
+  'currentStock',
+  'inStock',
+  'openingStock',
+  'openingWarehouseId',
+];
 
 // ── Inventory schemas ─────────────────────────────────────────────────────
 export const branchSchema = z.object({

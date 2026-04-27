@@ -27,9 +27,10 @@ export class AppError extends Error {
  * Used when request data fails validation
  */
 export class ValidationError extends AppError {
-  constructor(message) {
+  constructor(message, code) {
     super(message, 400);
     this.name = 'ValidationError';
+    if (code) this.code = code;
   }
 }
 

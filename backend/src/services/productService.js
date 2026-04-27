@@ -1,9 +1,9 @@
 import { getDb, saveDatabase } from '../db.js';
-import { products, categories, productStock, warehouses } from '../models/index.js';
-import { NotFoundError, ConflictError, ValidationError } from '../utils/errors.js';
-import { eq, like, or, and, desc, lte, sql, inArray } from 'drizzle-orm';
+import { products, categories, productStock } from '../models/index.js';
+import { NotFoundError, ConflictError } from '../utils/errors.js';
+import { eq, like, or, and, desc, sql } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
-import inventoryService, { InventoryService } from './inventoryService.js';
+import inventoryService from './inventoryService.js';
 
 export class ProductService {
   async create(productData, userId) {
@@ -21,12 +21,10 @@ export class ProductService {
       }
     }
 
-    // Extract opening stock (supports either a single warehouseId or the first
-    // active warehouse) — the legacy `stock` field is written to products.stock
-    // for backward-compat and as an opening_balance movement.
-    const openingQty = Number(productData.stock || 0);
-    const openingWarehouseId = productData.openingWarehouseId || null;
-
+    // Stock quantity is intentionally NOT written here — opening balance must
+    // be entered via the inventory movement API (`/inventory/adjust`) so an
+    // auditable movement record is created. The frontend redirects the user to
+    // that flow after a successful product create.
     const [newProduct] = await db
       .insert(products)
       .values({
@@ -35,35 +33,9 @@ export class ProductService {
       })
       .returning();
 
-    // Ensure per-warehouse stock rows exist for the new product
+    // Pre-create per-warehouse stock rows (quantity 0). Inventory movements
+    // own all subsequent updates to those rows.
     await inventoryService.ensureProductStockRows(newProduct.id);
-
-    if (openingQty > 0) {
-      let targetWarehouseId = openingWarehouseId;
-      if (!targetWarehouseId) {
-        const [wh] = await db
-          .select({ id: warehouses.id })
-          .from(warehouses)
-          .where(eq(warehouses.isActive, true))
-          .orderBy(warehouses.id)
-          .limit(1);
-        targetWarehouseId = wh?.id || null;
-      }
-      if (targetWarehouseId) {
-        await InventoryService.withTransaction((tx) =>
-          InventoryService.applyStockChangeTx(tx, {
-            productId: newProduct.id,
-            warehouseId: targetWarehouseId,
-            quantityChange: openingQty,
-            movementType: 'opening_balance',
-            referenceType: 'product',
-            referenceId: newProduct.id,
-            notes: 'Opening balance on product creation',
-            userId,
-          })
-        );
-      }
-    }
 
     saveDatabase();
     alertBus.emit('alerts.changed', 'product.created');
@@ -91,7 +63,13 @@ export class ProductService {
       SELECT SUM(ps.quantity) FROM product_stock ps WHERE ps.product_id = ${products.id}
     ), 0)`;
 
-    // Build base query
+    // Build base query.
+    //
+    // Note: `stock` here is the legacy aggregate column on `products`. It is
+    // never written from product create/update — the canonical stock figures
+    // are `warehouseStock` (current warehouse) and `totalStock` (sum across
+    // warehouses), both derived from `product_stock` rows. The legacy field is
+    // returned as a cached fallback for older clients only.
     let baseQuery = db
       .select({
         id: products.id,
@@ -102,7 +80,7 @@ export class ProductService {
         costPrice: products.costPrice,
         sellingPrice: products.sellingPrice,
         currency: products.currency,
-        stock: products.stock, // legacy field — keep for backward compat
+        stock: totalStockSelect.as('stock'),
         warehouseStock: warehouseStockSelect.as('warehouseStock'),
         totalStock: totalStockSelect.as('totalStock'),
         minStock: products.minStock,
@@ -178,6 +156,11 @@ export class ProductService {
 
   async getById(id) {
     const db = await getDb();
+    // Stock is intentionally a derived value, not a column on `products`.
+    const totalStockSelect = sql`COALESCE((
+      SELECT SUM(ps.quantity) FROM product_stock ps WHERE ps.product_id = ${products.id}
+    ), 0)`;
+
     const [product] = await db
       .select({
         id: products.id,
@@ -189,11 +172,14 @@ export class ProductService {
         costPrice: products.costPrice,
         sellingPrice: products.sellingPrice,
         currency: products.currency,
-        stock: products.stock,
+        stock: totalStockSelect.as('stock'),
+        totalStock: totalStockSelect.as('totalStock'),
         minStock: products.minStock,
+        lowStockThreshold: products.lowStockThreshold,
         unit: products.unit,
         supplier: products.supplier,
         isActive: products.isActive,
+        status: products.status,
         createdAt: products.createdAt,
         category: categories.name,
       })
@@ -210,15 +196,32 @@ export class ProductService {
       ...product,
       costPrice: Number(product.costPrice) || 0,
       sellingPrice: Number(product.sellingPrice) || 0,
+      stock: Number(product.stock) || 0,
+      totalStock: Number(product.totalStock) || 0,
     };
   }
 
   async update(id, productData) {
     const db = await getDb();
+    // Defensive scrub: even though the controller already rejects
+    // quantity-like keys, never let them reach the products row from any
+    // future caller path (internal jobs, scripts, etc.).
+    const {
+      stock: _stock,
+      quantity: _quantity,
+      qty: _qty,
+      stockQuantity: _stockQuantity,
+      currentStock: _currentStock,
+      inStock: _inStock,
+      openingStock: _openingStock,
+      openingWarehouseId: _openingWarehouseId,
+      ...safeUpdate
+    } = productData || {};
+
     const [updated] = await db
       .update(products)
       .set({
-        ...productData,
+        ...safeUpdate,
         updatedAt: new Date(),
       })
       .where(eq(products.id, id))
@@ -248,25 +251,6 @@ export class ProductService {
     return { message: 'Product deleted successfully' };
   }
 
-  async updateStock(productId, quantity) {
-    const db = await getDb();
-    const product = await this.getById(productId);
-
-    const [updated] = await db
-      .update(products)
-      .set({
-        stock: product.stock + quantity,
-        updatedAt: new Date(),
-      })
-      .where(eq(products.id, productId))
-      .returning();
-
-    saveDatabase();
-    alertBus.emit('alerts.changed', 'product.stock_updated');
-
-    return updated;
-  }
-
   async getLowStock(warehouseId) {
     // If a warehouseId is provided, delegate to inventoryService which joins
     // with product_stock and applies the per-warehouse threshold.
@@ -274,13 +258,37 @@ export class ProductService {
       return await inventoryService.getLowStockProducts(Number(warehouseId));
     }
 
-    // Legacy fallback: use products.stock vs minStock
+    // Without a warehouse, aggregate stock per product from `product_stock`
+    // and compare against the product's threshold. We never read the legacy
+    // `products.stock` column for this — that field is no longer authoritative.
     const db = await getDb();
-    const lowStockProducts = await db
-      .select()
+    const rows = await db
+      .select({
+        id: products.id,
+        name: products.name,
+        sku: products.sku,
+        barcode: products.barcode,
+        unit: products.unit,
+        sellingPrice: products.sellingPrice,
+        currency: products.currency,
+        minStock: products.minStock,
+        lowStockThreshold: products.lowStockThreshold,
+        isActive: products.isActive,
+        stock: sql`COALESCE(SUM(${productStock.quantity}), 0)`.as('stock'),
+      })
       .from(products)
-      .where((products) => lte(products.stock, products.minStock));
+      .leftJoin(productStock, eq(productStock.productId, products.id))
+      .where(eq(products.isActive, true))
+      .groupBy(products.id);
 
-    return lowStockProducts;
+    return rows
+      .map((r) => ({ ...r, stock: Number(r.stock) || 0 }))
+      .filter((r) => {
+        const threshold =
+          r.lowStockThreshold && r.lowStockThreshold > 0
+            ? r.lowStockThreshold
+            : r.minStock || 0;
+        return r.stock <= threshold;
+      });
   }
 }

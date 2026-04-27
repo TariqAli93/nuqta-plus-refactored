@@ -10,6 +10,7 @@
         </div>
         <div class="flex gap-2 flex-wrap">
           <v-btn
+            v-if="canRequestTransfer"
             color="primary"
             prepend-icon="mdi-transfer"
             size="default"
@@ -18,13 +19,14 @@
             نقل مخزون
           </v-btn>
           <v-btn
+            v-if="canAdjust"
             color="warning"
             prepend-icon="mdi-tune"
             size="default"
             :disabled="!inventoryStore.selectedWarehouseId"
             @click="openAdjustDialog(null)"
           >
-            تعديل يدوي
+            إضافة / تعديل مخزون
           </v-btn>
           <v-btn
             color="error"
@@ -92,15 +94,17 @@
         </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
+            v-if="canAdjust"
             icon="mdi-tune"
             size="small"
             variant="text"
-            title="تعديل يدوي"
+            title="إضافة / تعديل مخزون"
             @click="openAdjustDialog(item)"
           >
             <v-icon size="20">mdi-tune</v-icon>
           </v-btn>
           <v-btn
+            v-if="canRequestTransfer"
             icon="mdi-transfer"
             size="small"
             variant="text"
@@ -176,14 +180,22 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, ref, watch, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
+import { useAuthStore } from '@/stores/auth';
 
 const inventoryStore = useInventoryStore();
 const notificationStore = useNotificationStore();
+const authStore = useAuthStore();
 const router = useRouter();
+const route = useRoute();
+
+const canAdjust = computed(() => authStore.hasPermission?.('inventory:adjust') === true);
+const canRequestTransfer = computed(
+  () => authStore.hasPermission?.('inventory:transfer') === true
+);
 
 const search = ref('');
 const lowStockOnly = ref(false);
@@ -218,7 +230,26 @@ onMounted(async () => {
   if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
   if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
   await reload();
+  await maybeOpenAdjustFromRoute();
 });
+
+// Allow other screens (e.g. ProductForm) to deep-link into the adjust flow:
+//   /inventory?productId=42&action=adjust
+// Resolves the row from the loaded warehouse stock and pre-fills the dialog.
+const maybeOpenAdjustFromRoute = async () => {
+  if (route.query.action !== 'adjust') return;
+  const productId = Number(route.query.productId);
+  if (!productId || !canAdjust.value) return;
+  if (!inventoryStore.selectedWarehouseId) {
+    notificationStore.error('اختر مخزناً قبل إضافة كمية افتتاحية');
+    return;
+  }
+  await nextTick();
+  const row = (inventoryStore.stock || []).find((r) => Number(r.productId) === productId);
+  openAdjustDialog(row || { productId });
+  // Clear the query so a refresh doesn't re-open the dialog unexpectedly.
+  router.replace({ name: 'Inventory' });
+};
 
 // Adjust dialog state
 const adjustDialog = ref(false);
