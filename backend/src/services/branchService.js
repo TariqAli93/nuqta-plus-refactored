@@ -7,30 +7,25 @@ import {
   AuthorizationError,
 } from '../utils/errors.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
-import { branchFilterFor, isGlobalAdmin, isBranchAdmin, isBranchManager } from './scopeService.js';
+import permissionService, {
+  PERMISSION_ERRORS,
+  assertCan,
+  canCreateBranch,
+  canDeleteBranch,
+  canEditBranchMeta,
+  canEditBranchDefaultWarehouse,
+  getAllowedBranchIdsSync,
+  isGlobalAdmin,
+} from './permissionService.js';
 
 /**
- * Stable error codes attached to thrown errors so the frontend can render a
- * field-aware, localized message.
+ * Branch CRUD. All authorization decisions live in `permissionService`;
+ * this module only handles validation and persistence.
  */
-export const BRANCH_ERRORS = Object.freeze({
-  BRANCH_CREATE_FORBIDDEN: 'BRANCH_CREATE_FORBIDDEN',
-  BRANCH_DELETE_FORBIDDEN: 'BRANCH_DELETE_FORBIDDEN',
-  BRANCH_ACCESS_DENIED: 'BRANCH_ACCESS_DENIED',
-  DEFAULT_WAREHOUSE_OUTSIDE_BRANCH: 'DEFAULT_WAREHOUSE_OUTSIDE_BRANCH',
-  DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN: 'DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN',
-});
 
-function tag(err, code) {
-  err.code = code;
-  return err;
-}
+// Re-export error codes for backwards compatibility with existing imports.
+export const BRANCH_ERRORS = PERMISSION_ERRORS;
 
-/**
- * Validate that `warehouseId` exists, is active, and belongs to `branchId`.
- * Used when setting `branches.defaultWarehouseId` so we never wire up a
- * default that the user can't actually use.
- */
 async function assertWarehouseBelongsToBranch(db, warehouseId, branchId) {
   if (warehouseId == null) return;
   const [wh] = await db
@@ -40,10 +35,9 @@ async function assertWarehouseBelongsToBranch(db, warehouseId, branchId) {
     .limit(1);
   if (!wh) throw new ValidationError('Default warehouse not found');
   if (wh.branchId != null && Number(wh.branchId) !== Number(branchId)) {
-    throw tag(
-      new ValidationError('Default warehouse must belong to the same branch'),
-      BRANCH_ERRORS.DEFAULT_WAREHOUSE_OUTSIDE_BRANCH
-    );
+    const err = new ValidationError('Default warehouse must belong to the same branch');
+    err.code = PERMISSION_ERRORS.DEFAULT_WAREHOUSE_OUTSIDE_BRANCH;
+    throw err;
   }
   if (wh.isActive === false) {
     throw new ValidationError('Default warehouse must be active');
@@ -51,9 +45,14 @@ async function assertWarehouseBelongsToBranch(db, warehouseId, branchId) {
 }
 
 export class BranchService {
+  /**
+   * Backend-filtered list — branch-bound users only ever receive their own
+   * branch. The frontend renders the response as-is and never tries to
+   * filter for authorization.
+   */
   async getAll(actingUser = null) {
     const db = await getDb();
-    const allowed = branchFilterFor(actingUser);
+    const allowed = getAllowedBranchIdsSync(actingUser);
 
     let q = db
       .select({
@@ -75,7 +74,14 @@ export class BranchService {
     return await q;
   }
 
-  async getById(id) {
+  async getById(id, actingUser = null) {
+    if (actingUser) {
+      assertCan(
+        permissionService.canViewBranch(actingUser, id),
+        'Branch belongs to a different scope',
+        PERMISSION_ERRORS.BRANCH_ACCESS_DENIED
+      );
+    }
     const db = await getDb();
     const [branch] = await db.select().from(branches).where(eq(branches.id, id)).limit(1);
     if (!branch) throw new NotFoundError('Branch');
@@ -122,12 +128,11 @@ export class BranchService {
   }
 
   async create(data, actingUser = null) {
-    // Branch creation is global-admin only — branch_admin/branch_manager
-    // shouldn't be able to spawn new branches alongside their own.
-    if (actingUser && !isGlobalAdmin(actingUser)) {
-      throw tag(
-        new AuthorizationError('Only global admins can create branches'),
-        BRANCH_ERRORS.BRANCH_CREATE_FORBIDDEN
+    if (actingUser) {
+      assertCan(
+        canCreateBranch(actingUser),
+        'Only global admins can create branches',
+        PERMISSION_ERRORS.BRANCH_CREATE_FORBIDDEN
       );
     }
     const db = await getDb();
@@ -147,9 +152,6 @@ export class BranchService {
       })
       .returning();
 
-    // Default warehouse is set after creation since the warehouse must already
-    // exist and reference this branch. Callers that send `defaultWarehouseId`
-    // on create must have provisioned the warehouse first.
     if (data.defaultWarehouseId) {
       await assertWarehouseBelongsToBranch(db, data.defaultWarehouseId, row.id);
       const [updated] = await db
@@ -163,50 +165,58 @@ export class BranchService {
   }
 
   /**
-   * Update branch fields with role-aware filtering.
+   * Update branch fields with policy-driven, role-aware filtering.
    *
-   *  - global_admin / admin: full update (all fields).
-   *  - branch_admin: full update on the branch they're assigned to.
-   *  - branch_manager: only `defaultWarehouseId`, and only on their assigned branch.
-   *  - everyone else: rejected.
+   * The policy decides:
+   *   canEditBranchMeta              → name/address/isActive
+   *   canEditBranchDefaultWarehouse  → defaultWarehouseId
+   *
+   * Branch managers only get the second one — sending other fields raises
+   * `BRANCH_UPDATE_FORBIDDEN`.
    */
   async update(id, data, actingUser = null) {
     const db = await getDb();
 
     if (actingUser) {
-      if (!isGlobalAdmin(actingUser)) {
-        // Both branch_admin and branch_manager are scoped to their branch.
-        if (
-          !actingUser.assignedBranchId ||
-          Number(actingUser.assignedBranchId) !== Number(id)
-        ) {
-          throw tag(
-            new AuthorizationError('You can only modify your assigned branch'),
-            BRANCH_ERRORS.BRANCH_ACCESS_DENIED
-          );
-        }
-        if (isBranchManager(actingUser)) {
-          // Branch managers can ONLY pick the default warehouse — strip any
-          // other fields the caller may have sent.
-          const allowedKeys = ['defaultWarehouseId'];
-          const sentDisallowed = Object.keys(data).filter(
-            (k) => !allowedKeys.includes(k) && data[k] !== undefined
-          );
-          if (sentDisallowed.length > 0) {
-            throw tag(
-              new AuthorizationError(
-                'Branch managers can only update the default warehouse'
-              ),
-              BRANCH_ERRORS.DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN
-            );
-          }
-        } else if (!isBranchAdmin(actingUser)) {
-          // Other branch-scoped roles (manager, cashier, viewer) — denied.
-          throw tag(
-            new AuthorizationError('You do not have permission to update this branch'),
-            BRANCH_ERRORS.BRANCH_ACCESS_DENIED
-          );
-        }
+      assertCan(
+        permissionService.canViewBranch(actingUser, id),
+        'Branch belongs to a different scope',
+        PERMISSION_ERRORS.BRANCH_ACCESS_DENIED
+      );
+      const wantsMeta =
+        data.name !== undefined || data.address !== undefined || data.isActive !== undefined;
+      const wantsDefault = data.defaultWarehouseId !== undefined;
+      const allowMeta = canEditBranchMeta(actingUser, id);
+      const allowDefault = canEditBranchDefaultWarehouse(actingUser, id);
+
+      if (wantsMeta && !allowMeta) {
+        // Branch managers see DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN here so the
+        // UI can guide them back to changing only the default; everyone else
+        // gets the generic BRANCH_UPDATE_FORBIDDEN.
+        const code = isGlobalAdmin(actingUser)
+          ? PERMISSION_ERRORS.BRANCH_UPDATE_FORBIDDEN
+          : allowDefault
+            ? PERMISSION_ERRORS.DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN
+            : PERMISSION_ERRORS.BRANCH_UPDATE_FORBIDDEN;
+        const err = new AuthorizationError(
+          'You may only change the default warehouse on this branch'
+        );
+        err.code = code;
+        throw err;
+      }
+      if (wantsDefault && !allowDefault) {
+        const err = new AuthorizationError(
+          'You do not have permission to change this branch default warehouse'
+        );
+        err.code = PERMISSION_ERRORS.DEFAULT_WAREHOUSE_UPDATE_FORBIDDEN;
+        throw err;
+      }
+      if (!wantsMeta && !wantsDefault && !allowMeta && !allowDefault) {
+        const err = new AuthorizationError(
+          'You do not have permission to update this branch'
+        );
+        err.code = PERMISSION_ERRORS.BRANCH_UPDATE_FORBIDDEN;
+        throw err;
       }
     }
 
@@ -230,10 +240,11 @@ export class BranchService {
   }
 
   async delete(id, actingUser = null) {
-    if (actingUser && !isGlobalAdmin(actingUser)) {
-      throw tag(
-        new AuthorizationError('Only global admins can delete branches'),
-        BRANCH_ERRORS.BRANCH_DELETE_FORBIDDEN
+    if (actingUser) {
+      assertCan(
+        canDeleteBranch(actingUser),
+        'Only global admins can delete branches',
+        PERMISSION_ERRORS.BRANCH_DELETE_FORBIDDEN
       );
     }
     const db = await getDb();

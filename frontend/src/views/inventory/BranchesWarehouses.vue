@@ -27,8 +27,8 @@
             <v-list-item
               v-for="b in inventoryStore.branches"
               :key="b.id"
-              :disabled="!canEditBranch(b)"
-              @click="canEditBranch(b) && openEditBranch(b)"
+              :disabled="!canOpenBranch(b)"
+              @click="canOpenBranch(b) && openEditBranch(b)"
             >
               <v-list-item-title>
                 {{ b.name }}
@@ -132,6 +132,7 @@
             class="mb-2"
             :hint="defaultWarehouseHint"
             persistent-hint
+            :readonly="!canChangeDefaultWarehouse"
           />
         </v-card-text>
         <v-card-actions>
@@ -192,29 +193,33 @@ const warehouseForm = reactive({ name: '', branchId: null });
 
 const branchFeatureOn = computed(() => authStore.featureFlags?.multiBranch !== false);
 
-// ── Role-aware capabilities ───────────────────────────────────────────────
-// Branch managers can only edit the default warehouse on their own branch.
-// Branch admins keep full edit on their assigned branch. Global admins do it
-// all. Backend enforces the same rules — these flags only drive the UI.
-const isGlobalAdmin = computed(() => authStore.isGlobalAdmin);
-const role = computed(() => authStore.userRole);
-const isBranchManager = computed(() => role.value === 'branch_manager');
-const isBranchAdmin = computed(() => role.value === 'branch_admin');
-
-const canCreateBranch = computed(() => isGlobalAdmin.value);
-const canCreateWarehouse = computed(
-  () => isGlobalAdmin.value || isBranchAdmin.value
-);
-const canEditBranchMeta = computed(
-  () => isGlobalAdmin.value || isBranchAdmin.value
+// All UI gating reads from `authStore.capabilities`, which is the
+// backend-issued source of truth (see backend/src/services/permissionService.js).
+// We never re-derive permissions from role here — backend re-validates every
+// mutation, and the frontend just renders what the backend allows.
+const capabilities = computed(() => authStore.capabilities || {});
+const canCreateBranch = computed(() => capabilities.value.canCreateBranch === true);
+const canCreateWarehouse = computed(() => capabilities.value.canCreateWarehouse === true);
+const canEditBranchMeta = computed(() => capabilities.value.canEditBranchMeta === true);
+const canChangeDefaultWarehouse = computed(
+  () => capabilities.value.canChangeDefaultWarehouse === true
 );
 
-const canEditBranch = (branch) => {
-  if (isGlobalAdmin.value) return true;
+// A branch row is "openable" when the user can edit its meta or its default
+// warehouse. The dialog further disables individual fields based on the same
+// capabilities. Backend rejects unauthorized fields with explicit error codes.
+const canOpenBranch = (branch) => {
   if (!branch) return false;
-  // Both branch admin and branch manager can open *their* branch — the
-  // dialog limits which fields they can actually change.
-  return Number(authStore.assignedBranchId) === Number(branch.id);
+  if (canEditBranchMeta.value) {
+    // Global admins can open any branch; branch admins reach this branch
+    // only when the backend returned it (it filters the list by scope).
+    return true;
+  }
+  // Branch managers can open their assigned branch to change the default.
+  return (
+    canChangeDefaultWarehouse.value &&
+    Number(authStore.assignedBranchId) === Number(branch.id)
+  );
 };
 
 const warehousesForBranch = (branchId) =>
@@ -254,15 +259,17 @@ const saveBranch = async () => {
   savingBranch.value = true;
   try {
     if (branchForm.id) {
-      // Branch managers can only update the default warehouse — sending
-      // name/address would be rejected server-side, so we strip them.
-      const payload = isBranchManager.value
-        ? { defaultWarehouseId: branchForm.defaultWarehouseId ?? null }
-        : {
-            name: branchForm.name,
-            address: branchForm.address || undefined,
-            defaultWarehouseId: branchForm.defaultWarehouseId ?? null,
-          };
+      // Send only fields the user is allowed to change. Backend will still
+      // reject mismatches with explicit error codes — this is just a
+      // friendlier client experience.
+      const payload = {};
+      if (canEditBranchMeta.value) {
+        payload.name = branchForm.name;
+        payload.address = branchForm.address || undefined;
+      }
+      if (canChangeDefaultWarehouse.value) {
+        payload.defaultWarehouseId = branchForm.defaultWarehouseId ?? null;
+      }
       await inventoryStore.updateBranch(branchForm.id, payload);
     } else {
       await inventoryStore.createBranch({

@@ -3,6 +3,15 @@ import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
 import { hasPermission, matchesPermissionPattern } from '@/auth/permissionMatrix.js';
 
+function readJSON(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
@@ -12,6 +21,10 @@ export const useAuthStore = defineStore('auth', {
     scope: null,
     featureFlags: {},
     setupMode: 'done',
+    // Backend-provided UI capability flags. Frontend treats this as the
+    // single source of truth for what to render — never re-derive these
+    // from role. See backend/src/services/permissionService.js.
+    capabilities: readJSON('capabilities') || {},
   }),
 
   getters: {
@@ -113,12 +126,14 @@ export const useAuthStore = defineStore('auth', {
         this.scope = response.data.scope || null;
         this.featureFlags = response.data.featureFlags || {};
         this.setupMode = response.data.setupMode || 'done';
+        this.capabilities = response.data.capabilities || {};
 
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
         if (this.scope) localStorage.setItem('scope', JSON.stringify(this.scope));
         if (this.featureFlags)
           localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
+        localStorage.setItem('capabilities', JSON.stringify(this.capabilities));
 
         // Update axios default headers with new token
         api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
@@ -198,14 +213,16 @@ export const useAuthStore = defineStore('auth', {
         const response = await api.get('/auth/profile');
 
         if (response.data) {
-          const { scope, featureFlags, setupMode, ...userOnly } = response.data;
+          const { scope, featureFlags, setupMode, capabilities, ...userOnly } = response.data;
           this.user = userOnly;
           this.scope = scope || null;
           this.featureFlags = featureFlags || {};
           this.setupMode = setupMode || 'done';
+          this.capabilities = capabilities || {};
           localStorage.setItem('user', JSON.stringify(userOnly));
           if (scope) localStorage.setItem('scope', JSON.stringify(scope));
           if (featureFlags) localStorage.setItem('featureFlags', JSON.stringify(featureFlags));
+          localStorage.setItem('capabilities', JSON.stringify(this.capabilities));
         }
 
         return response;
@@ -250,11 +267,13 @@ export const useAuthStore = defineStore('auth', {
       this.isAuthenticated = false;
       this.scope = null;
       this.featureFlags = {};
+      this.capabilities = {};
 
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('scope');
       localStorage.removeItem('featureFlags');
+      localStorage.removeItem('capabilities');
 
       // Remove authorization header
       delete api.defaults.headers.common['Authorization'];

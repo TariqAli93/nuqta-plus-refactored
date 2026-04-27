@@ -119,28 +119,16 @@ const fromStock = ref([]);
 // exposes their active warehouse).
 const destinationOptions = ref([]);
 
-// Source dropdown:
-//  - global admin: pick from any active warehouse
-//  - branch admin / users with multiple allowed warehouses: pick from allowed
-//  - everyone else: locked to the active warehouse
-const sourceOptions = computed(() => {
-  if (authStore.isGlobalAdmin) {
-    return inventoryStore.warehouses.filter((w) => w.isActive);
-  }
-  const allowed = authStore.allowedWarehouseIds || [];
-  const pool = inventoryStore.warehouses.filter((w) => w.isActive);
-  if (allowed.length > 1) return pool.filter((w) => allowed.includes(w.id));
-  // Fall back to the user's active warehouse only — keeps the dropdown
-  // populated even when allowedWarehouseIds isn't set.
-  if (form.fromWarehouseId) return pool.filter((w) => w.id === form.fromWarehouseId);
-  return [];
-});
+// Source dropdown options come from the inventory store, which only contains
+// the warehouses the backend authorized for the current user. We just keep
+// active rows here — no role-based filtering on the frontend.
+const sourceOptions = computed(() =>
+  inventoryStore.warehouses.filter((w) => w.isActive)
+);
 
-const canChangeSource = computed(() => {
-  if (authStore.isGlobalAdmin) return true;
-  const allowed = authStore.allowedWarehouseIds || [];
-  return allowed.length > 1;
-});
+// User can change source iff the backend gave them more than one warehouse.
+// No role check needed.
+const canChangeSource = computed(() => sourceOptions.value.length > 1);
 
 const maxQuantity = computed(() => {
   const row = fromStock.value.find((r) => r.productId === form.productId);

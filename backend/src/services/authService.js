@@ -8,6 +8,7 @@ import config from '../config.js';
 import auditService from './auditService.js';
 import { resolveUserScope } from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
+import { getUserCapabilities } from './permissionService.js';
 
 export class AuthService {
   /**
@@ -230,11 +231,14 @@ export class AuthService {
     const userWithoutPassword = { ...user };
     delete userWithoutPassword.password;
 
-    // Resolve branch scope + feature flags so the frontend can hydrate on login
-    const [scope, featureFlags, setupMode] = await Promise.all([
+    // Resolve branch scope + feature flags + capabilities so the frontend
+    // can hydrate on login. `capabilities` is the single source of truth
+    // for UI visibility — frontend never re-derives permissions from role.
+    const [scope, featureFlags, setupMode, capabilities] = await Promise.all([
       resolveUserScope(user),
       featureFlagsService.getFeatureFlags(),
       featureFlagsService.getSetupMode(),
+      getUserCapabilities(user),
     ]);
 
     return {
@@ -246,6 +250,7 @@ export class AuthService {
       scope,
       featureFlags,
       setupMode,
+      capabilities,
       token,
     };
   }
@@ -288,14 +293,16 @@ export class AuthService {
 
     user.permissions = this.getRolePermissions(user.role);
 
-    const [scope, featureFlags, setupMode] = await Promise.all([
+    const [scope, featureFlags, setupMode, capabilities] = await Promise.all([
       resolveUserScope(user),
       featureFlagsService.getFeatureFlags(),
       featureFlagsService.getSetupMode(),
+      getUserCapabilities(user),
     ]);
     user.scope = scope;
     user.featureFlags = featureFlags;
     user.setupMode = setupMode;
+    user.capabilities = capabilities;
 
     return user;
   }

@@ -110,11 +110,11 @@ const contextLabel = computed(() => {
   return 'السياق الحالي';
 });
 
-// Only admins see the "no default warehouse" warning — normal users can't
-// fix it anyway.
+// Only show the "no default warehouse" warning to users who can actually
+// fix it. `canChangeDefaultWarehouse` is supplied by the backend.
 const missingDefaultWarning = computed(
   () =>
-    authStore.isGlobalAdmin &&
+    (authStore.capabilities?.canChangeDefaultWarehouse === true) &&
     authStore.featureFlags?.multiBranch !== false &&
     inventoryStore.missingDefaultWarehouse
 );
