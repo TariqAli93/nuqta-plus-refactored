@@ -31,7 +31,7 @@ export const userSchema = z.object({
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
   phone: z.string().optional(),
   role: z
-    .enum(['admin', 'global_admin', 'branch_admin', 'cashier', 'manager', 'viewer'])
+    .enum(['admin', 'global_admin', 'branch_admin', 'branch_manager', 'cashier', 'manager', 'viewer'])
     .default('cashier'),
   assignedBranchId: z
     .union([z.number().int().positive(), z.null()])
@@ -79,12 +79,22 @@ export const productSchema = z.object({
 export const branchSchema = z.object({
   name: z.string().min(2, 'Branch name must be at least 2 characters'),
   address: z.string().optional(),
+  // Default warehouse for this branch. The service layer additionally checks
+  // that the warehouse belongs to this branch.
+  defaultWarehouseId: z
+    .union([z.number().int().positive(), z.null()])
+    .optional(),
   isActive: z.boolean().optional(),
 });
 
+// `branchId` is required only when the multi-branch feature is enabled. With
+// the feature off, warehouses are global. The service layer enforces this
+// with the live feature flag.
 export const warehouseSchema = z.object({
   name: z.string().min(2, 'Warehouse name must be at least 2 characters'),
-  branchId: z.number().int().positive('branchId is required'),
+  branchId: z
+    .union([z.number().int().positive(), z.null()])
+    .optional(),
   isActive: z.boolean().optional(),
 });
 

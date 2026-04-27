@@ -263,6 +263,7 @@ const statusOptions = [
 const roleOptions = [
   { title: 'مدير عام', value: 'global_admin' },
   { title: 'مدير فرع', value: 'branch_admin' },
+  { title: 'مسؤول فرع', value: 'branch_manager' },
   { title: 'مدير متجر', value: 'manager' },
   { title: 'كاشير', value: 'cashier' },
   { title: 'مشاهد', value: 'viewer' },

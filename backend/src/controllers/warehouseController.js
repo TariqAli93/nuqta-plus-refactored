@@ -15,24 +15,41 @@ export class WarehouseController {
   }
 
   async getById(request, reply) {
-    const data = await warehouseService.getById(Number(request.params.id));
+    const data = await warehouseService.getById(Number(request.params.id), request.user);
     return reply.send({ success: true, data });
   }
 
   async create(request, reply) {
     const validated = warehouseSchema.parse(request.body);
-    const data = await warehouseService.create(validated);
+    const data = await warehouseService.create(validated, request.user);
     return reply.code(201).send({ success: true, data, message: 'Warehouse created' });
   }
 
   async update(request, reply) {
     const validated = warehouseSchema.partial().parse(request.body);
-    const data = await warehouseService.update(Number(request.params.id), validated);
+    const data = await warehouseService.update(
+      Number(request.params.id),
+      validated,
+      request.user
+    );
     return reply.send({ success: true, data, message: 'Warehouse updated' });
   }
 
   async delete(request, reply) {
-    const data = await warehouseService.delete(Number(request.params.id));
+    const data = await warehouseService.delete(Number(request.params.id), request.user);
     return reply.send({ success: true, data, message: data.message });
+  }
+
+  /**
+   * Return warehouses the caller can use as transfer destinations for the
+   * given source warehouse. Branch-bound users still see destinations across
+   * all warehouses in their branch — sales/POS scoping does not narrow this.
+   */
+  async getTransferTargets(request, reply) {
+    const sourceWarehouseId = Number(
+      request.query?.sourceWarehouseId ?? request.query?.source ?? 0
+    );
+    const data = await warehouseService.getTransferTargets(sourceWarehouseId, request.user);
+    return reply.send({ success: true, data });
   }
 }

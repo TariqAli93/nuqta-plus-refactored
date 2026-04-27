@@ -27,6 +27,9 @@ async function errorHandlerPlugin(fastify) {
         statusCode: error.statusCode,
         error: error.name,
         message: error.message,
+        // Stable error code (e.g. SOURCE_WAREHOUSE_NOT_ALLOWED) for the
+        // frontend to render a localized, field-aware message.
+        ...(error.code ? { code: error.code } : {}),
         timestamp: error.timestamp,
       });
     }

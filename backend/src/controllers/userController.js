@@ -7,6 +7,7 @@ const ROLE_ENUM = z.enum([
   'global_admin',
   'admin',
   'branch_admin',
+  'branch_manager',
   'manager',
   'cashier',
   'viewer',
