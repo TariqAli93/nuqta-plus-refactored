@@ -11,6 +11,19 @@ export default async function warehouseRoutes(fastify) {
     schema: { description: 'List warehouses', tags: ['inventory'], security: [{ bearerAuth: [] }] },
   });
 
+  // Stock-transfer destination list. The default `GET /warehouses` is narrowed
+  // by POS/inventory scope; this endpoint returns the wider list of valid
+  // transfer destinations within the caller's branch.
+  fastify.get('/transfer-targets', {
+    onRequest: [fastify.authenticate, fastify.authorize('inventory:read')],
+    handler: warehouseController.getTransferTargets,
+    schema: {
+      description: 'List warehouses valid as transfer destinations',
+      tags: ['inventory'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
   fastify.get('/:id', {
     onRequest: [fastify.authenticate, fastify.authorize('inventory:read')],
     handler: warehouseController.getById,

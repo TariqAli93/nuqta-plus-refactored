@@ -15,25 +15,36 @@
           <v-col cols="12" md="6">
             <v-select
               v-model="form.fromWarehouseId"
-              :items="activeWarehouses"
+              :items="sourceOptions"
               item-title="name"
               item-value="id"
               label="من المخزن"
               density="comfortable"
               :rules="[(v) => !!v || 'مطلوب']"
-              @update:model-value="loadFromStock"
+              :readonly="!canChangeSource"
+              :hint="!canChangeSource ? 'مقيّد بمخزنك الحالي' : ''"
+              persistent-hint
+              @update:model-value="onSourceChange"
             />
           </v-col>
           <v-col cols="12" md="6">
             <v-select
               v-model="form.toWarehouseId"
-              :items="activeWarehouses.filter((w) => w.id !== form.fromWarehouseId)"
+              :items="destinationOptions"
               item-title="name"
               item-value="id"
               label="إلى المخزن"
               density="comfortable"
               :rules="[(v) => !!v || 'مطلوب']"
+              :loading="loadingTargets"
+              :no-data-text="noDestinationsText"
             />
+            <div
+              v-if="!loadingTargets && destinationOptions.length === 0 && form.fromWarehouseId"
+              class="text-caption text-warning mt-1"
+            >
+              {{ noDestinationsText }}
+            </div>
           </v-col>
           <v-col cols="12">
             <v-autocomplete
@@ -88,6 +99,7 @@ import api from '@/plugins/axios';
 
 const inventoryStore = useInventoryStore();
 const notificationStore = useNotificationStore();
+const authStore = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -100,13 +112,34 @@ const form = reactive({
 });
 
 const submitting = ref(false);
+const loadingTargets = ref(false);
 const fromStock = ref([]);
+// Destinations are loaded from the dedicated transfer-targets endpoint so the
+// dropdown isn't constrained by the user's POS/inventory scope (which only
+// exposes their active warehouse).
+const destinationOptions = ref([]);
 
-const activeWarehouses = computed(() => inventoryStore.warehouses.filter((w) => w.isActive));
+// Source dropdown options come from the inventory store, which only contains
+// the warehouses the backend authorized for the current user. We just keep
+// active rows here — no role-based filtering on the frontend.
+const sourceOptions = computed(() =>
+  inventoryStore.warehouses.filter((w) => w.isActive)
+);
+
+// User can change source iff the backend gave them more than one warehouse.
+// No role check needed.
+const canChangeSource = computed(() => sourceOptions.value.length > 1);
+
 const maxQuantity = computed(() => {
   const row = fromStock.value.find((r) => r.productId === form.productId);
   return row?.quantity || 0;
 });
+
+const noDestinationsText = computed(() =>
+  authStore.featureFlags?.multiBranch !== false
+    ? 'لا يوجد مخازن متاحة للنقل في فرعك الحالي.'
+    : 'لا يوجد مخازن متاحة للنقل.'
+);
 
 const canSubmit = computed(
   () =>
@@ -130,7 +163,44 @@ const loadFromStock = async () => {
   }));
 };
 
-const authStore = useAuthStore();
+/**
+ * Pulls valid transfer destinations for the current source.
+ * Server enforces same-branch restriction for non-admin users so the list is
+ * already correct for the caller's permissions.
+ */
+const loadTransferTargets = async () => {
+  if (!form.fromWarehouseId) {
+    destinationOptions.value = [];
+    return;
+  }
+  loadingTargets.value = true;
+  try {
+    const response = await api.get('/warehouses/transfer-targets', {
+      params: { sourceWarehouseId: form.fromWarehouseId },
+    });
+    destinationOptions.value = response?.data || [];
+    // Drop a stale destination if it isn't in the new target list.
+    if (
+      form.toWarehouseId &&
+      !destinationOptions.value.some((w) => w.id === form.toWarehouseId)
+    ) {
+      form.toWarehouseId = null;
+    }
+  } catch (error) {
+    destinationOptions.value = [];
+    notificationStore.error(error?.message || 'فشل تحميل مخازن النقل');
+  } finally {
+    loadingTargets.value = false;
+  }
+};
+
+const onSourceChange = () => {
+  form.productId = null;
+  form.toWarehouseId = null;
+  loadFromStock();
+  loadTransferTargets();
+};
+
 const submit = async () => {
   submitting.value = true;
   try {
@@ -160,14 +230,23 @@ const submit = async () => {
 
 watch(
   () => form.fromWarehouseId,
-  () => {
-    form.productId = null;
-    loadFromStock();
+  (next, prev) => {
+    if (next === prev) return;
+    onSourceChange();
   }
 );
 
 onMounted(async () => {
   if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
-  if (form.fromWarehouseId) await loadFromStock();
+
+  // Default the source to the user's active warehouse when nothing was
+  // pre-selected — non-admins can't change it anyway.
+  if (!form.fromWarehouseId && inventoryStore.selectedWarehouseId) {
+    form.fromWarehouseId = inventoryStore.selectedWarehouseId;
+  }
+
+  if (form.fromWarehouseId) {
+    await Promise.all([loadFromStock(), loadTransferTargets()]);
+  }
 });
 </script>

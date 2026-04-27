@@ -1,5 +1,6 @@
 import inventoryService from '../services/inventoryService.js';
 import warehouseTransferService from '../services/warehouseTransferService.js';
+import warehouseService from '../services/warehouseService.js';
 import { stockAdjustmentSchema, stockTransferSchema } from '../utils/validation.js';
 import {
   isGlobalAdmin,
@@ -52,6 +53,15 @@ export class InventoryController {
     // Global admins can transfer immediately (bypass approval). Anyone else
     // must go through the approval flow by creating a transfer request.
     if (isGlobalAdmin(request.user)) {
+      // Validate source/destination warehouses with the same explicit codes
+      // the request flow uses, so even admin POSTs get a useful error when
+      // the IDs are stale or inactive.
+      const fromWh = await warehouseService.assertCanTransferFrom(
+        validated.fromWarehouseId,
+        request.user
+      );
+      await warehouseService.assertCanTransferTo(validated.toWarehouseId, fromWh, request.user);
+
       const data = await inventoryService.transferStock({
         ...validated,
         userId: request.user.id,

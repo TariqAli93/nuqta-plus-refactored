@@ -18,7 +18,7 @@ export const users = pgTable('users', {
   fullName: text('full_name').notNull(),
   phone: text('phone'),
   // Roles: 'admin' (legacy full), 'global_admin', 'branch_admin',
-  //        'manager', 'cashier', 'viewer'
+  //        'branch_manager', 'manager', 'cashier', 'viewer'
   role: text('role').notNull().default('cashier'),
   // Branch binding — NULL means "unassigned" (only valid for admin/global_admin)
   assignedBranchId: integer('assigned_branch_id'),
@@ -89,17 +89,23 @@ export const branches = pgTable('branches', {
   id: serial('id').primaryKey(),
   name: text('name').notNull().unique(),
   address: text('address'),
+  // Per-branch default warehouse — used to seed the active warehouse when the
+  // user logs in or switches branches. Nullable so a brand-new branch can
+  // exist before any warehouse is created. Cleared automatically (SET NULL)
+  // if the referenced warehouse is deleted at the database level.
+  defaultWarehouseId: integer('default_warehouse_id'),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
 // ── Warehouses ────────────────────────────────────────────────────────────
+// `branchId` is nullable so warehouses can exist independently when the
+// multi-branch feature is disabled. When the feature is enabled, the
+// validation/service layer requires a branchId.
 export const warehouses = pgTable('warehouses', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
-  branchId: integer('branch_id')
-    .notNull()
-    .references(() => branches.id),
+  branchId: integer('branch_id').references(() => branches.id),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });

@@ -5,7 +5,12 @@
  * - global_admin: Cross-branch access. Can switch branch/warehouse context,
  *                 manage feature flags, approve any transfer.
  * - admin: Legacy full-access role. Treated as global_admin for authorization.
- * - branch_admin: Admin for one branch. Can approve transfers inside their branch.
+ * - branch_admin: Admin for one branch. Can approve transfers inside their branch
+ *                 and create/delete warehouses in that branch.
+ * - branch_manager: Like branch_admin but can NOT create/delete branches or
+ *                   warehouses. Can change the branch's default warehouse,
+ *                   transfer stock inside the branch, and switch active
+ *                   warehouse within the branch.
  * - manager: Manages sales, products, customers inside their branch.
  * - cashier: Creates sales, reads data; cannot delete or manage users.
  * - viewer: Read-only.
@@ -17,6 +22,7 @@ export const ROLES = Object.freeze({
   GLOBAL_ADMIN: 'global_admin',
   ADMIN: 'admin',
   BRANCH_ADMIN: 'branch_admin',
+  BRANCH_MANAGER: 'branch_manager',
   MANAGER: 'manager',
   CASHIER: 'cashier',
   VIEWER: 'viewer',
@@ -24,7 +30,11 @@ export const ROLES = Object.freeze({
 
 const GLOBAL = [ROLES.GLOBAL_ADMIN, ROLES.ADMIN];
 const BRANCH_ADMIN = [...GLOBAL, ROLES.BRANCH_ADMIN];
-const MANAGER = [...BRANCH_ADMIN, ROLES.MANAGER];
+// Branch managers sit between branch_admin and manager: they get
+// branch-scoped admin privileges that don't create/delete branches or
+// warehouses.
+const BRANCH_MANAGER = [...BRANCH_ADMIN, ROLES.BRANCH_MANAGER];
+const MANAGER = [...BRANCH_MANAGER, ROLES.MANAGER];
 const CASHIER = [...MANAGER, ROLES.CASHIER];
 const ALL = [...CASHIER, ROLES.VIEWER];
 
@@ -83,7 +93,7 @@ const PERMISSION_MATRIX = {
   // ── User management ──────────────────────────────────────────────────────
   // Branch admins manage users inside their branch; global admins manage all.
   'users:create': BRANCH_ADMIN,
-  'users:read': BRANCH_ADMIN,
+  'users:read': BRANCH_MANAGER,
   'users:update': BRANCH_ADMIN,
   'users:delete': GLOBAL,
   'users:manage': BRANCH_ADMIN,
@@ -107,8 +117,14 @@ const PERMISSION_MATRIX = {
   'inventory:adjust': MANAGER,
   // Cashiers create transfer *requests* (those go to the approval queue).
   'inventory:transfer': CASHIER,
-  // Branch/warehouse management — only admins of the branch or above.
+  // Branch/warehouse CRUD — restricted to branch_admin and global admins.
+  // Branch managers intentionally lack this so they can't create/delete
+  // warehouses or rename branches; their branch-config rights are limited
+  // to the dedicated `branches:set_default_warehouse` permission below.
   'inventory:manage': BRANCH_ADMIN,
+  // Granular: change the branch's default warehouse only. Branch managers
+  // get this so they can pick the active default for their own branch.
+  'branches:set_default_warehouse': BRANCH_MANAGER,
 
   // ── Branch / warehouse scope ─────────────────────────────────────────────
   manage_all_branches: GLOBAL,

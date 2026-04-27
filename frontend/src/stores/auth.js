@@ -3,6 +3,15 @@ import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
 import { hasPermission, matchesPermissionPattern } from '@/auth/permissionMatrix.js';
 
+function readJSON(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
@@ -12,6 +21,10 @@ export const useAuthStore = defineStore('auth', {
     scope: null,
     featureFlags: {},
     setupMode: 'done',
+    // Backend-provided UI capability flags. Frontend treats this as the
+    // single source of truth for what to render — never re-derive these
+    // from role. See backend/src/services/permissionService.js.
+    capabilities: readJSON('capabilities') || {},
   }),
 
   getters: {
@@ -23,6 +36,10 @@ export const useAuthStore = defineStore('auth', {
     canSwitchWarehouse: (state) => state.scope?.canSwitchWarehouse === true,
     assignedBranchId: (state) =>
       state.scope?.branchId ?? state.user?.assignedBranchId ?? null,
+    assignedWarehouseId: (state) =>
+      state.scope?.warehouseId ?? state.user?.assignedWarehouseId ?? null,
+    branchFeatureEnabled: (state) =>
+      state.scope?.branchFeatureEnabled ?? state.featureFlags?.multiBranch !== false,
     allowedBranchIds: (state) => state.scope?.allowedBranchIds || [],
     allowedWarehouseIds: (state) => state.scope?.allowedWarehouseIds || [],
     isFeatureEnabled: (state) => (flag) => state.featureFlags?.[flag] !== false,
@@ -109,15 +126,21 @@ export const useAuthStore = defineStore('auth', {
         this.scope = response.data.scope || null;
         this.featureFlags = response.data.featureFlags || {};
         this.setupMode = response.data.setupMode || 'done';
+        this.capabilities = response.data.capabilities || {};
 
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
         if (this.scope) localStorage.setItem('scope', JSON.stringify(this.scope));
         if (this.featureFlags)
           localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
+        localStorage.setItem('capabilities', JSON.stringify(this.capabilities));
 
         // Update axios default headers with new token
         api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+
+        // Hydrate branch + warehouse state in a single, ordered flow so the
+        // dashboard/POS sees the right context immediately after login.
+        await this.bootstrapSession();
 
         notificationStore.success('تم تسجيل الدخول بنجاح');
         return response;
@@ -125,6 +148,30 @@ export const useAuthStore = defineStore('auth', {
         const errorMessage = error.response?.data?.message || error.message || 'فشل تسجيل الدخول';
         notificationStore.error(errorMessage);
         throw error;
+      }
+    },
+
+    /**
+     * Single post-auth initialization flow.
+     *
+     *   loadSettings → loadCurrentUser → resolveActiveBranch → resolveActiveWarehouse
+     *
+     * The current user, scope and feature flags are already on the store at
+     * this point (login response or /auth/profile). This method delegates the
+     * branch/warehouse resolution to the inventory store so we have a single
+     * source of truth and avoid race conditions where warehouses load before
+     * the branch is known.
+     */
+    async bootstrapSession() {
+      if (!this.isAuthenticated) return;
+      // Lazy-import to avoid a circular dependency at module load time.
+      const { useInventoryStore } = await import('@/stores/inventory');
+      const inventoryStore = useInventoryStore();
+      try {
+        await inventoryStore.initialize({ force: true });
+      } catch {
+        // Non-fatal: the user can still navigate; individual screens will
+        // surface their own errors.
       }
     },
 
@@ -144,6 +191,9 @@ export const useAuthStore = defineStore('auth', {
           // Verify token is still valid by fetching profile (sets this.user from API)
           await this.getProfile();
           this.isAuthenticated = true;
+          // Re-resolve branch/warehouse on app reload too, so a refresh
+          // honors a freshly-changed assigned branch or feature flag.
+          await this.bootstrapSession();
         } catch {
           // Token is invalid, clear everything
           this.logout();
@@ -163,14 +213,16 @@ export const useAuthStore = defineStore('auth', {
         const response = await api.get('/auth/profile');
 
         if (response.data) {
-          const { scope, featureFlags, setupMode, ...userOnly } = response.data;
+          const { scope, featureFlags, setupMode, capabilities, ...userOnly } = response.data;
           this.user = userOnly;
           this.scope = scope || null;
           this.featureFlags = featureFlags || {};
           this.setupMode = setupMode || 'done';
+          this.capabilities = capabilities || {};
           localStorage.setItem('user', JSON.stringify(userOnly));
           if (scope) localStorage.setItem('scope', JSON.stringify(scope));
           if (featureFlags) localStorage.setItem('featureFlags', JSON.stringify(featureFlags));
+          localStorage.setItem('capabilities', JSON.stringify(this.capabilities));
         }
 
         return response;
@@ -183,10 +235,25 @@ export const useAuthStore = defineStore('auth', {
 
     /**
      * Persist updated feature flags returned from the feature-flags API.
+     * Toggling `multiBranch` re-runs the branch/warehouse resolution so the
+     * UI reflects the new mode immediately (filtered → global or vice versa).
      */
-    setFeatureFlags(flags) {
+    async setFeatureFlags(flags) {
+      const prev = this.featureFlags || {};
       this.featureFlags = flags || {};
       localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
+      const branchToggleChanged =
+        (prev.multiBranch !== false) !== (this.featureFlags.multiBranch !== false);
+      if (branchToggleChanged && this.isAuthenticated) {
+        // Re-fetch profile so the server-side scope reflects the new flag
+        // (e.g. allowedWarehouseIds is no longer branch-filtered).
+        try {
+          await this.getProfile();
+        } catch {
+          // Non-fatal — the next API call that needs the scope will retry.
+        }
+        await this.bootstrapSession();
+      }
     },
 
     /**
@@ -200,14 +267,22 @@ export const useAuthStore = defineStore('auth', {
       this.isAuthenticated = false;
       this.scope = null;
       this.featureFlags = {};
+      this.capabilities = {};
 
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('scope');
       localStorage.removeItem('featureFlags');
+      localStorage.removeItem('capabilities');
 
       // Remove authorization header
       delete api.defaults.headers.common['Authorization'];
+
+      // Clear branch/warehouse state so the next login starts clean.
+      // Lazy-imported to avoid a circular dependency.
+      import('@/stores/inventory')
+        .then((mod) => mod.useInventoryStore().reset())
+        .catch(() => {});
 
       notificationStore.info('تم تسجيل الخروج بنجاح');
     },
