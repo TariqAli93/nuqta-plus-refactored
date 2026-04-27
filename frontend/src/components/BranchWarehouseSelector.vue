@@ -1,8 +1,8 @@
 <template>
   <!-- Nothing to show when multi-branch/multi-warehouse features are off -->
   <template v-if="shouldRender">
-    <!-- Global admin: switchable dropdowns -->
-    <div v-if="canSwitch" class="flex items-center gap-2 ml-2">
+    <!-- Switchable dropdowns when the user has something to switch -->
+    <div v-if="hasAnySwitcher" class="flex items-center gap-2 ml-2">
       <v-select
         v-if="showBranchSelector"
         :model-value="inventoryStore.selectedBranchId"
@@ -28,12 +28,11 @@
         hide-details
         variant="outlined"
         style="min-width: 160px"
-        :disabled="warehouseOptions.length === 0"
         @update:model-value="onWarehouseChange"
       />
     </div>
 
-    <!-- Everyone else: read-only context label -->
+    <!-- Read-only context label when there's nothing to switch -->
     <div v-else class="context-banner flex items-center gap-2 px-3 py-1 rounded ml-2">
       <v-icon size="18" class="text-medium-emphasis">mdi-store</v-icon>
       <span class="text-body-2">{{ contextLabel }}</span>
@@ -62,6 +61,20 @@ import { useAuthStore } from '@/stores/auth';
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();
 
+// When branches are off, show every active warehouse globally; when branches
+// are on, show only warehouses for the active branch. Backend already
+// filters the inventory store by user scope, so we just need to apply the
+// branch view.
+const warehouseOptions = computed(() => {
+  const branchOn = authStore.featureFlags?.multiBranch !== false;
+  const pool = branchOn
+    ? inventoryStore.warehousesForBranch
+    : inventoryStore.warehouses;
+  const allowed = authStore.allowedWarehouseIds || [];
+  const visible = !allowed.length ? pool : pool.filter((w) => allowed.includes(w.id));
+  return visible.filter((w) => w.isActive !== false);
+});
+
 // Hide the whole widget when the user is on a single-branch single-warehouse
 // setup — there's nothing useful to show.
 const shouldRender = computed(() => {
@@ -72,34 +85,24 @@ const shouldRender = computed(() => {
   return multi;
 });
 
-const canSwitch = computed(
-  () => authStore.canSwitchBranch || authStore.canSwitchWarehouse
-);
-
 // Branch selector is admin-only and only visible when multi-branch is on.
+// Driven by the backend-issued `canSwitchBranch` scope flag (global admin only).
 const showBranchSelector = computed(
   () =>
     authStore.canSwitchBranch &&
     authStore.featureFlags?.multiBranch !== false
 );
 
-const showWarehouseSelector = computed(
-  () =>
-    (authStore.canSwitchWarehouse || authStore.canSwitchBranch) &&
-    authStore.featureFlags?.multiWarehouse !== false
-);
+// Warehouse selector shows whenever the user actually has more than one
+// option to pick from — regardless of the `multiWarehouse` feature flag.
+// Branch admins with multiple warehouses in their branch get the dropdown
+// even when `multiWarehouse` is off, because the dropdown is driven by what
+// the backend authorized for them, not the org-level toggle.
+const showWarehouseSelector = computed(() => warehouseOptions.value.length > 1);
 
-// When branches are off, show every active warehouse globally; when branches
-// are on, show only warehouses for the active branch.
-const warehouseOptions = computed(() => {
-  const branchOn = authStore.featureFlags?.multiBranch !== false;
-  const pool = branchOn
-    ? inventoryStore.warehousesForBranch
-    : inventoryStore.warehouses;
-  const allowed = authStore.allowedWarehouseIds || [];
-  if (!allowed.length) return pool;
-  return pool.filter((w) => allowed.includes(w.id));
-});
+const hasAnySwitcher = computed(
+  () => showBranchSelector.value || showWarehouseSelector.value
+);
 
 const contextLabel = computed(() => {
   const b = inventoryStore.selectedBranch?.name;

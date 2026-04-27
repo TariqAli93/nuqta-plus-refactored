@@ -26,6 +26,24 @@ import permissionService, {
 // Re-export error codes for backwards compatibility with existing imports.
 export const BRANCH_ERRORS = PERMISSION_ERRORS;
 
+/**
+ * Decorate a raw branch row with a per-user `permissions` block so the
+ * frontend can drive UI visibility (Edit/Delete/Default-warehouse) without
+ * re-deriving role logic. Backend remains authoritative — write endpoints
+ * re-check the same predicates regardless of what the frontend sends.
+ */
+function withPermissions(branchRow, actingUser) {
+  if (!branchRow) return branchRow;
+  return {
+    ...branchRow,
+    permissions: {
+      canEditMeta: canEditBranchMeta(actingUser, branchRow.id),
+      canChangeDefaultWarehouse: canEditBranchDefaultWarehouse(actingUser, branchRow.id),
+      canDelete: canDeleteBranch(actingUser),
+    },
+  };
+}
+
 async function assertWarehouseBelongsToBranch(db, warehouseId, branchId) {
   if (warehouseId == null) return;
   const [wh] = await db
@@ -71,7 +89,8 @@ export class BranchService {
       if (allowed.length === 0) return [];
       q = q.where(inArray(branches.id, allowed));
     }
-    return await q;
+    const rows = await q;
+    return rows.map((row) => withPermissions(row, actingUser));
   }
 
   async getById(id, actingUser = null) {
@@ -85,7 +104,7 @@ export class BranchService {
     const db = await getDb();
     const [branch] = await db.select().from(branches).where(eq(branches.id, id)).limit(1);
     if (!branch) throw new NotFoundError('Branch');
-    return branch;
+    return withPermissions(branch, actingUser);
   }
 
   /**

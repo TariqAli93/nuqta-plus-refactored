@@ -248,34 +248,40 @@ const warehouseForm = reactive({
 
 const branchFeatureOn = computed(() => authStore.featureFlags?.multiBranch !== false);
 
-// All UI gating reads from `authStore.capabilities`, which is the
-// backend-issued source of truth (see backend/src/services/permissionService.js).
-// We never re-derive permissions from role here — backend re-validates every
-// mutation, and the frontend just renders what the backend allows.
+// All UI gating reads from `authStore.capabilities` (the global flags from
+// the backend) plus per-row `permissions` blocks the API attaches to each
+// branch/warehouse row. We never re-derive permissions from role here —
+// backend re-validates every mutation regardless of what we send.
 const capabilities = computed(() => authStore.capabilities || {});
 const canCreateBranch = computed(() => capabilities.value.canCreateBranch === true);
 const canCreateWarehouse = computed(() => capabilities.value.canCreateWarehouse === true);
-const canEditBranchMeta = computed(() => capabilities.value.canEditBranchMeta === true);
-const canChangeDefaultWarehouse = computed(
-  () => capabilities.value.canChangeDefaultWarehouse === true
+
+// Per-branch flags fall back to the global capability when the API hasn't
+// attached a per-row block (e.g., during the brief moment before
+// fetchBranches resolves).
+const canEditBranchMetaFor = (b) =>
+  b?.permissions?.canEditMeta ?? (capabilities.value.canEditBranchMeta === true);
+const canChangeDefaultWarehouseFor = (b) =>
+  b?.permissions?.canChangeDefaultWarehouse ??
+  (capabilities.value.canChangeDefaultWarehouse === true);
+
+// Form-level flags, computed against the branch currently being edited.
+const editingBranch = computed(
+  () => inventoryStore.branches.find((b) => b.id === branchForm.id) || null
+);
+const canEditBranchMeta = computed(() =>
+  branchForm.id ? canEditBranchMetaFor(editingBranch.value) : capabilities.value.canCreateBranch === true
+);
+const canChangeDefaultWarehouse = computed(() =>
+  branchForm.id
+    ? canChangeDefaultWarehouseFor(editingBranch.value)
+    : capabilities.value.canChangeDefaultWarehouse === true
 );
 
 // A branch row is "openable" when the user can edit its meta or its default
-// warehouse. The dialog further disables individual fields based on the same
-// capabilities. Backend rejects unauthorized fields with explicit error codes.
-const canOpenBranch = (branch) => {
-  if (!branch) return false;
-  if (canEditBranchMeta.value) {
-    // Global admins can open any branch; branch admins reach this branch
-    // only when the backend returned it (it filters the list by scope).
-    return true;
-  }
-  // Branch managers can open their assigned branch to change the default.
-  return (
-    canChangeDefaultWarehouse.value &&
-    Number(authStore.assignedBranchId) === Number(branch.id)
-  );
-};
+// warehouse — both flags come from the backend per-row permissions block.
+const canOpenBranch = (branch) =>
+  !!branch && (canEditBranchMetaFor(branch) || canChangeDefaultWarehouseFor(branch));
 
 const warehousesForBranch = (branchId) =>
   inventoryStore.warehouses.filter(

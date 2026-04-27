@@ -11,7 +11,7 @@ export class BranchController {
   async getById(request, reply) {
     const id = Number(request.params.id);
     enforceBranchScope(request.user, id);
-    const data = await branchService.getById(id);
+    const data = await branchService.getById(id, request.user);
     return reply.send({ success: true, data });
   }
 
