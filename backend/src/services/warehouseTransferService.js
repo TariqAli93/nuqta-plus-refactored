@@ -7,13 +7,13 @@ import {
   branches,
 } from '../models/index.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { NotFoundError, ValidationError, AuthorizationError } from '../utils/errors.js';
+import { ValidationError } from '../utils/errors.js';
 import {
   isGlobalAdmin,
-  enforceWarehouseScope,
   enforceBranchScope,
   branchFilterFor,
 } from './scopeService.js';
+import warehouseService, { TRANSFER_ERRORS } from './warehouseService.js';
 import { InventoryService } from './inventoryService.js';
 import featureFlagsService from './featureFlagsService.js';
 import alertBus from '../events/alertBus.js';
@@ -35,41 +35,25 @@ export class WarehouseTransferService {
 
     const { fromWarehouseId, toWarehouseId, productId, quantity, notes } = payload;
     if (!fromWarehouseId || !toWarehouseId) {
-      throw new ValidationError('Both source and destination warehouses are required');
+      const err = new ValidationError('Both source and destination warehouses are required');
+      err.code = TRANSFER_ERRORS.WAREHOUSE_NOT_FOUND;
+      throw err;
     }
-    if (fromWarehouseId === toWarehouseId) {
-      throw new ValidationError('Source and destination warehouses must differ');
+    if (Number(fromWarehouseId) === Number(toWarehouseId)) {
+      const err = new ValidationError('Source and destination warehouses must differ');
+      err.code = TRANSFER_ERRORS.SAME_SOURCE_AND_DESTINATION;
+      throw err;
     }
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new ValidationError('Quantity must be a positive integer');
     }
 
+    // Both checks attach a stable `code` so the controller/UI can route the
+    // error to the right field instead of a generic toast.
+    const fromWh = await warehouseService.assertCanTransferFrom(fromWarehouseId, actingUser);
+    const toWh = await warehouseService.assertCanTransferTo(toWarehouseId, fromWh, actingUser);
+
     const db = await getDb();
-    const [fromWh, toWh] = await Promise.all([
-      db
-        .select({ id: warehouses.id, branchId: warehouses.branchId, isActive: warehouses.isActive })
-        .from(warehouses)
-        .where(eq(warehouses.id, fromWarehouseId))
-        .limit(1)
-        .then((r) => r[0]),
-      db
-        .select({ id: warehouses.id, branchId: warehouses.branchId, isActive: warehouses.isActive })
-        .from(warehouses)
-        .where(eq(warehouses.id, toWarehouseId))
-        .limit(1)
-        .then((r) => r[0]),
-    ]);
-
-    if (!fromWh) throw new NotFoundError('Source warehouse');
-    if (!toWh) throw new NotFoundError('Destination warehouse');
-
-    // Cross-branch transfers require global admin
-    if (fromWh.branchId !== toWh.branchId && !isGlobalAdmin(actingUser)) {
-      throw new AuthorizationError('Cross-branch transfers require a global admin');
-    }
-
-    // Requester must be scoped to the source warehouse
-    await enforceWarehouseScope(actingUser, fromWarehouseId);
 
     // Transfer inherits the source branch — that's the branch whose admin will approve.
     const branchId = fromWh.branchId;

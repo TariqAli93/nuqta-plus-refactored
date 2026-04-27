@@ -35,4 +35,17 @@ export class WarehouseController {
     const data = await warehouseService.delete(Number(request.params.id));
     return reply.send({ success: true, data, message: data.message });
   }
+
+  /**
+   * Return warehouses the caller can use as transfer destinations for the
+   * given source warehouse. Branch-bound users still see destinations across
+   * all warehouses in their branch — sales/POS scoping does not narrow this.
+   */
+  async getTransferTargets(request, reply) {
+    const sourceWarehouseId = Number(
+      request.query?.sourceWarehouseId ?? request.query?.source ?? 0
+    );
+    const data = await warehouseService.getTransferTargets(sourceWarehouseId, request.user);
+    return reply.send({ success: true, data });
+  }
 }

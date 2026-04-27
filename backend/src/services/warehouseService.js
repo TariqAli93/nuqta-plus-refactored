@@ -1,9 +1,26 @@
 import { getDb } from '../db.js';
 import { warehouses, branches, productStock } from '../models/index.js';
-import { NotFoundError, ConflictError, ValidationError } from '../utils/errors.js';
-import { eq, and, desc, inArray, sql } from 'drizzle-orm';
+import { NotFoundError, ConflictError, ValidationError, AuthorizationError } from '../utils/errors.js';
+import { eq, and, desc, ne, sql } from 'drizzle-orm';
 import { isGlobalAdmin, branchFilterFor } from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
+
+/**
+ * Stable error codes attached to thrown errors so the frontend can localize
+ * the message and decide whether to show a per-field hint or a global toast.
+ */
+export const TRANSFER_ERRORS = Object.freeze({
+  WAREHOUSE_NOT_FOUND: 'WAREHOUSE_NOT_FOUND',
+  WAREHOUSE_INACTIVE: 'WAREHOUSE_INACTIVE',
+  SOURCE_WAREHOUSE_NOT_ALLOWED: 'SOURCE_WAREHOUSE_NOT_ALLOWED',
+  DESTINATION_WAREHOUSE_NOT_ALLOWED: 'DESTINATION_WAREHOUSE_NOT_ALLOWED',
+  SAME_SOURCE_AND_DESTINATION: 'SAME_SOURCE_AND_DESTINATION',
+});
+
+function tagError(err, code) {
+  err.code = code;
+  return err;
+}
 
 export class WarehouseService {
   /**
@@ -188,6 +205,161 @@ export class WarehouseService {
       }
     }
     return row;
+  }
+
+  /**
+   * Verify the acting user is allowed to act on `warehouseId` as a transfer
+   * source. Throws a tagged error so the controller can surface a stable
+   * `code` to the client.
+   *
+   * Rules:
+   *  - global admin: any active warehouse.
+   *  - branch-bound user: warehouse must be in the user's assigned branch.
+   *  - fixed-warehouse user: must equal `assignedWarehouseId`.
+   */
+  async assertCanTransferFrom(warehouseId, actingUser) {
+    const db = await getDb();
+    const [wh] = await db
+      .select({ id: warehouses.id, branchId: warehouses.branchId, isActive: warehouses.isActive })
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId))
+      .limit(1);
+    if (!wh) {
+      throw tagError(new NotFoundError('Source warehouse'), TRANSFER_ERRORS.WAREHOUSE_NOT_FOUND);
+    }
+    if (wh.isActive === false) {
+      throw tagError(new ValidationError('Source warehouse is inactive'), TRANSFER_ERRORS.WAREHOUSE_INACTIVE);
+    }
+    if (isGlobalAdmin(actingUser)) return wh;
+
+    const flags = await featureFlagsService.getFeatureFlags();
+    const branchOn = flags.multiBranch !== false;
+
+    if (branchOn) {
+      if (!actingUser?.assignedBranchId) {
+        throw tagError(
+          new AuthorizationError('User has no branch assigned'),
+          TRANSFER_ERRORS.SOURCE_WAREHOUSE_NOT_ALLOWED
+        );
+      }
+      if (Number(wh.branchId) !== Number(actingUser.assignedBranchId)) {
+        throw tagError(
+          new AuthorizationError('Source warehouse is outside your branch'),
+          TRANSFER_ERRORS.SOURCE_WAREHOUSE_NOT_ALLOWED
+        );
+      }
+    }
+    if (
+      actingUser?.assignedWarehouseId &&
+      Number(actingUser.assignedWarehouseId) !== Number(warehouseId)
+    ) {
+      throw tagError(
+        new AuthorizationError('You can only transfer from your assigned warehouse'),
+        TRANSFER_ERRORS.SOURCE_WAREHOUSE_NOT_ALLOWED
+      );
+    }
+    return wh;
+  }
+
+  /**
+   * Verify the acting user can use `destinationId` as a transfer destination
+   * given the validated `source` warehouse row.
+   */
+  async assertCanTransferTo(destinationId, source, actingUser) {
+    if (!destinationId) {
+      throw tagError(
+        new ValidationError('Destination warehouse is required'),
+        TRANSFER_ERRORS.DESTINATION_WAREHOUSE_NOT_ALLOWED
+      );
+    }
+    if (Number(destinationId) === Number(source.id)) {
+      throw tagError(
+        new ValidationError('Source and destination warehouses must differ'),
+        TRANSFER_ERRORS.SAME_SOURCE_AND_DESTINATION
+      );
+    }
+
+    const db = await getDb();
+    const [wh] = await db
+      .select({ id: warehouses.id, branchId: warehouses.branchId, isActive: warehouses.isActive })
+      .from(warehouses)
+      .where(eq(warehouses.id, destinationId))
+      .limit(1);
+    if (!wh) {
+      throw tagError(new NotFoundError('Destination warehouse'), TRANSFER_ERRORS.WAREHOUSE_NOT_FOUND);
+    }
+    if (wh.isActive === false) {
+      throw tagError(
+        new ValidationError('Destination warehouse is inactive'),
+        TRANSFER_ERRORS.WAREHOUSE_INACTIVE
+      );
+    }
+
+    if (isGlobalAdmin(actingUser)) return wh;
+
+    const flags = await featureFlagsService.getFeatureFlags();
+    const branchOn = flags.multiBranch !== false;
+    if (branchOn && Number(wh.branchId) !== Number(source.branchId)) {
+      throw tagError(
+        new AuthorizationError('Cross-branch transfers require a global admin'),
+        TRANSFER_ERRORS.DESTINATION_WAREHOUSE_NOT_ALLOWED
+      );
+    }
+    return wh;
+  }
+
+  /**
+   * Resolve the list of warehouses the acting user can use as transfer
+   * destinations for a given source warehouse.
+   *
+   *  - branch feature ON, normal user → other active warehouses in the same
+   *    branch (always, even when the user is locked to a single warehouse
+   *    for sales/POS purposes — transfers are intentionally wider).
+   *  - branch feature ON, global admin → any other active warehouse.
+   *  - branch feature OFF → any other active warehouse.
+   */
+  async getTransferTargets(sourceWarehouseId, actingUser) {
+    if (!sourceWarehouseId) {
+      throw tagError(
+        new ValidationError('sourceWarehouseId is required'),
+        TRANSFER_ERRORS.WAREHOUSE_NOT_FOUND
+      );
+    }
+    // Reuses the source-permission check so we can't hand out destinations
+    // for a source the caller can't even use.
+    const source = await this.assertCanTransferFrom(sourceWarehouseId, actingUser);
+
+    const db = await getDb();
+    const flags = await featureFlagsService.getFeatureFlags();
+    const branchOn = flags.multiBranch !== false;
+    const conds = [
+      eq(warehouses.isActive, true),
+      ne(warehouses.id, sourceWarehouseId),
+    ];
+
+    if (branchOn && !isGlobalAdmin(actingUser)) {
+      // Same-branch only for non-admins.
+      if (source.branchId == null) {
+        // Source is global (no branch) — only other global warehouses are
+        // valid destinations.
+        conds.push(sql`${warehouses.branchId} IS NULL`);
+      } else {
+        conds.push(eq(warehouses.branchId, source.branchId));
+      }
+    }
+
+    return await db
+      .select({
+        id: warehouses.id,
+        name: warehouses.name,
+        branchId: warehouses.branchId,
+        branchName: branches.name,
+        isActive: warehouses.isActive,
+      })
+      .from(warehouses)
+      .leftJoin(branches, eq(warehouses.branchId, branches.id))
+      .where(and(...conds))
+      .orderBy(desc(warehouses.createdAt));
   }
 
   async delete(id) {
