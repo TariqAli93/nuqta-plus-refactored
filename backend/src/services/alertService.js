@@ -1,6 +1,6 @@
 import { getDb } from '../db.js';
-import { installments, products, customers, sales } from '../models/index.js';
-import { eq, and, lte, gt } from 'drizzle-orm';
+import { installments, products, customers, sales, productStock } from '../models/index.js';
+import { eq, and, lte, sql } from 'drizzle-orm';
 
 export class AlertService {
   /**
@@ -37,39 +37,74 @@ export class AlertService {
   }
 
   /**
-   * Get low stock products (stock <= minStock and stock > 0)
+   * Get low stock products. Stock is aggregated across warehouses from
+   * `product_stock` (the canonical source). A product is "low" when the
+   * total > 0 but <= the configured threshold (lowStockThreshold, falling
+   * back to minStock).
    * @returns {Promise<Array>} Array of low stock products
    */
   async getLowStockProducts() {
     const db = await getDb();
-    const lowStock = await db
-      .select()
+    const stockExpr = sql`COALESCE(SUM(${productStock.quantity}), 0)`;
+    const rows = await db
+      .select({
+        id: products.id,
+        name: products.name,
+        sku: products.sku,
+        barcode: products.barcode,
+        unit: products.unit,
+        currency: products.currency,
+        minStock: products.minStock,
+        lowStockThreshold: products.lowStockThreshold,
+        isActive: products.isActive,
+        stock: stockExpr.as('stock'),
+      })
       .from(products)
-      .where(
-        and(
-          lte(products.stock, products.minStock),
-          gt(products.stock, 0),
-          eq(products.isActive, true)
-        )
-      )
-      .orderBy(products.stock);
+      .leftJoin(productStock, eq(productStock.productId, products.id))
+      .where(eq(products.isActive, true))
+      .groupBy(products.id)
+      .orderBy(stockExpr);
 
-    return lowStock;
+    return rows
+      .map((r) => ({ ...r, stock: Number(r.stock) || 0 }))
+      .filter((r) => {
+        const threshold =
+          r.lowStockThreshold && r.lowStockThreshold > 0
+            ? r.lowStockThreshold
+            : r.minStock || 0;
+        return r.stock > 0 && r.stock <= threshold;
+      });
   }
 
   /**
-   * Get out of stock products (stock = 0)
+   * Get out of stock products. Stock is aggregated across warehouses from
+   * `product_stock`; a product is out of stock when the sum is 0 (or there
+   * are no rows yet).
    * @returns {Promise<Array>} Array of out of stock products
    */
   async getOutOfStockProducts() {
     const db = await getDb();
-    const outOfStock = await db
-      .select()
+    const stockExpr = sql`COALESCE(SUM(${productStock.quantity}), 0)`;
+    const rows = await db
+      .select({
+        id: products.id,
+        name: products.name,
+        sku: products.sku,
+        barcode: products.barcode,
+        unit: products.unit,
+        currency: products.currency,
+        isActive: products.isActive,
+        stock: stockExpr.as('stock'),
+      })
       .from(products)
-      .where(and(eq(products.stock, 0), eq(products.isActive, true)))
+      .leftJoin(productStock, eq(productStock.productId, products.id))
+      .where(eq(products.isActive, true))
+      .groupBy(products.id)
       .orderBy(products.name);
 
-    return outOfStock;
+    return rows
+      .map((r) => ({ ...r, stock: Number(r.stock) || 0 }))
+      .filter((r) => r.stock === 0);
   }
 
   /**

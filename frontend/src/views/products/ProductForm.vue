@@ -140,10 +140,9 @@
             </v-col>
             <v-col cols="12" md="3">
               <v-text-field
-                v-model.number="formData.stock"
-                label="المخزون"
-                type="number"
-                :rules="[rules.required]"
+                v-model="formData.unit"
+                label="الوحدة"
+                placeholder="piece"
               ></v-text-field>
             </v-col>
             <v-col cols="12" md="3">
@@ -151,6 +150,8 @@
                 v-model.number="formData.minStock"
                 label="الحد الأدنى للمخزون"
                 type="number"
+                hint="حد للتنبيه فقط — لا يغيّر الكمية"
+                persistent-hint
               ></v-text-field>
             </v-col>
             <v-col cols="12" md="3">
@@ -170,8 +171,28 @@
                 :rules="[rules.required]"
               ></v-select>
             </v-col>
+            <v-col cols="12" md="3">
+              <v-switch
+                v-model="formData.isActive"
+                color="success"
+                density="comfortable"
+                hide-details
+                inset
+                :label="formData.isActive ? 'نشط' : 'غير نشط'"
+              ></v-switch>
+            </v-col>
             <v-col cols="12">
               <v-textarea v-model="formData.description" label="الوصف" rows="3"></v-textarea>
+            </v-col>
+            <v-col v-if="!isEdit" cols="12">
+              <v-alert type="info" variant="tonal" density="comfortable" class="mb-0">
+                <div class="font-weight-medium">
+                  لإدخال كمية افتتاحية، استخدم صفحة إدارة المخزون بعد إنشاء المنتج.
+                </div>
+                <div class="text-caption">
+                  جميع تغييرات الكمية تتم عبر حركات المخزون (إضافة، خصم، نقل، تعديل) لضمان سجل تدقيق كامل.
+                </div>
+              </v-alert>
             </v-col>
           </v-row>
 
@@ -184,6 +205,31 @@
         </v-form>
       </v-card-text>
     </v-card>
+
+    <!-- Add Opening Stock CTA (only after a successful create) -->
+    <v-dialog v-model="openingStockDialog" max-width="480" persistent>
+      <v-card>
+        <v-card-title class="bg-primary text-white">
+          <v-icon start>mdi-package-variant-plus</v-icon>
+          إضافة مخزون افتتاحي
+        </v-card-title>
+        <v-card-text class="pt-4">
+          <p class="mb-2">
+            تم إنشاء المنتج بنجاح. هل تود إضافة كمية افتتاحية الآن من خلال حركة مخزون؟
+          </p>
+          <p class="text-caption text-medium-emphasis mb-0">
+            تسجيل الكمية كحركة مخزون يضمن وجود سجل تدقيق ويسمح بتحديد المخزن المستهدف.
+          </p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="skipOpeningStock">لاحقاً</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-arrow-right" @click="goToAddOpeningStock">
+            إضافة مخزون
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Admin Verification Dialog -->
     <v-dialog v-model="showAdminVerifyDialog" max-width="500" persistent>
@@ -263,6 +309,9 @@ const categories = ref([]);
 const categorySearch = ref('');
 const creatingCategory = ref(false);
 
+// NOTE: stock quantity is intentionally NOT part of this form. It is managed
+// only via inventory movements (see Inventory.vue + /inventory/adjust). The
+// user is redirected to add opening stock immediately after creation.
 const formData = ref({
   name: '',
   sku: '',
@@ -272,9 +321,10 @@ const formData = ref({
   costPrice: settingsStore.settings?.defaultCostPrice || 0,
   sellingPrice: settingsStore.settings?.defaultSellingPrice || 0,
   currency: settingsStore.settings?.defaultCurrency || 'IQD',
-  stock: settingsStore.settings?.defaultStock || 0,
   minStock: settingsStore.settings?.defaultMinStock || 0,
   lowStockThreshold: settingsStore.settings?.defaultMinStock || 0,
+  unit: 'piece',
+  isActive: true,
   status: settingsStore.settings?.defaultStatus || 'available',
 });
 
@@ -297,6 +347,11 @@ const statusOptions = [
 
 const isEdit = computed(() => !!route.params.id);
 const isAdmin = computed(() => authStore.user?.role === 'admin');
+const canAdjustInventory = computed(() => authStore.hasPermission?.('inventory:adjust') === true);
+
+// Post-create CTA: prompt to add opening stock via the inventory flow.
+const openingStockDialog = ref(false);
+const createdProduct = ref(null);
 
 // Computed property for available currencies
 const availableCurrencies = computed(() => settingsStore.availableCurrencies);
@@ -379,15 +434,40 @@ const handleSubmit = async () => {
   try {
     if (isEdit.value) {
       await productStore.updateProduct(route.params.id, formData.value);
+      router.push({ name: 'Products' });
     } else {
-      await productStore.createProduct(formData.value);
+      const response = await productStore.createProduct(formData.value);
+      // The store returns the raw axios response; the product payload is at
+      // `response.data` (or `response` itself when an interceptor unwraps it).
+      const newProduct = response?.data?.data || response?.data || response;
+      if (canAdjustInventory.value && newProduct?.id) {
+        createdProduct.value = newProduct;
+        openingStockDialog.value = true;
+      } else {
+        router.push({ name: 'Products' });
+      }
     }
-    router.push({ name: 'Products' });
   } catch (error) {
     // Error already handled by notification in store
   } finally {
     loading.value = false;
   }
+};
+
+// Route the user to the inventory page with the new product preselected so
+// they can record an opening-stock movement.
+const goToAddOpeningStock = () => {
+  const id = createdProduct.value?.id;
+  openingStockDialog.value = false;
+  router.push({
+    name: 'Inventory',
+    query: id ? { productId: id, action: 'adjust' } : {},
+  });
+};
+
+const skipOpeningStock = () => {
+  openingStockDialog.value = false;
+  router.push({ name: 'Products' });
 };
 
 const handleBarcodeScan = () => {
@@ -594,7 +674,27 @@ onMounted(async () => {
     loading.value = true;
     try {
       await productStore.fetchProduct(route.params.id);
-      formData.value = { ...productStore.currentProduct };
+      // Strip stock-like derived fields from the loaded product before binding
+      // it to the form. The backend rejects these keys on update with the
+      // STOCK_UPDATE_NOT_ALLOWED_ON_PRODUCT error code.
+      const {
+        stock: _stock,
+        totalStock: _totalStock,
+        warehouseStock: _warehouseStock,
+        quantity: _qty1,
+        qty: _qty2,
+        stockQuantity: _qty3,
+        currentStock: _qty4,
+        inStock: _qty5,
+        ...metadataOnly
+      } = productStore.currentProduct || {};
+      formData.value = {
+        ...formData.value,
+        ...metadataOnly,
+        // Defaults for newly added metadata fields if absent on legacy products.
+        unit: metadataOnly.unit || formData.value.unit,
+        isActive: metadataOnly.isActive !== false,
+      };
 
       // التأكد من أن العملة المحددة متاحة
       if (!availableCurrencies.value.includes(formData.value.currency)) {
