@@ -227,7 +227,15 @@ const recentSales = ref([]);
 const countSales = ref(0);
 
 const quickActions = [
-  { title: 'بطاقة الاقساط', icon: 'mdi-plus-circle', to: '/sales/new', permission: 'create:sales' },
+  {
+    title: 'بطاقة الاقساط',
+    icon: 'mdi-plus-circle',
+    to: '/sales/new',
+    permission: 'create:sales',
+    // Hide the installment-sale shortcut whenever installments are off OR
+    // the user lacks the capability — backend resolves both.
+    capability: 'canUseInstallments',
+  },
   {
     title: 'عميل جديد',
     icon: 'mdi-account-plus',
@@ -245,6 +253,9 @@ const quickActions = [
 
 const isActionAllowed = (action) => {
   if (!action || !userRole.value) return false;
+  // Capability check (backend-issued) takes precedence — it already accounts
+  // for the user's role AND every relevant feature flag.
+  if (action.capability && !authStore.can(action.capability)) return false;
   const perm = action.permission;
   if (!perm) return true; // If no permission specified, allow it
   if (perm === 'create:sales') return uiAccess.canCreateSales(userRole.value);

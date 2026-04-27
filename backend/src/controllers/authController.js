@@ -50,6 +50,20 @@ export class AuthController {
     });
   }
 
+  /**
+   * Session bootstrap — the canonical shape consumed by the SPA on login,
+   * app reload, and after a feature-flag/settings change.
+   *
+   * Returns: { user, role, scope, featureFlags, capabilities, setupMode }.
+   */
+  async getSession(request, reply) {
+    const session = await authService.getSession(request.user.id);
+    return reply.send({
+      success: true,
+      data: session,
+    });
+  }
+
   async logout(request, reply) {
     return reply.send({
       success: true,

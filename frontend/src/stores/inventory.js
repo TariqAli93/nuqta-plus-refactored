@@ -55,7 +55,7 @@ export const useInventoryStore = defineStore('inventory', {
      */
     warehousesForBranch(state) {
       const auth = useAuthStore();
-      const branchOn = auth.featureFlags?.multiBranch !== false;
+      const branchOn = auth.hasFeature("multiBranch");
       if (!branchOn) return state.warehouses;
       if (!state.selectedBranchId) return state.warehouses;
       return state.warehouses.filter(
@@ -98,7 +98,7 @@ export const useInventoryStore = defineStore('inventory', {
 
     async fetchWarehouses(branchId) {
       const auth = useAuthStore();
-      const branchOn = auth.featureFlags?.multiBranch !== false;
+      const branchOn = auth.hasFeature("multiBranch");
       const params = { activeOnly: true };
       if (branchOn && branchId) params.branchId = branchId;
       const response = await api.get('/warehouses', { params });
@@ -119,7 +119,7 @@ export const useInventoryStore = defineStore('inventory', {
      */
     async resolveActiveWarehouse() {
       const auth = useAuthStore();
-      const branchOn = auth.featureFlags?.multiBranch !== false;
+      const branchOn = auth.hasFeature("multiBranch");
       this.missingDefaultWarehouse = false;
 
       // Branches OFF → global warehouse list, no branch filter.
@@ -187,7 +187,7 @@ export const useInventoryStore = defineStore('inventory', {
       const auth = useAuthStore();
       if (!auth.isAuthenticated) return;
 
-      const branchOn = auth.featureFlags?.multiBranch !== false;
+      const branchOn = auth.hasFeature("multiBranch");
 
       // Always fetch warehouses; only fetch branches when branches are on.
       const tasks = [this.fetchWarehouses()];

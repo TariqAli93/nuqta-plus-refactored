@@ -346,7 +346,10 @@ const statusOptions = [
 ];
 
 const isEdit = computed(() => !!route.params.id);
-const isAdmin = computed(() => authStore.user?.role === 'admin');
+// Cost-price field is unlocked-by-default for admins (or anyone who can
+// delete products — the closest existing capability). Backend re-validates
+// the actual save, so this only affects the UI affordance.
+const isAdmin = computed(() => authStore.hasPermission('products:delete'));
 const canAdjustInventory = computed(() => authStore.hasPermission?.('inventory:adjust') === true);
 
 // Post-create CTA: prompt to add opening stock via the inventory flow.
@@ -596,8 +599,10 @@ const verifyAdmin = async () => {
       password: adminCredentials.value.password,
     });
 
-    // Check if user is admin
-    if (response.data?.user?.role === 'admin') {
+    // Accept any role with global access — the legacy single 'admin' role
+    // is a synonym of 'global_admin', and both unlock the cost price field.
+    const verifierRole = response.data?.user?.role;
+    if (verifierRole === 'admin' || verifierRole === 'global_admin') {
       costPriceUnlocked.value = true;
       notification.success('تم التحقق بنجاح');
       closeAdminDialog();

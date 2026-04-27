@@ -340,47 +340,94 @@ export async function canTransferBetweenWarehouses(user, sourceId, destId) {
 }
 
 // ── Capabilities (UI-facing aggregate) ────────────────────────────────────
+const EMPTY_CAPABILITIES = Object.freeze({
+  canCreateBranch: false,
+  canDeleteBranch: false,
+  canCreateWarehouse: false,
+  canEditWarehouse: false,
+  canDeleteWarehouse: false,
+  canEditBranchMeta: false,
+  canChangeDefaultWarehouse: false,
+  canTransferBetweenBranchWarehouses: false,
+  canTransferStock: false,
+  canViewAllBranches: false,
+  canViewAllWarehouses: false,
+  canSwitchBranch: false,
+  canSwitchWarehouse: false,
+  canUseInstallments: false,
+  canUsePOS: false,
+  canUseDraftInvoices: false,
+  canApproveTransfer: false,
+  canManageFeatureToggles: false,
+  canManageUsers: false,
+});
+
 /**
  * Build the `capabilities` object the frontend uses to drive UI visibility.
  * Backend remains the authority — these flags only let the UI hide actions
  * the user cannot perform, never grant new ones.
+ *
+ * Capabilities are computed from THREE inputs: backend feature flags, user
+ * role, and assigned branch/warehouse scope. A capability is `false` whenever
+ * the feature it gates is disabled, even if the role would otherwise grant
+ * it (e.g. a `global_admin` cannot use installments while installments=false).
  */
 export async function getUserCapabilities(user) {
-  if (!user) {
-    return {
-      canCreateBranch: false,
-      canCreateWarehouse: false,
-      canEditBranchMeta: false,
-      canChangeDefaultWarehouse: false,
-      canTransferBetweenBranchWarehouses: false,
-      canViewAllBranches: false,
-      canViewAllWarehouses: false,
-      canDeleteBranch: false,
-      canDeleteWarehouse: false,
-      canEditWarehouse: false,
-    };
-  }
+  if (!user) return { ...EMPTY_CAPABILITIES };
+
   const branchId = user.assignedBranchId || null;
   const flags = await featureFlagsService.getFeatureFlags();
+
   const branchOn = flags.multiBranch !== false;
+  const warehouseOn = flags.multiWarehouse !== false;
+  const transfersOn = flags.warehouseTransfers !== false;
+  const installmentsOn = flags.installments !== false;
+  const posOn = flags.pos !== false;
+  const draftsOn = flags.draftInvoices !== false;
+
+  const role = user.role;
+  const isGlobal = isGlobalAdmin(user);
+  const isBA = isBranchAdmin(user);
+  const isBM = isBranchManager(user);
+  const isCashier = role === 'cashier';
+  const isManager = role === 'manager';
+
   return {
-    canCreateBranch: canCreateBranch(user),
-    canDeleteBranch: canDeleteBranch(user),
-    canCreateWarehouse: canCreateWarehouse(user),
-    // For the UI, "can edit warehouse" is meaningful as a global flag —
-    // the per-row check still runs server-side.
-    canEditWarehouse: isGlobalAdmin(user) || isBranchAdmin(user),
-    canDeleteWarehouse: isGlobalAdmin(user) || isBranchAdmin(user),
-    canEditBranchMeta: branchId
-      ? canEditBranchMeta(user, branchId)
-      : isGlobalAdmin(user),
-    canChangeDefaultWarehouse: branchId
-      ? canEditBranchDefaultWarehouse(user, branchId)
-      : isGlobalAdmin(user),
+    // Branch lifecycle is meaningless when multiBranch is off.
+    canCreateBranch: branchOn && canCreateBranch(user),
+    canDeleteBranch: branchOn && canDeleteBranch(user),
+    // Warehouse CRUD also requires the multi-branch feature, since warehouses
+    // are tied to branches in the data model.
+    canCreateWarehouse: branchOn && canCreateWarehouse(user),
+    canEditWarehouse: branchOn && (isGlobal || isBA),
+    canDeleteWarehouse: branchOn && (isGlobal || isBA),
+    canEditBranchMeta:
+      branchOn && (branchId ? canEditBranchMeta(user, branchId) : isGlobal),
+    canChangeDefaultWarehouse:
+      branchOn &&
+      (branchId ? canEditBranchDefaultWarehouse(user, branchId) : isGlobal),
+    // Transfer-related capabilities require the warehouseTransfers / inventoryTransfers flag.
     canTransferBetweenBranchWarehouses:
-      isGlobalAdmin(user) || isBranchAdmin(user) || isBranchManager(user),
-    canViewAllBranches: isGlobalAdmin(user),
-    canViewAllWarehouses: isGlobalAdmin(user) || !branchOn,
+      transfersOn && (isGlobal || isBA || isBM),
+    // Spec name. Same rule as above plus cashier/manager who can request
+    // (server-side approval queue handles the rest).
+    canTransferStock:
+      transfersOn && (isGlobal || isBA || isBM || isManager || isCashier),
+    canApproveTransfer: transfersOn && (isGlobal || isBA),
+    canViewAllBranches: branchOn && isGlobal,
+    canViewAllWarehouses: isGlobal || !branchOn,
+    // Switching branch context is admin-only and also requires multi-branch.
+    canSwitchBranch: branchOn && isGlobal,
+    // Switching warehouse only matters when the user has more than one to
+    // pick from — backend reflects that via scope.canSwitchWarehouse.
+    canSwitchWarehouse: warehouseOn || branchOn ? !user.assignedWarehouseId : false,
+    // POS / installments / draft invoices: feature-gated for ALL roles
+    // including global admin.
+    canUseInstallments: installmentsOn && (isGlobal || isBA || isBM || isManager || isCashier),
+    canUsePOS: posOn && (isGlobal || isBA || isBM || isManager || isCashier),
+    canUseDraftInvoices: draftsOn && (isGlobal || isBA || isBM || isManager || isCashier),
+    canManageFeatureToggles: isGlobal,
+    canManageUsers: isGlobal || isBA,
   };
 }
 

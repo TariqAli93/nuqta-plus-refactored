@@ -136,6 +136,19 @@ api.interceptors.response.use(
 
     // Handle 403 Forbidden
     if (error.response?.status === 403) {
+      // FEATURE_DISABLED / CAPABILITY_DENIED → backend just rejected an
+      // action that the SPA may still think is available (e.g. another
+      // tab disabled it). Refresh the session so menus/buttons/routes
+      // re-evaluate against the latest state.
+      const code = error.response?.data?.code;
+      if (code === 'FEATURE_DISABLED' || code === 'CAPABILITY_DENIED') {
+        try {
+          const authStore = useAuthStore();
+          if (authStore.isAuthenticated) authStore.refreshSession();
+        } catch {
+          /* non-fatal */
+        }
+      }
       notificationStore.error(buildMessage(error) || 'ليس لديك صلاحية للوصول إلى هذا المورد');
       return Promise.reject(error.response?.data || error.message);
     }

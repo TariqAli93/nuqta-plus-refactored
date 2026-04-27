@@ -110,13 +110,20 @@ const routes = [
         path: 'sales/pos',
         name: 'PosScreen',
         component: PosScreen,
-        meta: { requiresCreateSales: true },
+        // POS depends on the `pos` feature flag + canUsePOS capability.
+        meta: { requiresCreateSales: true, feature: 'pos', capability: 'canUsePOS' },
       },
       {
         path: 'sales/new',
         name: 'NewSale',
         component: NewSale,
-        meta: { requiresCreateSales: true },
+        // /sales/new is the installment-sale entry point; gate it by the
+        // installments feature flag + capability.
+        meta: {
+          requiresCreateSales: true,
+          feature: 'installments',
+          capability: 'canUseInstallments',
+        },
       },
       {
         path: 'sales/:id',
@@ -135,9 +142,9 @@ const routes = [
       },
       { path: 'inventory', name: 'Inventory', component: Inventory, meta: { feature: 'inventory' } },
       { path: 'inventory/movements', name: 'StockMovements', component: StockMovements, meta: { feature: 'inventory' } },
-      { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer, meta: { feature: 'warehouseTransfers' } },
+      { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer, meta: { feature: 'inventoryTransfers', capability: 'canTransferStock' } },
       { path: 'inventory/low-stock', name: 'LowStock', component: LowStock, meta: { feature: 'inventory' } },
-      { path: 'inventory/transfers', name: 'TransferRequests', component: TransferRequests, meta: { feature: 'warehouseTransfers' } },
+      { path: 'inventory/transfers', name: 'TransferRequests', component: TransferRequests, meta: { feature: 'inventoryTransfers' } },
       { path: 'inventory/settings', name: 'BranchesWarehouses', component: BranchesWarehouses, meta: { requiresManageProducts: true, anyFeature: ['multiBranch', 'multiWarehouse'] } },
       { path: 'settings/feature-flags', name: 'FeatureFlags', component: FeatureFlags, meta: { requiresGlobalAdmin: true } },
       { path: 'setup', name: 'SetupWizard', component: SetupWizard, meta: { requiresGlobalAdmin: true } },
@@ -216,16 +223,27 @@ router.beforeEach(async (to, from, next) => {
       return next({ name: 'Forbidden' });
     }
 
-    // Feature-flag gate: hide entire pages when the flag is off.
-    if (to.meta.feature && authStore.featureFlags?.[to.meta.feature] === false) {
+    // Feature-flag gate: hide entire pages when the flag is off. Uses the
+    // alias-aware `hasFeature` getter so route meta can use either
+    // canonical (warehouseTransfers) or spec (inventoryTransfers) names.
+    if (to.meta.feature && !authStore.hasFeature(to.meta.feature)) {
       return next({ name: 'Dashboard' });
     }
     if (
       Array.isArray(to.meta.anyFeature) &&
       to.meta.anyFeature.length > 0 &&
-      !to.meta.anyFeature.some((f) => authStore.featureFlags?.[f] !== false)
+      !to.meta.anyFeature.some((f) => authStore.hasFeature(f))
     ) {
       return next({ name: 'Dashboard' });
+    }
+
+    // Capability gate: backend tells us whether this user (with this role,
+    // scope, AND feature flag state) can use the page. Block when false —
+    // forbidden, not redirect to dashboard, since the user might be on a
+    // page they previously could access (e.g. installments just got
+    // disabled while they were drafting a sale).
+    if (to.meta.capability && !authStore.can(to.meta.capability)) {
+      return next({ name: 'Forbidden' });
     }
 
     // First-run wizard: redirect a global admin with pending setup to the

@@ -2,6 +2,7 @@ import { getDb, getPool, saveDatabase } from '../db.js';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import {
   SALE_TYPE_INSTALLMENT,
+  SALE_SOURCE_POS,
   saleTypeToPaymentType,
 } from '../constants/sales.js';
 import {
@@ -27,6 +28,7 @@ import { getCustomerCreditSnapshot } from './creditScoringService.js';
 import auditService from './auditService.js';
 import { InventoryService } from './inventoryService.js';
 import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './scopeService.js';
+import featureFlagsService from './featureFlagsService.js';
 
 // Threshold below which a customer is considered "high risk" for an alert
 const HIGH_RISK_SCORE_THRESHOLD = 50;
@@ -231,10 +233,37 @@ export class SaleService {
       saleData.paymentType ||
       (saleType ? saleTypeToPaymentType(saleType) : 'cash');
 
+    // Feature gate: a POS sale requires the pos feature flag to be on.
+    // Mirrors the frontend "hide POS button/route" UX.
+    if (saleSource === SALE_SOURCE_POS) {
+      const posEnabled = await featureFlagsService.isFeatureEnabled('pos');
+      if (!posEnabled) {
+        const err = new ValidationError('POS module is disabled');
+        err.statusCode = 403;
+        err.code = 'FEATURE_DISABLED';
+        err.feature = 'pos';
+        throw err;
+      }
+    }
+
     const isInstallmentSale =
       paymentType === 'installment' ||
       paymentType === 'mixed' ||
       saleType    === SALE_TYPE_INSTALLMENT;
+
+    // Feature gate: reject installment sales when the installments module is
+    // disabled. Mirrors the frontend "hide installment button" UX so a
+    // direct API call still gets blocked.
+    if (isInstallmentSale) {
+      const installmentsEnabled = await featureFlagsService.isFeatureEnabled('installments');
+      if (!installmentsEnabled) {
+        const err = new ValidationError('Installments are disabled');
+        err.statusCode = 403;
+        err.code = 'FEATURE_DISABLED';
+        err.feature = 'installments';
+        throw err;
+      }
+    }
     // ───────────────────────────────────────────────────────────────────────
 
     let interestAmount = 0;

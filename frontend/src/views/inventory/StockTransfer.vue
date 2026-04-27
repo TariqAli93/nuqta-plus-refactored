@@ -136,7 +136,7 @@ const maxQuantity = computed(() => {
 });
 
 const noDestinationsText = computed(() =>
-  authStore.featureFlags?.multiBranch !== false
+  authStore.hasFeature('multiBranch')
     ? 'لا يوجد مخازن متاحة للنقل في فرعك الحالي.'
     : 'لا يوجد مخازن متاحة للنقل.'
 );
@@ -212,9 +212,10 @@ const submit = async () => {
       notes: form.notes || undefined,
     };
 
-    // Global admins move stock immediately; everyone else submits a request
-    // that goes through the approval queue.
-    if (authStore.isGlobalAdmin) {
+    // canApproveTransfer is true for users who can move stock immediately
+    // (global admin / branch admin); everyone else submits a request to the
+    // approval queue. This replaces a hardcoded role check.
+    if (authStore.can('canApproveTransfer')) {
       await inventoryStore.transferStock(payload);
       router.push({ name: 'Inventory' });
     } else {

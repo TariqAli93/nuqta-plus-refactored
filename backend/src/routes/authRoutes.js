@@ -87,6 +87,20 @@ export default async function authRoutes(fastify) {
     },
   });
 
+  // Canonical session/bootstrap endpoint. The SPA hits this on login, page
+  // reload, and after a feature-flag/settings change. Returns a uniform
+  // payload of { user, role, scope, featureFlags, capabilities, setupMode }
+  // that the frontend treats as the single source of truth for UI visibility.
+  fastify.get('/session', {
+    onRequest: [fastify.authenticate],
+    handler: authController.getSession,
+    schema: {
+      description: 'Bootstrap session: user, scope, feature flags, capabilities',
+      tags: ['auth'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
   fastify.post('/logout', {
     onRequest: [fastify.authenticate],
     handler: authController.logout,

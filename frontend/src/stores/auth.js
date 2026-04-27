@@ -12,6 +12,16 @@ function readJSON(key) {
   }
 }
 
+/**
+ * Aliases between feature-flag names. Lets `can('inventoryTransfers')` and
+ * `can('warehouseTransfers')` resolve to the same flag value, so component
+ * code can use either naming convention.
+ */
+const FLAG_ALIASES = Object.freeze({
+  inventoryTransfers: 'warehouseTransfers',
+  warehouseTransfers: 'inventoryTransfers',
+});
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
@@ -38,11 +48,60 @@ export const useAuthStore = defineStore('auth', {
       state.scope?.branchId ?? state.user?.assignedBranchId ?? null,
     assignedWarehouseId: (state) =>
       state.scope?.warehouseId ?? state.user?.assignedWarehouseId ?? null,
-    branchFeatureEnabled: (state) =>
-      state.scope?.branchFeatureEnabled ?? state.featureFlags?.multiBranch !== false,
+    branchFeatureEnabled() {
+      // Prefer scope.branchFeatureEnabled (server-resolved); fall back to
+      // the alias-aware feature lookup so a stale cache still answers right.
+      if (this.scope?.branchFeatureEnabled !== undefined) {
+        return !!this.scope.branchFeatureEnabled;
+      }
+      return this.hasFeature('multiBranch');
+    },
     allowedBranchIds: (state) => state.scope?.allowedBranchIds || [],
     allowedWarehouseIds: (state) => state.scope?.allowedWarehouseIds || [],
-    isFeatureEnabled: (state) => (flag) => state.featureFlags?.[flag] !== false,
+
+    /**
+     * `hasFeature(flag)` — returns true when the named feature flag is
+     * enabled in the backend-provided featureFlags map. Aliases resolve to
+     * the canonical key (warehouseTransfers ↔ inventoryTransfers).
+     */
+    hasFeature: (state) => (flag) => {
+      if (!flag) return false;
+      const flags = state.featureFlags || {};
+      if (flags[flag] !== undefined) return flags[flag] !== false;
+      const alias = FLAG_ALIASES[flag];
+      if (alias && flags[alias] !== undefined) return flags[alias] !== false;
+      return false;
+    },
+
+    // Kept for backward compatibility — uses the alias-aware lookup.
+    isFeatureEnabled() {
+      return this.hasFeature;
+    },
+
+    /**
+     * `can(name)` — single source of truth for UI visibility decisions.
+     * Resolves to a backend-issued capability flag first, falling back to a
+     * feature flag with the same name (e.g. `can('pos')` checks featureFlags.pos
+     * when there is no `canUsePos` capability). Returns boolean.
+     *
+     * Use this in components instead of role checks: components stay agnostic
+     * of role and feature topology — the backend tells the frontend what can
+     * be rendered.
+     */
+    can: (state) => (name) => {
+      if (!name) return false;
+      const caps = state.capabilities || {};
+      // Direct capability hit (e.g. canCreateBranch).
+      if (caps[name] !== undefined) return caps[name] === true;
+
+      // Feature flag fallback (e.g. can('installments')).
+      const flags = state.featureFlags || {};
+      if (flags[name] !== undefined) return flags[name] !== false;
+      const alias = FLAG_ALIASES[name];
+      if (alias && flags[alias] !== undefined) return flags[alias] !== false;
+      return false;
+    },
+
     needsSetupWizard: (state) =>
       state.setupMode === 'pending' &&
       (state.user?.role === 'global_admin' || state.user?.role === 'admin'),
@@ -108,6 +167,25 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
     /**
+     * Hydrate the store from a `/auth/session`-shaped payload. Used by both
+     * login and `refreshSession()` so the persistence layer has a single
+     * code path. LocalStorage is treated as an offline cache for resume; it
+     * never overrides what the server returned.
+     */
+    _hydrateFromSession(payload) {
+      this.user = payload.user || null;
+      this.scope = payload.scope || null;
+      this.featureFlags = payload.featureFlags || {};
+      this.setupMode = payload.setupMode || 'done';
+      this.capabilities = payload.capabilities || {};
+
+      if (this.user) localStorage.setItem('user', JSON.stringify(this.user));
+      if (this.scope) localStorage.setItem('scope', JSON.stringify(this.scope));
+      localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
+      localStorage.setItem('capabilities', JSON.stringify(this.capabilities));
+    },
+
+    /**
      * Login user with credentials
      * @param {Object} credentials - Username and password
      */
@@ -121,22 +199,19 @@ export const useAuthStore = defineStore('auth', {
         }
 
         this.token = response.data.token;
-        this.user = response.data.user;
         this.isAuthenticated = true;
-        this.scope = response.data.scope || null;
-        this.featureFlags = response.data.featureFlags || {};
-        this.setupMode = response.data.setupMode || 'done';
-        this.capabilities = response.data.capabilities || {};
-
         localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
-        if (this.scope) localStorage.setItem('scope', JSON.stringify(this.scope));
-        if (this.featureFlags)
-          localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
-        localStorage.setItem('capabilities', JSON.stringify(this.capabilities));
-
-        // Update axios default headers with new token
         api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+
+        // Hydrate from the same shape as /auth/session so login + bootstrap
+        // share one persistence path.
+        this._hydrateFromSession({
+          user: response.data.user,
+          scope: response.data.scope,
+          featureFlags: response.data.featureFlags,
+          setupMode: response.data.setupMode,
+          capabilities: response.data.capabilities,
+        });
 
         // Hydrate branch + warehouse state in a single, ordered flow so the
         // dashboard/POS sees the right context immediately after login.
@@ -148,6 +223,36 @@ export const useAuthStore = defineStore('auth', {
         const errorMessage = error.response?.data?.message || error.message || 'فشل تسجيل الدخول';
         notificationStore.error(errorMessage);
         throw error;
+      }
+    },
+
+    /**
+     * Refresh the canonical session/bootstrap payload from the backend and
+     * rehydrate featureFlags + capabilities. Call this after a settings
+     * change, after the feature-flags page toggles a flag, or any other time
+     * the SPA needs to pick up server-side changes WITHOUT a full reload.
+     *
+     * Stale branch/warehouse state is reconciled by `bootstrapSession()`
+     * which the inventory store reset/initialize handles.
+     */
+    async refreshSession({ resetInventory = true } = {}) {
+      if (!this.token) return null;
+      try {
+        const response = await api.get('/auth/session');
+        const payload = response.data || {};
+        this._hydrateFromSession(payload);
+        if (resetInventory) {
+          // Rebuild branch/warehouse context — feature flag changes can flip
+          // multiBranch, which changes which warehouses are visible.
+          await this.bootstrapSession();
+        }
+        return payload;
+      } catch (error) {
+        // Non-fatal: callers can decide to log out on auth failures.
+        if (error?.response?.status === 401) {
+          this.logout();
+        }
+        return null;
       }
     },
 
@@ -176,36 +281,41 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /**
-     * Check authentication status on app load
+     * Check authentication status on app load. Hits `/auth/session` so the
+     * SPA always boots from the backend's source-of-truth payload — local
+     * cache is only used to gate the request, never to decide UI visibility.
      */
     async checkAuth() {
       const token = localStorage.getItem('token');
-      const user = localStorage.getItem('user');
-
-      if (token && user) {
-        try {
-          // Set token first for API calls
-          this.token = token;
-          api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-          // Verify token is still valid by fetching profile (sets this.user from API)
-          await this.getProfile();
-          this.isAuthenticated = true;
-          // Re-resolve branch/warehouse on app reload too, so a refresh
-          // honors a freshly-changed assigned branch or feature flag.
-          await this.bootstrapSession();
-        } catch {
-          // Token is invalid, clear everything
-          this.logout();
-        }
-      } else {
-        // No token or user, ensure logged out state
+      if (!token) {
         this.isAuthenticated = false;
+        return;
+      }
+
+      try {
+        this.token = token;
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+        // Fetch the canonical session payload. This validates the token AND
+        // hydrates featureFlags/capabilities/scope in one round-trip.
+        const session = await this.refreshSession({ resetInventory: false });
+        if (!session || !session.user) {
+          this.logout();
+          return;
+        }
+        this.isAuthenticated = true;
+        // Re-resolve branch/warehouse on app reload too, so a refresh honors
+        // a freshly-changed assigned branch or feature flag.
+        await this.bootstrapSession();
+      } catch {
+        // Token is invalid, clear everything
+        this.logout();
       }
     },
 
     /**
-     * Get current user profile
+     * Get current user profile (legacy `/auth/profile`). Kept for
+     * backward-compat; `refreshSession()` is the preferred entry point now.
      */
     async getProfile() {
       const notificationStore = useNotificationStore();
@@ -214,15 +324,13 @@ export const useAuthStore = defineStore('auth', {
 
         if (response.data) {
           const { scope, featureFlags, setupMode, capabilities, ...userOnly } = response.data;
-          this.user = userOnly;
-          this.scope = scope || null;
-          this.featureFlags = featureFlags || {};
-          this.setupMode = setupMode || 'done';
-          this.capabilities = capabilities || {};
-          localStorage.setItem('user', JSON.stringify(userOnly));
-          if (scope) localStorage.setItem('scope', JSON.stringify(scope));
-          if (featureFlags) localStorage.setItem('featureFlags', JSON.stringify(featureFlags));
-          localStorage.setItem('capabilities', JSON.stringify(this.capabilities));
+          this._hydrateFromSession({
+            user: userOnly,
+            scope,
+            featureFlags,
+            setupMode,
+            capabilities,
+          });
         }
 
         return response;
@@ -234,30 +342,25 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /**
-     * Persist updated feature flags returned from the feature-flags API.
-     * Toggling `multiBranch` re-runs the branch/warehouse resolution so the
-     * UI reflects the new mode immediately (filtered → global or vice versa).
+     * Persist updated feature flags returned from the feature-flags API
+     * and re-fetch the canonical session so capabilities + scope reflect
+     * the new flag state. This guarantees that ALL feature-flag changes
+     * (not just multiBranch) cause an immediate UI refresh.
      */
     async setFeatureFlags(flags) {
-      const prev = this.featureFlags || {};
       this.featureFlags = flags || {};
       localStorage.setItem('featureFlags', JSON.stringify(this.featureFlags));
-      const branchToggleChanged =
-        (prev.multiBranch !== false) !== (this.featureFlags.multiBranch !== false);
-      if (branchToggleChanged && this.isAuthenticated) {
-        // Re-fetch profile so the server-side scope reflects the new flag
-        // (e.g. allowedWarehouseIds is no longer branch-filtered).
-        try {
-          await this.getProfile();
-        } catch {
-          // Non-fatal — the next API call that needs the scope will retry.
-        }
-        await this.bootstrapSession();
-      }
+      if (!this.isAuthenticated) return;
+      // Refresh /auth/session so capabilities (which depend on flags) are
+      // recomputed by the backend, and so scope (e.g. allowedWarehouseIds)
+      // reflects whether multiBranch / multiWarehouse changed.
+      await this.refreshSession();
     },
 
     /**
-     * Logout user and clear session
+     * Logout user and clear ALL session-bound state — including feature flags
+     * and capabilities — so the next login can never inherit a stale "feature
+     * X is on" assumption from the previous user/session.
      */
     logout() {
       const notificationStore = useNotificationStore();
@@ -267,13 +370,19 @@ export const useAuthStore = defineStore('auth', {
       this.isAuthenticated = false;
       this.scope = null;
       this.featureFlags = {};
+      this.setupMode = 'done';
       this.capabilities = {};
 
+      // localStorage may also contain stale UI preferences keyed off
+      // feature-dependent state (selected branch/warehouse, feature flags
+      // cache). Wipe them all so the next session bootstraps cleanly.
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('scope');
       localStorage.removeItem('featureFlags');
       localStorage.removeItem('capabilities');
+      localStorage.removeItem('selectedBranchId');
+      localStorage.removeItem('selectedWarehouseId');
 
       // Remove authorization header
       delete api.defaults.headers.common['Authorization'];

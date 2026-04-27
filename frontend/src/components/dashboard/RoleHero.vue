@@ -46,10 +46,12 @@ const fullName = computed(() => authStore.user?.fullName || authStore.user?.user
  * transfers trio is off. On a simple single-branch POS setup its KPIs and
  * shortcuts add no value, so the Dashboard renders without it.
  */
-const shouldRender = computed(() => {
-  const f = authStore.featureFlags || {};
-  return f.multiBranch !== false || f.multiWarehouse !== false || f.warehouseTransfers !== false;
-});
+const shouldRender = computed(
+  () =>
+    authStore.hasFeature('multiBranch') ||
+    authStore.hasFeature('multiWarehouse') ||
+    authStore.hasFeature('inventoryTransfers')
+);
 
 const greeting = computed(() => {
   if (authStore.isGlobalAdmin) return `مرحباً ${fullName.value} — إدارة عامة`;
@@ -143,7 +145,9 @@ const kpis = computed(() => {
 // ── Shortcuts per role ─────────────────────────────────────────────────────
 const shortcuts = computed(() => {
   const list = [];
-  if (authStore.hasPermission('create:sales')) {
+  // "New sale" hits the installment-sale screen — gate it on the installment
+  // capability, not just create:sales.
+  if (authStore.can('canUseInstallments')) {
     list.push({ title: 'بيع جديد', icon: 'mdi-plus-circle', to: '/sales/new', color: 'primary' });
   }
   if (authStore.hasPermission('create:customers')) {
@@ -154,10 +158,7 @@ const shortcuts = computed(() => {
       variant: 'outlined',
     });
   }
-  if (
-    authStore.hasPermission('approve_warehouse_transfer') &&
-    authStore.featureFlags?.warehouseTransfers !== false
-  ) {
+  if (authStore.can('canApproveTransfer')) {
     list.push({
       title: 'طلبات النقل',
       icon: 'mdi-check-decagram',
@@ -166,7 +167,7 @@ const shortcuts = computed(() => {
       color: pendingTransfers.value ? 'warning' : undefined,
     });
   }
-  if (authStore.isGlobalAdmin) {
+  if (authStore.can('canManageFeatureToggles')) {
     list.push({
       title: 'إعدادات الميزات',
       icon: 'mdi-toggle-switch',
@@ -179,7 +180,7 @@ const shortcuts = computed(() => {
 
 // ── Data loads ─────────────────────────────────────────────────────────────
 const loadPendingTransfers = async () => {
-  if (authStore.featureFlags?.warehouseTransfers === false) return;
+  if (!authStore.hasFeature('inventoryTransfers')) return;
   if (!authStore.hasPermission('inventory:read')) return;
   try {
     const response = await api.get('/warehouse-transfers', {
@@ -192,7 +193,7 @@ const loadPendingTransfers = async () => {
 };
 
 const loadLowStock = async () => {
-  if (authStore.featureFlags?.inventory === false) return;
+  if (!authStore.hasFeature('inventory')) return;
   const warehouseId = inventoryStore.selectedWarehouseId;
   if (!warehouseId) return;
   try {

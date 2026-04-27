@@ -246,7 +246,7 @@ const warehouseForm = reactive({
   isActive: true,
 });
 
-const branchFeatureOn = computed(() => authStore.featureFlags?.multiBranch !== false);
+const branchFeatureOn = computed(() => authStore.hasFeature('multiBranch'));
 
 // All UI gating reads from `authStore.capabilities` (the global flags from
 // the backend) plus per-row `permissions` blocks the API attaches to each

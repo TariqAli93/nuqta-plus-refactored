@@ -6,6 +6,17 @@ import { ValidationError } from '../utils/errors.js';
 const SETTINGS_KEY = 'feature_flags';
 const SETUP_MODE_KEY = 'setup_mode';
 
+/**
+ * Some flags are exposed to the API under more than one name so the
+ * frontend payload can stay aligned with the product spec ("inventoryTransfers")
+ * while the storage layer keeps the historical key ("warehouseTransfers").
+ * The values are mirrored on read and on write — touching either name updates
+ * the canonical key.
+ */
+const FLAG_ALIASES = Object.freeze({
+  inventoryTransfers: 'warehouseTransfers',
+});
+
 /** Preset bundles for the first-run wizard. */
 export const SETUP_PRESETS = Object.freeze({
   simple: {
@@ -15,6 +26,8 @@ export const SETUP_PRESETS = Object.freeze({
     multiBranch: false,
     multiWarehouse: false,
     warehouseTransfers: false,
+    pos: true,
+    draftInvoices: true,
   },
   installments: {
     installments: true,
@@ -23,6 +36,8 @@ export const SETUP_PRESETS = Object.freeze({
     multiBranch: false,
     multiWarehouse: false,
     warehouseTransfers: false,
+    pos: true,
+    draftInvoices: true,
   },
   multi_branch: {
     installments: true,
@@ -31,6 +46,8 @@ export const SETUP_PRESETS = Object.freeze({
     multiBranch: true,
     multiWarehouse: true,
     warehouseTransfers: true,
+    pos: true,
+    draftInvoices: true,
   },
 });
 
@@ -40,6 +57,9 @@ export const DEFAULT_FLAGS = Object.freeze({
   installments: true,
   creditScore: true,
   inventory: true,
+  // Front-counter modules — on out of the box.
+  pos: true,
+  draftInvoices: true,
   // Advanced — off by default
   multiBranch: false,
   multiWarehouse: false,
@@ -49,23 +69,50 @@ export const DEFAULT_FLAGS = Object.freeze({
   liveOperations: true,
 });
 
-const ALLOWED_KEYS = new Set(Object.keys(DEFAULT_FLAGS));
+const ALLOWED_KEYS = new Set([...Object.keys(DEFAULT_FLAGS), ...Object.keys(FLAG_ALIASES)]);
+
+/**
+ * Decorate the flag map with alias keys so callers (and the frontend) can
+ * read either the canonical or spec-aligned name. The canonical key remains
+ * the source of truth in storage.
+ */
+function withAliases(flags) {
+  const next = { ...flags };
+  for (const [alias, canonical] of Object.entries(FLAG_ALIASES)) {
+    next[alias] = next[canonical] !== false;
+  }
+  return next;
+}
+
+/** Resolve any incoming alias keys to their canonical name. */
+function normalizeFlagPayload(partial) {
+  const next = {};
+  for (const [key, value] of Object.entries(partial)) {
+    const target = FLAG_ALIASES[key] || key;
+    next[target] = value;
+  }
+  return next;
+}
 
 export async function getFeatureFlags() {
   const db = await getDb();
   const [row] = await db.select().from(settings).where(eq(settings.key, SETTINGS_KEY)).limit(1);
-  if (!row) return { ...DEFAULT_FLAGS };
+  if (!row) return withAliases({ ...DEFAULT_FLAGS });
   try {
     const parsed = JSON.parse(row.value);
-    return { ...DEFAULT_FLAGS, ...parsed };
+    // Merge defaults so newly added flags are always present in the payload.
+    const merged = { ...DEFAULT_FLAGS, ...normalizeFlagPayload(parsed) };
+    return withAliases(merged);
   } catch {
-    return { ...DEFAULT_FLAGS };
+    return withAliases({ ...DEFAULT_FLAGS });
   }
 }
 
 export async function isFeatureEnabled(flag) {
   const flags = await getFeatureFlags();
-  return flags[flag] !== false;
+  // Normalize alias to canonical so callers can pass either name.
+  const key = FLAG_ALIASES[flag] || flag;
+  return flags[key] !== false;
 }
 
 /**
@@ -86,9 +133,15 @@ export async function updateFeatureFlags(partial, userId) {
     }
   }
 
+  const normalized = normalizeFlagPayload(partial);
+
   const db = await getDb();
   const current = await getFeatureFlags();
-  const next = { ...current, ...partial };
+  // Strip alias keys before persisting so storage stays canonical.
+  const canonicalCurrent = Object.fromEntries(
+    Object.entries(current).filter(([k]) => !FLAG_ALIASES[k])
+  );
+  const next = { ...canonicalCurrent, ...normalized };
   const value = JSON.stringify(next);
 
   const [row] = await db.select().from(settings).where(eq(settings.key, SETTINGS_KEY)).limit(1);
@@ -106,14 +159,23 @@ export async function updateFeatureFlags(partial, userId) {
     });
   }
 
-  return next;
+  return withAliases(next);
 }
 
-/** Fastify-style guard: throws if the flag is off. */
+/**
+ * Throw when the named feature is disabled. The thrown error carries
+ * `code = 'FEATURE_DISABLED'` and `statusCode = 403` so the global error
+ * handler renders a recognizable JSON body and the frontend can refresh
+ * its session/bootstrap.
+ */
 export async function requireFeature(flag) {
   const enabled = await isFeatureEnabled(flag);
   if (!enabled) {
-    throw new ValidationError(`Feature "${flag}" is disabled`);
+    const err = new ValidationError(`Feature "${flag}" is disabled`);
+    err.statusCode = 403;
+    err.code = 'FEATURE_DISABLED';
+    err.feature = flag;
+    throw err;
   }
 }
 
