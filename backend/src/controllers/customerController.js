@@ -6,6 +6,11 @@ import {
   getRiskLevel,
   assessAndLogCreditRisk,
 } from '../services/creditScoringService.js';
+import {
+  getScoringMode,
+  getModelVersion,
+  isCreditScoreModelAvailable,
+} from '../services/onnxCreditScoringService.js';
 
 const customerService = new CustomerService();
 
@@ -72,7 +77,13 @@ export class CustomerController {
     const result = await calculateAndPersistCreditScore(Number(request.params.id));
     return reply.send({
       success: true,
-      data: { ...result, riskLevel: getRiskLevel(result.score) },
+      data: {
+        ...result,
+        riskLevel: getRiskLevel(result.score),
+        scoring_mode: getScoringMode(),
+        model_version: result.modelVersion ?? getModelVersion(),
+        model_loaded: isCreditScoreModelAvailable(),
+      },
     });
   }
 

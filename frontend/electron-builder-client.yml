@@ -20,6 +20,12 @@ extraResources:
   - from: ./electron/scripts
     to: dist-electron/scripts
 
+# Client installer DELIBERATELY does NOT ship:
+#   - resources/backend/        (no local backend; clients call the LAN server)
+#   - credit-score.onnx         (no local ONNX inference; clients are renderer-only)
+#   - onnxruntime-node          (not present in the client deps)
+# All credit-risk scoring happens server-side via /api/customers/:id/credit-score.
+
 directories:
   buildResources: build
   output: ../release-client
@@ -49,4 +55,7 @@ nsis:
   uninstallDisplayName: 'NuqtaPlus Client'
   license: build/license.md
   unicode: true
-  include: ../scripts/installer-include.nsh
+  # Client uses a no-op include so the installer does NOT register or start
+  # the backend Windows Service — the client is renderer-only and points at
+  # a remote LAN server.
+  include: ../scripts/installer-include-client.nsh

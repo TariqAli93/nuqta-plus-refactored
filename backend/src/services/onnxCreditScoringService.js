@@ -14,26 +14,39 @@
  *      without exposing model internals.
  *
  * ── Production safety ────────────────────────────────────────────────────
- *   - If the .onnx file is absent or onnxruntime-node fails to load, the
- *     service falls back to rule-based scoring transparently.
- *   - If input features are malformed/null, the engine returns a safe
- *     MEDIUM default instead of throwing.
+ *   - Path resolution goes through utils/modelPathResolver.js, which knows
+ *     about packaged Electron (process.resourcesPath), Windows-Service mode
+ *     (anchored on __dirname), and the local source/dev tree. process.cwd()
+ *     is only consulted as a last resort.
+ *   - Startup validation refuses to enable ONNX unless ALL of the following
+ *     hold: model file exists & non-empty, meta.json exists & is valid JSON,
+ *     meta.feature_order matches the runtime FEATURE_ORDER exactly, and the
+ *     ONNX session loads without error. Any failure flips the engine into
+ *     RULES_ONLY mode — the app NEVER crashes because of a missing or
+ *     corrupt model.
+ *   - On invalid input the engine returns a safe MEDIUM default.
  *   - Inference NEVER trains or modifies the model file at runtime.
  *
+ * ── scoring_mode contract ────────────────────────────────────────────────
+ *   ONNX_HYBRID  — model loaded successfully; risk is the weighted blend.
+ *   RULES_ONLY   — model unavailable; risk is purely rule-based.
+ *
  * ── Model contract ───────────────────────────────────────────────────────
- *   Input:  Float32 tensor [1, F] — normalized features (F from meta file)
+ *   Input:  Float32 tensor [1, F] — normalized features
  *   Output: Float32 tensor [1, 1] — risk probability in [0, 1]
  *   Where F and the feature order both come from credit-score.meta.json.
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import {
+  resolveOnnxModelPath,
+  resolveModelMetaPath,
+  resolveCreditModelArtifacts,
+} from '../utils/modelPathResolver.js';
 
 // ── Defaults — must agree with the training script ───────────────────────
+// These are also the runtime FEATURE_ORDER / RANGES used to validate the
+// meta sidecar. If a future model adds/removes features, update both this
+// file and scripts/train-credit-model.mjs.
 const DEFAULT_FEATURE_ORDER = [
   'totalSalesOnInstallment',
   'totalPaidOnTime',
@@ -55,6 +68,12 @@ const DEFAULT_RANGES = {
   activeInstallmentsCount: { min: 0, max: 20 },
   completedInstallmentsCount: { min: 0, max: 100 },
 };
+
+// ── scoring_mode constants — exported for callers that need to compare ───
+export const SCORING_MODE = Object.freeze({
+  ONNX_HYBRID: 'ONNX_HYBRID',
+  RULES_ONLY: 'RULES_ONLY',
+});
 
 // ── Hybrid + risk-level configuration ────────────────────────────────────
 export const HYBRID_CONFIG = {
@@ -78,93 +97,101 @@ let ort = null;
 let session = null;
 let modelLoaded = false;
 let initError = null;
+let scoringMode = SCORING_MODE.RULES_ONLY;
 
 let modelMeta = null;
+let resolvedModelPath = null;
+let resolvedMetaPath = null;
 let featureOrder = DEFAULT_FEATURE_ORDER;
 let featureRanges = DEFAULT_RANGES;
 let modelVersion = 'rules-only';
 
-// ── Path resolution ──────────────────────────────────────────────────────
-function resolveModelPath() {
-  if (process.env.ONNX_MODEL_PATH) return process.env.ONNX_MODEL_PATH;
-  return join(__dirname, '..', '..', 'models', 'credit-score.onnx');
-}
-
-function resolveMetaPath() {
-  if (process.env.ONNX_MODEL_META_PATH) return process.env.ONNX_MODEL_META_PATH;
-  return join(__dirname, '..', '..', 'models', 'credit-score.meta.json');
-}
-
-function loadMeta() {
-  const path = resolveMetaPath();
-  if (!existsSync(path)) return null;
-  try {
-    const meta = JSON.parse(readFileSync(path, 'utf8'));
-    if (Array.isArray(meta.feature_order) && meta.feature_order.length) {
-      featureOrder = meta.feature_order;
-    }
-    if (meta.feature_ranges && typeof meta.feature_ranges === 'object') {
-      featureRanges = { ...DEFAULT_RANGES, ...meta.feature_ranges };
-    }
-    if (typeof meta.version === 'string') {
-      modelVersion = meta.version;
-    }
-    modelMeta = meta;
-    return meta;
-  } catch (err) {
-    console.warn(`[onnx] failed to read meta file: ${err.message}`);
-    return null;
-  }
-}
-
 // ── Public API ───────────────────────────────────────────────────────────
 
 /**
- * Load the runtime + model. Safe to call if either is missing — returns
- * false and the engine quietly falls back to rules-only scoring.
+ * Load + validate model artifacts at startup.
+ *
+ *   ✓ resolves paths via modelPathResolver (Electron/service/dev aware)
+ *   ✓ verifies model file exists and is non-empty
+ *   ✓ verifies meta.json exists, parses, and matches FEATURE_ORDER
+ *   ✓ verifies the ONNX session opens
+ *
+ * Any failure → RULES_ONLY mode. Returns true iff ONNX_HYBRID was enabled.
+ * Always safe to call. Idempotent.
  */
 export async function initCreditScoreModel() {
-  // 1. Sidecar meta — load even if the .onnx is missing so feature_order /
-  //    version are still discoverable from rule-only paths.
-  loadMeta();
+  // Reset state in case init is called more than once (tests, hot-reload).
+  ort = null;
+  session = null;
+  modelLoaded = false;
+  initError = null;
+  scoringMode = SCORING_MODE.RULES_ONLY;
+  modelMeta = null;
+  featureOrder = [...DEFAULT_FEATURE_ORDER];
+  featureRanges = { ...DEFAULT_RANGES };
+  modelVersion = 'rules-only';
 
-  // 2. ONNX runtime
+  // 1. Resolve + validate paths and meta cross-check before touching ORT.
+  const artifacts = resolveCreditModelArtifacts(DEFAULT_FEATURE_ORDER);
+  resolvedModelPath = artifacts.model.path;
+  resolvedMetaPath = artifacts.meta.path;
+
+  if (artifacts.model.status !== 'found') {
+    initError = `model file ${artifacts.model.status}: ${artifacts.model.reason ?? 'unknown'}`;
+    console.warn(`[onnx] ${initError} — falling back to RULES_ONLY`);
+    return false;
+  }
+  if (artifacts.meta.status !== 'found') {
+    initError = `meta file ${artifacts.meta.status}: ${artifacts.meta.reason ?? 'unknown'}`;
+    console.warn(`[onnx] ${initError} — falling back to RULES_ONLY`);
+    return false;
+  }
+
+  // 2. Apply meta — feature_order has already been cross-checked by the resolver.
+  const meta = artifacts.meta.meta;
+  modelMeta = meta;
+  if (Array.isArray(meta.feature_order) && meta.feature_order.length) {
+    featureOrder = [...meta.feature_order];
+  }
+  if (meta.feature_ranges && typeof meta.feature_ranges === 'object') {
+    featureRanges = { ...DEFAULT_RANGES, ...meta.feature_ranges };
+  }
+  if (typeof meta.version === 'string' && meta.version.length) {
+    modelVersion = meta.version;
+  }
+
+  // 3. Dynamically import onnxruntime-node (optional dep).
   try {
     const mod = await import('onnxruntime-node');
     ort = mod.default ?? mod;
   } catch (err) {
     initError = `onnxruntime-node not installed: ${err.message}`;
-    console.warn(`[onnx] ${initError}`);
-    modelLoaded = false;
+    console.warn(`[onnx] ${initError} — falling back to RULES_ONLY`);
     return false;
   }
 
-  // 3. Model file
-  const modelPath = resolveModelPath();
-  if (!existsSync(modelPath)) {
-    initError = `Model file not found: ${modelPath}`;
-    console.warn(`[onnx] ${initError} — rule-based fallback active`);
-    modelLoaded = false;
-    return false;
-  }
-
+  // 4. Open the ONNX session.
   try {
-    session = await ort.InferenceSession.create(modelPath, {
+    session = await ort.InferenceSession.create(resolvedModelPath, {
       executionProviders: ['cpu'],
     });
-    modelLoaded = true;
-    initError = null;
-    console.log(
-      `[onnx] credit model loaded version=${modelVersion} features=${featureOrder.length}`
-    );
-    return true;
   } catch (err) {
-    initError = `Failed to create session: ${err.message}`;
-    console.error(`[onnx] ${initError}`);
-    modelLoaded = false;
+    initError = `failed to create ONNX session: ${err.message}`;
+    console.error(`[onnx] ${initError} — falling back to RULES_ONLY`);
     session = null;
     return false;
   }
+
+  modelLoaded = true;
+  scoringMode = SCORING_MODE.ONNX_HYBRID;
+  initError = null;
+  console.log(
+    `[onnx] credit model loaded version=${modelVersion} ` +
+      `features=${featureOrder.length} mode=${scoringMode}`
+  );
+  console.log(`[onnx]   model: ${resolvedModelPath}`);
+  console.log(`[onnx]   meta:  ${resolvedMetaPath}`);
+  return true;
 }
 
 export function isCreditScoreModelAvailable() {
@@ -179,17 +206,34 @@ export function getFeatureOrder() {
   return [...featureOrder];
 }
 
+export function getScoringMode() {
+  return scoringMode;
+}
+
+/**
+ * Diagnostic info returned by /admin/health-style endpoints AND attached to
+ * every scoring API response so callers can see exactly which engine
+ * produced the number they're looking at.
+ */
 export function getModelStatus() {
   return {
+    scoring_mode: scoringMode,
+    model_loaded: modelLoaded,
+    model_version: modelVersion,
     available: modelLoaded,
     error: initError,
-    modelPath: resolveModelPath(),
-    metaPath: resolveMetaPath(),
-    version: modelVersion,
+    modelPath: resolvedModelPath,
+    metaPath: resolvedMetaPath,
     featureOrder: [...featureOrder],
     metrics: modelMeta?.metrics ?? null,
   };
 }
+
+/**
+ * Re-export the path resolver helpers for callers that only need raw
+ * resolution (e.g. health-check endpoints, smoke tests).
+ */
+export { resolveOnnxModelPath, resolveModelMetaPath };
 
 // ── Normalization ────────────────────────────────────────────────────────
 function normalize(name, value) {
@@ -314,6 +358,7 @@ async function runOnnx(metrics) {
     );
     modelLoaded = false;
     initError = `Inference error: ${err.message}`;
+    scoringMode = SCORING_MODE.RULES_ONLY;
     session = null;
     return null;
   }
@@ -332,7 +377,9 @@ async function runOnnx(metrics) {
  *   risk_level: 'LOW'|'MEDIUM'|'HIGH',
  *   reasons: Array<{type:string, impact:'low'|'medium'|'high'}>,
  *   features_used: object,
+ *   scoring_mode: 'ONNX_HYBRID'|'RULES_ONLY',
  *   model_version: string,
+ *   model_loaded: boolean,
  *   model_source: 'hybrid'|'rules-only',
  *   score: number,                // 0–100, higher = safer
  *   model_risk?: number,
@@ -347,7 +394,9 @@ export async function assessCreditRisk(metrics) {
       risk_level: 'MEDIUM',
       reasons: [{ type: 'invalid_input', impact: 'medium' }],
       features_used: metrics ?? {},
+      scoring_mode: SCORING_MODE.RULES_ONLY,
       model_version: modelVersion,
+      model_loaded: modelLoaded,
       model_source: 'rules-only',
       score: 50,
     };
@@ -358,14 +407,17 @@ export async function assessCreditRisk(metrics) {
 
   let finalRisk;
   let modelSource;
+  let mode;
   if (modelRisk == null) {
     finalRisk = ruleResult.risk;
     modelSource = 'rules-only';
+    mode = SCORING_MODE.RULES_ONLY;
   } else {
     finalRisk =
       HYBRID_CONFIG.MODEL_WEIGHT * modelRisk +
       HYBRID_CONFIG.RULE_WEIGHT * ruleResult.risk;
     modelSource = 'hybrid';
+    mode = SCORING_MODE.ONNX_HYBRID;
   }
 
   // Clamp + round to 4 decimals for stable logs / UI.
@@ -377,7 +429,9 @@ export async function assessCreditRisk(metrics) {
     risk_level: riskLevelFromProbability(finalRisk),
     reasons: ruleResult.reasons,
     features_used: ruleResult.features,
+    scoring_mode: mode,
     model_version: modelVersion,
+    model_loaded: modelLoaded,
     model_source: modelSource,
     score,
     model_risk: modelRisk == null ? null : +modelRisk.toFixed(4),

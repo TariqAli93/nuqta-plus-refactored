@@ -10,6 +10,8 @@ import {
   isCreditScoreModelAvailable,
   assessCreditRisk,
   getModelVersion,
+  getScoringMode,
+  SCORING_MODE,
 } from './onnxCreditScoringService.js';
 
 /**
@@ -257,7 +259,9 @@ export async function assessAndLogCreditRisk(customerId) {
       risk_level: 'MEDIUM',
       reasons: [{ type: 'metrics_unavailable', impact: 'medium' }],
       features_used: {},
+      scoring_mode: SCORING_MODE.RULES_ONLY,
       model_version: getModelVersion(),
+      model_loaded: isCreditScoreModelAvailable(),
       model_source: 'rules-only',
       score: 50,
     };
@@ -502,5 +506,10 @@ export async function getCustomerCreditSnapshot(customerId) {
     totalDebt: row.totalDebt == null ? 0 : Number(row.totalDebt),
     riskLevel: getRiskLevel(creditScore),
     modelSource: isCreditScoreModelAvailable() ? 'onnx' : 'rule-based',
+    // Required production-safety contract — every credit-related API
+    // response advertises which engine produced the number.
+    scoring_mode: getScoringMode(),
+    model_version: getModelVersion(),
+    model_loaded: isCreditScoreModelAvailable(),
   };
 }

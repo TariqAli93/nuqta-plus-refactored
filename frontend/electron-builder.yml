@@ -20,6 +20,15 @@ extraResources:
   - from: ./electron/scripts
     to: dist-electron/scripts
 
+  # Credit-risk model artifacts — the production runtime resolves these via
+  # process.resourcesPath (see backend/src/utils/modelPathResolver.js). They
+  # are also placed under resources/backend/models by afterPack via dist-backend,
+  # so this entry is a safety net in case afterPack is ever bypassed.
+  - from: ../backend/models/credit-score.onnx
+    to: backend/models/credit-score.onnx
+  - from: ../backend/models/credit-score.meta.json
+    to: backend/models/credit-score.meta.json
+
 afterPack: ../scripts/afterPack.cjs
 
 directories:
