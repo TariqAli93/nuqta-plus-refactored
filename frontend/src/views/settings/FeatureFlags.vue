@@ -77,10 +77,22 @@ const groups = [
     color: 'primary',
     items: [
       {
+        key: 'pos',
+        title: 'نقطة البيع (POS)',
+        description: 'شاشة البيع السريع للكاشير.',
+        icon: 'mdi-point-of-sale',
+      },
+      {
         key: 'installments',
         title: 'بيع بالأقساط',
         description: 'تفعيل الدفعات المؤجلة وجدولة الأقساط.',
         icon: 'mdi-calendar-clock',
+      },
+      {
+        key: 'draftInvoices',
+        title: 'الفواتير المسودة',
+        description: 'حفظ فاتورة كمسودة وإكمالها لاحقًا.',
+        icon: 'mdi-content-save-outline',
       },
       {
         key: 'creditScore',
@@ -162,7 +174,10 @@ const toggle = async (key, value) => {
   try {
     const response = await api.put('/feature-flags', { [key]: value });
     Object.assign(flags, response.data || {});
-    authStore.setFeatureFlags({ ...flags });
+    // setFeatureFlags re-fetches /auth/session so capabilities + scope
+    // (and therefore every menu/button that uses `can()` or `hasFeature()`)
+    // update immediately — no full page reload needed.
+    await authStore.setFeatureFlags({ ...flags });
     notify.success('تم حفظ التغيير');
   } catch {
     flags[key] = previous;

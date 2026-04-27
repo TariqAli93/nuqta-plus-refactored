@@ -51,9 +51,34 @@ const handleModifierClick = (e) => {
   }
 };
 
+/**
+ * Cross-tab sync: when another tab changes featureFlags/capabilities (or
+ * logs out), pick up the change here so the user doesn't see stale UI in
+ * the other tab. Triggered via the StorageEvent the browser fires for
+ * `localStorage` writes from other tabs.
+ */
+const handleStorageEvent = (e) => {
+  if (!e.key) {
+    // Whole storage cleared — log out to be safe.
+    if (authStore.isAuthenticated) authStore.logout();
+    return;
+  }
+  if (e.key === 'token' && !e.newValue) {
+    // Another tab logged out.
+    if (authStore.isAuthenticated) authStore.logout();
+    return;
+  }
+  if (e.key === 'featureFlags' || e.key === 'capabilities') {
+    // Another tab toggled a flag — refresh our session so capabilities,
+    // feature-flag-driven menus, and route guards re-evaluate immediately.
+    if (authStore.isAuthenticated) authStore.refreshSession();
+  }
+};
+
 onMounted(async () => {
   document.addEventListener('auxclick', handleAuxClick, true);
   document.addEventListener('click', handleModifierClick, true);
+  window.addEventListener('storage', handleStorageEvent);
 
   // Skip backend-dependent checks when showing the activation window
   if (route.name === 'Activation') return;
@@ -63,6 +88,7 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('auxclick', handleAuxClick, true);
   document.removeEventListener('click', handleModifierClick, true);
+  window.removeEventListener('storage', handleStorageEvent);
 });
 </script>
 

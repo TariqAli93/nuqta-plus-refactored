@@ -213,6 +213,7 @@
         <!-- Actions -->
         <div class="pay__actions">
           <v-btn
+            v-if="canUseDrafts"
             variant="outlined"
             size="large"
             class="pay__draft-btn"
@@ -534,6 +535,7 @@ import {
   useNotificationStore,
   useSaleStore,
 } from '@/stores';
+import { useAuthStore } from '@/stores/auth';
 import { usePosCart } from '@/composables/usePosCart';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 
@@ -544,6 +546,11 @@ const inventoryStore = useInventoryStore();
 const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
 const saleStore = useSaleStore();
+const authStore = useAuthStore();
+
+// Capability-driven UI: the "save as draft" button is only meaningful when
+// the draftInvoices module is enabled AND the user has the capability.
+const canUseDrafts = computed(() => authStore.can('canUseDraftInvoices'));
 const router = useRouter();
 const route = useRoute();
 

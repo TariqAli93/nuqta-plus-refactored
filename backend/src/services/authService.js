@@ -265,7 +265,8 @@ export class AuthService {
   }
 
   /**
-   * Get user profile by ID
+   * Get user profile by ID. Kept for backward compatibility with the
+   * `/auth/profile` endpoint — the response shape mirrors {@link getSession}.
    * @param {number} userId - User ID
    * @returns {Promise<Object>} User profile data
    */
@@ -305,6 +306,28 @@ export class AuthService {
     user.capabilities = capabilities;
 
     return user;
+  }
+
+  /**
+   * Single session/bootstrap payload — the canonical shape every frontend
+   * fetch (login, app reload, post-settings refresh) consumes. Returns:
+   *
+   *   { user, role, scope, featureFlags, capabilities, setupMode }
+   *
+   * The frontend treats this as the single source of truth: featureFlags +
+   * capabilities decide UI visibility, never role checks or local cache.
+   */
+  async getSession(userId) {
+    const profile = await this.getProfile(userId);
+    const { scope, featureFlags, setupMode, capabilities, ...userOnly } = profile;
+    return {
+      user: userOnly,
+      role: profile.role,
+      scope,
+      featureFlags,
+      capabilities,
+      setupMode,
+    };
   }
 
   /**

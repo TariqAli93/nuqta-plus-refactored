@@ -66,7 +66,7 @@ const authStore = useAuthStore();
 // filters the inventory store by user scope, so we just need to apply the
 // branch view.
 const warehouseOptions = computed(() => {
-  const branchOn = authStore.featureFlags?.multiBranch !== false;
+  const branchOn = authStore.hasFeature('multiBranch');
   const pool = branchOn
     ? inventoryStore.warehousesForBranch
     : inventoryStore.warehouses;
@@ -75,23 +75,19 @@ const warehouseOptions = computed(() => {
   return visible.filter((w) => w.isActive !== false);
 });
 
-// Hide the whole widget when the user is on a single-branch single-warehouse
-// setup — there's nothing useful to show.
+// Hide the whole widget when neither multi-branch nor multi-warehouse is on
+// AND the user has no cross-branch capability. Capabilities are the source of
+// truth here — `can('canSwitchBranch')` is already gated on the multiBranch
+// flag at the backend, so we don't double-check the flag here.
 const shouldRender = computed(() => {
-  if (authStore.isGlobalAdmin) return true;
-  const multi =
-    authStore.featureFlags?.multiBranch !== false ||
-    authStore.featureFlags?.multiWarehouse !== false;
-  return multi;
+  if (authStore.can('canSwitchBranch')) return true;
+  return authStore.hasFeature('multiBranch') || authStore.hasFeature('multiWarehouse');
 });
 
-// Branch selector is admin-only and only visible when multi-branch is on.
-// Driven by the backend-issued `canSwitchBranch` scope flag (global admin only).
-const showBranchSelector = computed(
-  () =>
-    authStore.canSwitchBranch &&
-    authStore.featureFlags?.multiBranch !== false
-);
+// Branch selector visibility comes straight from the backend capability.
+// `canSwitchBranch` is already false when multiBranch is off OR the user
+// is not a global admin, so no extra flag check is needed here.
+const showBranchSelector = computed(() => authStore.can('canSwitchBranch'));
 
 // Warehouse selector shows whenever the user actually has more than one
 // option to pick from — regardless of the `multiWarehouse` feature flag.
@@ -114,12 +110,10 @@ const contextLabel = computed(() => {
 });
 
 // Only show the "no default warehouse" warning to users who can actually
-// fix it. `canChangeDefaultWarehouse` is supplied by the backend.
+// fix it. `canChangeDefaultWarehouse` is supplied by the backend and is
+// already gated on the multiBranch flag.
 const missingDefaultWarning = computed(
-  () =>
-    (authStore.capabilities?.canChangeDefaultWarehouse === true) &&
-    authStore.featureFlags?.multiBranch !== false &&
-    inventoryStore.missingDefaultWarehouse
+  () => authStore.can('canChangeDefaultWarehouse') && inventoryStore.missingDefaultWarehouse
 );
 
 const onBranchChange = (id) => inventoryStore.setBranch(id);

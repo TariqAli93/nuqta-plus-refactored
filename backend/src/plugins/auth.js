@@ -6,6 +6,8 @@ import { getDb } from '../db.js';
 import { users } from '../models/index.js';
 import { eq } from 'drizzle-orm';
 import { hasPermission } from '../auth/permissionMatrix.js';
+import featureFlagsService from '../services/featureFlagsService.js';
+import { getUserCapabilities } from '../services/permissionService.js';
 
 async function authPlugin(fastify) {
   // Register JWT
@@ -61,6 +63,52 @@ async function authPlugin(fastify) {
       const ok = required.some((perm) => hasPermission(perm, userRole));
       if (!ok) {
         throw new AuthorizationError(`Permission denied: ${required.join(' or ')}`);
+      }
+    };
+  });
+
+  /**
+   * Reject the request when the named feature flag is OFF, even if the user
+   * is otherwise authorized. Use this on routes that are wholly owned by an
+   * optional module (POS, draft invoices, inventory transfers, branches).
+   *
+   * Returns 403 with { code: 'FEATURE_DISABLED', feature } so the SPA can
+   * detect the case and refresh its session/bootstrap.
+   */
+  fastify.decorate('requireFeature', function (flag) {
+    return async function (request) {
+      const enabled = await featureFlagsService.isFeatureEnabled(flag);
+      if (!enabled) {
+        const err = new AuthorizationError(`Feature "${flag}" is disabled`);
+        err.statusCode = 403;
+        err.code = 'FEATURE_DISABLED';
+        err.feature = flag;
+        throw err;
+      }
+    };
+  });
+
+  /**
+   * Reject the request when the named capability is `false` for the current
+   * user. Capabilities are computed from feature flags + role + scope, so
+   * this single check covers the "feature off" and "role lacks permission"
+   * cases at once.
+   *
+   * Always run AFTER `fastify.authenticate` (or pair with `authorize` in the
+   * onRequest array — `authenticate` is invoked there).
+   */
+  fastify.decorate('requireCapability', function (capabilityName) {
+    return async function (request) {
+      await fastify.authenticate(request);
+      const caps = await getUserCapabilities(request.user);
+      if (caps[capabilityName] !== true) {
+        const err = new AuthorizationError(
+          `Capability "${capabilityName}" is not granted`
+        );
+        err.statusCode = 403;
+        err.code = 'CAPABILITY_DENIED';
+        err.capability = capabilityName;
+        throw err;
       }
     };
   });

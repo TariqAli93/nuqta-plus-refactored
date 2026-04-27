@@ -4,6 +4,8 @@ const controller = new WarehouseTransferController();
 
 export default async function warehouseTransferRoutes(fastify) {
   fastify.addHook('onRequest', fastify.authenticate);
+  // Whole router is gated by the warehouseTransfers (inventoryTransfers) flag.
+  fastify.addHook('onRequest', fastify.requireFeature('warehouseTransfers'));
 
   fastify.get('/', {
     onRequest: [fastify.authenticate, fastify.authorize('inventory:read')],

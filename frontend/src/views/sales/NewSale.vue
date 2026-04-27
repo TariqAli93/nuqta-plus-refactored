@@ -533,8 +533,13 @@ const notify = useNotificationStore();
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();
 
-/** Honour the `installments` feature flag: when it's off, only cash sales are allowed. */
-const installmentsEnabled = computed(() => authStore.isFeatureEnabled('installments'));
+/**
+ * Use the backend-issued capability instead of the raw feature flag — the
+ * capability is already gated on `featureFlags.installments` AND the user's
+ * role, so a cashier with installments=false sees no installment UI even
+ * if their role would normally allow it.
+ */
+const installmentsEnabled = computed(() => authStore.can('canUseInstallments'));
 
 const form = ref(null);
 const barcode = ref('');

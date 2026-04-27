@@ -29,8 +29,13 @@ export default async function branchRoutes(fastify) {
     },
   });
 
+  // Mutating branch operations require multiBranch to be on AND inventory:manage.
   fastify.post('/', {
-    onRequest: [fastify.authenticate, fastify.authorize('inventory:manage')],
+    onRequest: [
+      fastify.authenticate,
+      fastify.requireFeature('multiBranch'),
+      fastify.authorize('inventory:manage'),
+    ],
     handler: branchController.create,
     schema: { description: 'Create branch', tags: ['inventory'], security: [{ bearerAuth: [] }] },
   });
@@ -41,6 +46,7 @@ export default async function branchRoutes(fastify) {
   fastify.put('/:id', {
     onRequest: [
       fastify.authenticate,
+      fastify.requireFeature('multiBranch'),
       fastify.authorize(['inventory:manage', 'branches:set_default_warehouse']),
     ],
     handler: branchController.update,
@@ -48,7 +54,11 @@ export default async function branchRoutes(fastify) {
   });
 
   fastify.delete('/:id', {
-    onRequest: [fastify.authenticate, fastify.authorize('inventory:manage')],
+    onRequest: [
+      fastify.authenticate,
+      fastify.requireFeature('multiBranch'),
+      fastify.authorize('inventory:manage'),
+    ],
     handler: branchController.delete,
     schema: { description: 'Delete branch', tags: ['inventory'], security: [{ bearerAuth: [] }] },
   });

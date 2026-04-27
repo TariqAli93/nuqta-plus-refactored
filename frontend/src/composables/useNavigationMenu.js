@@ -10,6 +10,8 @@ import { hasPermission as rbacHasPermission } from '@/auth/permissionMatrix.js';
  *
  *   - `permission`: RBAC permission required (checked via permissionMatrix)
  *   - `feature`:    feature flag that must be enabled
+ *   - `capability`: backend-issued capability flag that must be true (preferred —
+ *                   already accounts for both feature flags AND role)
  *   - `roles`:      explicit allow-list of roles (rarely used)
  *   - `group`:      sub-items for a collapsible group
  *
@@ -25,7 +27,14 @@ export function useNavigationMenu() {
       to: '/',
       permission: null,
     },
-    { title: 'نقطة البيع', icon: 'mdi-point-of-sale', to: '/sales/pos', permission: 'create:sales' },
+    {
+      title: 'نقطة البيع',
+      icon: 'mdi-point-of-sale',
+      to: '/sales/pos',
+      // Capability check is the single rule: backend resolves
+      // featureFlags.pos AND user's role into canUsePOS.
+      capability: 'canUsePOS',
+    },
 
     // ── Operations ─────────────────────────────────────────────────────────
     {
@@ -84,15 +93,16 @@ export function useNavigationMenu() {
             title: 'نقل بين المخازن',
             icon: 'mdi-transfer',
             to: '/inventory/transfer',
-            permission: 'inventory:transfer',
-            feature: 'warehouseTransfers',
+            // canTransferStock already requires the warehouseTransfers /
+            // inventoryTransfers feature on the backend.
+            capability: 'canTransferStock',
           },
           {
             title: 'طلبات النقل',
             icon: 'mdi-check-decagram',
             to: '/inventory/transfers',
             permission: 'inventory:transfer',
-            feature: 'warehouseTransfers',
+            feature: 'inventoryTransfers',
           },
           {
             title: 'منخفض المخزون',
@@ -141,16 +151,19 @@ export function useNavigationMenu() {
 
   /** True if the menu entry should be visible for the current user. */
   const checkVisibility = (item, userRole) => {
-    // Feature flag gate (single flag)
-    if (item.feature && authStore.featureFlags?.[item.feature] === false) return false;
+    // Feature flag gate (single flag) — alias-aware via store getter.
+    if (item.feature && !authStore.hasFeature(item.feature)) return false;
 
     // "anyFeature" gate — show if ANY listed flag is enabled
     if (Array.isArray(item.anyFeature) && item.anyFeature.length > 0) {
-      const anyOn = item.anyFeature.some(
-        (f) => authStore.featureFlags?.[f] !== false
-      );
+      const anyOn = item.anyFeature.some((f) => authStore.hasFeature(f));
       if (!anyOn) return false;
     }
+
+    // Capability gate — backend-issued, accounts for role + feature flags.
+    // This is the preferred check; permission/feature gates remain as
+    // fallbacks for items the backend doesn't expose a capability for yet.
+    if (item.capability && !authStore.can(item.capability)) return false;
 
     // Role allow-list
     if (Array.isArray(item.roles) && item.roles.length && !item.roles.includes(userRole)) {
@@ -176,8 +189,9 @@ export function useNavigationMenu() {
           return checkVisibility(item, userRole) ? item : null;
         }
 
-        // Group-level flag (e.g. hide the whole Inventory group when inventory is off)
-        if (item.feature && authStore.featureFlags?.[item.feature] === false) return null;
+        // Group-level checks (e.g. hide the whole Inventory group when inventory is off)
+        if (item.feature && !authStore.hasFeature(item.feature)) return null;
+        if (item.capability && !authStore.can(item.capability)) return null;
         if (item.permission && !rbacHasPermission(item.permission, userRole)) return null;
 
         const allowedSubs = item.group.items.filter((sub) => checkVisibility(sub, userRole));

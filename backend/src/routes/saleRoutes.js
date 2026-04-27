@@ -141,8 +141,13 @@ export default async function saleRoutes(fastify) {
     },
   });
 
+  // Draft invoice routes are gated by the draftInvoices feature flag.
   fastify.post('/draft', {
-    onRequest: [fastify.authenticate, fastify.authorize('sales:create')],
+    onRequest: [
+      fastify.authenticate,
+      fastify.requireFeature('draftInvoices'),
+      fastify.authorize('sales:create'),
+    ],
     handler: saleController.createDraft,
     schema: {
       description: 'Create draft sale',
@@ -152,7 +157,11 @@ export default async function saleRoutes(fastify) {
   });
 
   fastify.post('/draft/:id/complete', {
-    onRequest: [fastify.authenticate, fastify.authorize('sales:create')],
+    onRequest: [
+      fastify.authenticate,
+      fastify.requireFeature('draftInvoices'),
+      fastify.authorize('sales:create'),
+    ],
     handler: saleController.completeDraft,
     schema: {
       description: 'Complete draft sale',
@@ -162,7 +171,11 @@ export default async function saleRoutes(fastify) {
   });
 
   fastify.delete('/drafts/old', {
-    onRequest: [fastify.authenticate, fastify.authorize('sales:delete')],
+    onRequest: [
+      fastify.authenticate,
+      fastify.requireFeature('draftInvoices'),
+      fastify.authorize('sales:delete'),
+    ],
     handler: saleController.deleteOldDrafts,
     schema: {
       description: 'Delete old draft sales (older than 1 day)',

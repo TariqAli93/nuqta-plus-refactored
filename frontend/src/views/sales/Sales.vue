@@ -3,7 +3,10 @@
     <v-card class="mb-4">
       <div class="flex justify-space-between items-center pa-3">
         <div class="text-h6 font-semibold text-primary">إدارة المبيعات</div>
+        <!-- Installment shortcut: only show when the installments capability
+             is granted (feature on AND user role allows it). -->
         <v-btn
+          v-if="canUseInstallments"
           color="primary"
           prepend-icon="mdi-plus"
           size="default"
@@ -110,14 +113,7 @@
             title="لا توجد مبيعات"
             description="ابدأ بإنشاء بيع جديد"
             icon="mdi-cash-register"
-            :actions="[
-              {
-                text: 'بيع جديد',
-                icon: 'mdi-plus',
-                to: '/sales/new',
-                color: 'primary',
-              },
-            ]"
+            :actions="emptyStateActions"
             compact
           />
         </template>
@@ -141,6 +137,7 @@
           <!-- أزرار المسودات -->
           <template v-if="item.status === 'draft'">
             <v-btn
+              v-if="canUseDrafts"
               size="small"
               variant="text"
               color="primary"
@@ -260,6 +257,20 @@ const customers = ref([]);
 const isAdmin = computed(() => authStore.hasPermission(['sales:delete', 'manage:sales']));
 const canDelete = computed(() => isAdmin.value);
 
+// Draft-related actions are hidden when the draftInvoices feature is off.
+const canUseDrafts = computed(() => authStore.can('canUseDraftInvoices'));
+// Installment-sale shortcut is hidden when installments are off.
+const canUseInstallments = computed(() => authStore.can('canUseInstallments'));
+
+// "New sale" empty-state action is the installment-sale entry point — only
+// surface it when installments are enabled AND the user can use them.
+const emptyStateActions = computed(() => {
+  if (!authStore.can('canUseInstallments')) return [];
+  return [
+    { text: 'بيع جديد', icon: 'mdi-plus', to: '/sales/new', color: 'primary' },
+  ];
+});
+
 const deleteSaleDialog = ref(false);
 const restoreSaleDialog = ref(false);
 const selectedSaleForDelete = ref(null);
@@ -268,12 +279,19 @@ const selectedSaleForRestore = ref(null);
 const { exportToCSV } = useExport();
 const notificationStore = useNotificationStore();
 
-const statusOptions = [
-  { title: 'مكتمل', value: 'completed' },
-  { title: 'قيد الانتظار', value: 'pending' },
-  { title: 'ملغي', value: 'cancelled' },
-  { title: 'مسودة', value: 'draft' },
-];
+// Drop the "draft" filter chip when draftInvoices is disabled — there are no
+// draft sales to filter for, and showing the chip is misleading.
+const statusOptions = computed(() => {
+  const options = [
+    { title: 'مكتمل', value: 'completed' },
+    { title: 'قيد الانتظار', value: 'pending' },
+    { title: 'ملغي', value: 'cancelled' },
+  ];
+  if (canUseDrafts.value) {
+    options.push({ title: 'مسودة', value: 'draft' });
+  }
+  return options;
+});
 
 const headers = [
   { title: 'رقم الفاتورة', key: 'invoiceNumber' },
