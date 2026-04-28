@@ -14,6 +14,7 @@ import Login from '@/views/auth/Login.vue';
 import Dashboard from '@/views/Dashboard.vue';
 import Customers from '@/views/customers/Customers.vue';
 import CustomerForm from '@/views/customers/CustomerForm.vue';
+import CustomerProfile from '@/views/customers/CustomerProfile.vue';
 import Products from '@/views/products/Products.vue';
 import ProductForm from '@/views/products/ProductForm.vue';
 import Categories from '@/views/categories/Categories.vue';
@@ -82,6 +83,11 @@ const routes = [
         name: 'EditCustomer',
         component: CustomerForm,
         meta: { requiresWrite: true },
+      },
+      {
+        path: 'customers/:id',
+        name: 'CustomerProfile',
+        component: CustomerProfile,
       },
       {
         path: 'products',

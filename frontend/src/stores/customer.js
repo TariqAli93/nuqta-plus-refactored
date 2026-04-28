@@ -59,6 +59,13 @@ export const useCustomerStore = defineStore('customer', {
       }
     },
 
+    async fetchCustomerProfile(id) {
+      // Branch-scoped 404 from backend stays a 404 — propagate and let the
+      // page render its error state instead of toasting twice.
+      const response = await api.get(`/customers/${id}/profile`);
+      return response?.data || null;
+    },
+
     async createCustomer(customerData) {
       const notificationStore = useNotificationStore();
 

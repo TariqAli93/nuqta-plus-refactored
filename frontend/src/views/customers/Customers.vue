@@ -75,7 +75,22 @@
             compact
           />
         </template>
+        <template #[`item.name`]="{ item }">
+          <RouterLink :to="`/customers/${item.id}`" class="text-primary text-decoration-none">
+            {{ item.name }}
+          </RouterLink>
+        </template>
         <template #[`item.actions`]="{ item }">
+          <v-btn
+            icon="mdi-account-details"
+            size="small"
+            variant="text"
+            :to="`/customers/${item.id}`"
+            title="عرض الملف"
+            aria-label="عرض ملف العميل"
+          >
+            <v-icon size="20">mdi-account-details</v-icon>
+          </v-btn>
           <v-btn
             icon="mdi-pencil"
             size="small"
@@ -125,6 +140,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { RouterLink } from 'vue-router';
 import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '@/stores/auth';
 import * as uiAccess from '@/auth/uiAccess.js';
