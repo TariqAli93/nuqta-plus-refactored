@@ -393,6 +393,107 @@ export const creditScores = pgTable(
   })
 );
 
+// ── Notification Settings ─────────────────────────────────────────────────
+// Singleton row (id=1) holding the messaging-module configuration. The whole
+// notification feature is OFF by default — no automatic message is queued or
+// sent until an admin enables `enabled` from the Settings UI.
+export const notificationSettings = pgTable('notification_settings', {
+  id: serial('id').primaryKey(),
+  enabled: boolean('enabled').notNull().default(false),
+  provider: text('provider').notNull().default('bulksmsiraq'),
+  // Encrypted at rest using config.jwt.secret-derived key. Never returned to
+  // the frontend except as a masked preview.
+  apiKeyEncrypted: text('api_key_encrypted'),
+  senderId: text('sender_id'),
+  smsEnabled: boolean('sms_enabled').notNull().default(true),
+  whatsappEnabled: boolean('whatsapp_enabled').notNull().default(false),
+  autoFallbackEnabled: boolean('auto_fallback_enabled').notNull().default(true),
+  defaultChannel: text('default_channel').notNull().default('auto'), // 'sms' | 'whatsapp' | 'auto'
+  overdueReminderEnabled: boolean('overdue_reminder_enabled').notNull().default(true),
+  paymentConfirmationEnabled: boolean('payment_confirmation_enabled').notNull().default(true),
+  bulkMessagingEnabled: boolean('bulk_messaging_enabled').notNull().default(false),
+  singleCustomerMessagingEnabled: boolean('single_customer_messaging_enabled')
+    .notNull()
+    .default(true),
+  // Optional per-template body overrides. When NULL, the in-code defaults are used.
+  templates: jsonb('templates'),
+  lastTestAt: timestamp('last_test_at'),
+  lastTestStatus: text('last_test_status'),
+  lastTestMessage: text('last_test_message'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// ── Notifications ─────────────────────────────────────────────────────────
+// One row per outbound message. Status lifecycle:
+//   pending → processing → (sent | failed)
+// The queue worker picks rows where status='pending' AND next_attempt_at<=now.
+// `dedupe_key` lets the service skip duplicates for the same logical event
+// (e.g. one overdue reminder per installment per day).
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: serial('id').primaryKey(),
+    type: text('type').notNull(), // 'overdue_reminder' | 'payment_confirmation' | 'bulk_message' | 'customer_message'
+    channel: text('channel').notNull().default('auto'), // 'sms' | 'whatsapp' | 'auto'
+    resolvedChannel: text('resolved_channel'),
+    recipientPhone: text('recipient_phone').notNull(),
+    customerId: integer('customer_id').references(() => customers.id, {
+      onDelete: 'set null',
+    }),
+    saleId: integer('sale_id').references(() => sales.id, { onDelete: 'set null' }),
+    installmentId: integer('installment_id').references(() => installments.id, {
+      onDelete: 'set null',
+    }),
+    paymentId: integer('payment_id').references(() => payments.id, { onDelete: 'set null' }),
+    template: text('template'),
+    payload: jsonb('payload'),
+    messageBody: text('message_body').notNull(),
+    status: text('status').notNull().default('pending'), // 'pending' | 'processing' | 'sent' | 'failed' | 'cancelled'
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(5),
+    nextAttemptAt: timestamp('next_attempt_at').defaultNow(),
+    dedupeKey: text('dedupe_key'),
+    error: text('error'),
+    sentAt: timestamp('sent_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+    createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (t) => ({
+    statusIdx: index('notifications_status_idx').on(t.status),
+    nextAttemptIdx: index('notifications_next_attempt_idx').on(t.nextAttemptAt),
+    customerIdx: index('notifications_customer_idx').on(t.customerId),
+    typeIdx: index('notifications_type_idx').on(t.type),
+    dedupeIdx: index('notifications_dedupe_idx').on(t.dedupeKey),
+  })
+);
+
+// ── Notification Logs ─────────────────────────────────────────────────────
+// Append-only audit trail of every provider call (success or failure). Kept
+// separate from `notifications` so we have a complete history even after
+// retries.
+export const notificationLogs = pgTable(
+  'notification_logs',
+  {
+    id: serial('id').primaryKey(),
+    notificationId: integer('notification_id').references(() => notifications.id, {
+      onDelete: 'cascade',
+    }),
+    provider: text('provider').notNull(),
+    channel: text('channel').notNull(),
+    requestPayload: jsonb('request_payload'),
+    responsePayload: jsonb('response_payload'),
+    status: text('status').notNull(),
+    error: text('error'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    notificationIdx: index('notification_logs_notification_idx').on(t.notificationId),
+    createdAtIdx: index('notification_logs_created_at_idx').on(t.createdAt),
+  })
+);
+
 // ── Audit Log ─────────────────────────────────────────────────────────────
 // New table for tracking all important user actions.
 export const auditLog = pgTable('audit_log', {

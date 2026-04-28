@@ -1,4 +1,5 @@
 import { runCreditScoringJob } from './creditScoringJob.js';
+import { runOverdueReminderJob } from '../services/notifications/overdueReminderJob.js';
 
 /**
  * Lightweight internal scheduler.
@@ -67,4 +68,22 @@ export function registerDefaultJobs(fastify) {
   fastify.log.info(
     `[scheduler] creditScoring registered (intervalMs=${intervalMs}, runOnStart=${runOnStart})`
   );
+
+  // Overdue reminder scan — once an hour by default. The notification service
+  // dedupes per-installment-per-day, so running often is safe and means a
+  // freshly enabled feature starts catching up within minutes.
+  if (process.env.OVERDUE_REMINDER_DISABLED !== '1') {
+    const overdueIntervalMs =
+      Number(process.env.OVERDUE_REMINDER_INTERVAL_MS) || 60 * 60 * 1000;
+    const overdueRunOnStart = process.env.OVERDUE_REMINDER_RUN_ON_START === '1';
+    scheduleJob('overdueReminder', {
+      intervalMs: overdueIntervalMs,
+      runOnStart: overdueRunOnStart,
+      run: runOverdueReminderJob,
+      logger: fastify.log,
+    });
+    fastify.log.info(
+      `[scheduler] overdueReminder registered (intervalMs=${overdueIntervalMs}, runOnStart=${overdueRunOnStart})`
+    );
+  }
 }
