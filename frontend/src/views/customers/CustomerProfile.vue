@@ -75,18 +75,31 @@
             >
               اتصال
             </v-btn>
-            <v-btn
-              v-if="profile.customer.phone"
-              :href="`https://wa.me/${normalizedPhone}`"
-              target="_blank"
-              rel="noopener"
-              prepend-icon="mdi-whatsapp"
-              variant="tonal"
-              color="success"
-              size="small"
+
+            <!-- WhatsApp message button — gated by notification settings ---- -->
+            <v-tooltip
+              v-if="canSendCustomerMessages"
+              location="bottom"
+              :disabled="canSendWhatsApp"
             >
-              واتساب
-            </v-btn>
+              <template #activator="{ props: tooltipProps }">
+                <span v-bind="tooltipProps">
+                  <v-btn
+                    prepend-icon="mdi-whatsapp"
+                    variant="tonal"
+                    color="success"
+                    size="small"
+                    :disabled="!canSendWhatsApp"
+                    :loading="messagingSettingsLoading"
+                    @click="openWhatsAppDialog"
+                  >
+                    رسالة واتساب
+                  </v-btn>
+                </span>
+              </template>
+              <span>{{ whatsAppDisabledReason }}</span>
+            </v-tooltip>
+
             <v-btn
               v-if="canEdit"
               :to="`/customers/${profile.customer.id}/edit`"
@@ -459,6 +472,61 @@
         </v-window>
       </v-card>
     </template>
+
+    <!-- WhatsApp message dialog ---------------------------------------- -->
+    <v-dialog v-model="whatsAppDialog" max-width="560" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="success">mdi-whatsapp</v-icon>
+          <span>إرسال رسالة واتساب</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <div class="text-body-2 mb-3">
+            <p class="mb-1">
+              <strong>العميل:</strong> {{ profile?.customer?.name }}
+            </p>
+            <p class="mb-0">
+              <strong>الهاتف:</strong> {{ profile?.customer?.phone }}
+            </p>
+          </div>
+          <v-textarea
+            v-model="messageBody"
+            label="نص الرسالة"
+            rows="5"
+            counter="1600"
+            :max-length="1600"
+            :rules="[
+              (v) => !!(v && v.trim()) || 'النص مطلوب',
+              (v) => (v && v.length <= 1600) || 'النص أطول من الحد المسموح',
+            ]"
+            auto-grow
+            persistent-counter
+          />
+
+          <div class="text-caption text-grey mb-1">معاينة</div>
+          <v-card variant="tonal" color="success" class="pa-3 message-preview">
+            <pre class="ma-0">{{ messagePreview }}</pre>
+          </v-card>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" :disabled="sendingMessage" @click="whatsAppDialog = false">
+            إلغاء
+          </v-btn>
+          <v-btn
+            color="success"
+            prepend-icon="mdi-send"
+            :loading="sendingMessage"
+            :disabled="!canSubmitMessage"
+            @click="sendWhatsAppMessage"
+          >
+            إرسال
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -467,6 +535,8 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '@/stores/auth';
+import { useNotificationSettingsStore } from '@/stores/notificationSettings';
+import { useNotificationStore } from '@/stores/notification';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
 import {
@@ -480,6 +550,8 @@ import {
 const route = useRoute();
 const customerStore = useCustomerStore();
 const authStore = useAuthStore();
+const notificationSettingsStore = useNotificationSettingsStore();
+const toastStore = useNotificationStore();
 
 const loading = ref(true);
 const error = ref(null);
@@ -490,6 +562,12 @@ const userRole = computed(() => authStore.user?.role);
 const canEdit = computed(() => uiAccess.canManageCustomers(userRole.value));
 const canCreateNewSale = computed(() => uiAccess.canCreateSales(userRole.value));
 const canAddPayment = computed(() => uiAccess.canAddPayments(userRole.value));
+// Only admins / managers with settings:manage can read messaging settings,
+// so only they can know whether the WhatsApp gate is satisfied. Hide the
+// button for everyone else.
+const canSendCustomerMessages = computed(() =>
+  uiAccess.canManageSettings(userRole.value)
+);
 
 const errorTitle = computed(() => {
   if (error.value?.statusCode === 404) return 'العميل غير موجود';
@@ -502,10 +580,111 @@ const errorDescription = computed(() => {
   return error.value?.message || 'حدث خطأ غير متوقع. حاول إعادة المحاولة لاحقاً.';
 });
 
-const normalizedPhone = computed(() => {
+// ── WhatsApp messaging (uses notification system) ──────────────────────
+const whatsAppDialog = ref(false);
+const sendingMessage = ref(false);
+const messageBody = ref('');
+const messagingSettingsLoading = ref(false);
+
+const messagingSettings = computed(() => notificationSettingsStore.settings);
+
+const hasValidPhone = computed(() => {
   const phone = profile.value?.customer?.phone || '';
-  return phone.replace(/[^\d+]/g, '');
+  // Loose pre-check: the backend re-validates with normalizeIraqPhone.
+  return /\d{6,}/.test(phone.replace(/[^\d]/g, ''));
 });
+
+const canSendWhatsApp = computed(() => {
+  if (!canSendCustomerMessages.value) return false;
+  if (!hasValidPhone.value) return false;
+  const s = messagingSettings.value;
+  if (!s) return false;
+  return (
+    s.enabled === true &&
+    s.whatsappEnabled === true &&
+    s.singleCustomerMessagingEnabled === true &&
+    s.apiKeyConfigured === true
+  );
+});
+
+const whatsAppDisabledReason = computed(() => {
+  if (!canSendCustomerMessages.value) return 'تحتاج صلاحية إدارة الإعدادات لإرسال الرسائل';
+  if (!hasValidPhone.value) return 'لا يوجد رقم هاتف صالح لهذا العميل';
+  const s = messagingSettings.value;
+  if (!s || messagingSettingsLoading.value) return 'جاري تحميل إعدادات المراسلة…';
+  if (!s.enabled) return 'نظام المراسلة معطّل من الإعدادات';
+  if (!s.whatsappEnabled) return 'قناة واتساب معطلة من الإعدادات';
+  if (!s.singleCustomerMessagingEnabled) return 'إرسال الرسائل الفردية للعملاء معطل';
+  if (!s.apiKeyConfigured) return 'لم يتم ضبط مفتاح API لمزود الرسائل';
+  return '';
+});
+
+const messagePreview = computed(() => {
+  const txt = (messageBody.value || '').trim();
+  return txt || '— الرسالة فارغة —';
+});
+
+const canSubmitMessage = computed(
+  () => canSendWhatsApp.value && messageBody.value.trim().length > 0 && !sendingMessage.value
+);
+
+const ensureMessagingSettings = async () => {
+  if (!canSendCustomerMessages.value) return;
+  // Refresh on every dialog open so an admin who just toggled a flag in
+  // another tab sees the current state immediately.
+  messagingSettingsLoading.value = true;
+  try {
+    await notificationSettingsStore.fetchSettings();
+  } catch {
+    // The store already toasts on failure — swallow so we don't double-toast.
+  } finally {
+    messagingSettingsLoading.value = false;
+  }
+};
+
+const openWhatsAppDialog = async () => {
+  await ensureMessagingSettings();
+  if (!canSendWhatsApp.value) {
+    if (whatsAppDisabledReason.value) {
+      toastStore.warning(whatsAppDisabledReason.value);
+    }
+    return;
+  }
+  messageBody.value = '';
+  whatsAppDialog.value = true;
+};
+
+const sendWhatsAppMessage = async () => {
+  if (!canSubmitMessage.value || !profile.value?.customer?.id) return;
+  sendingMessage.value = true;
+  try {
+    const res = await notificationSettingsStore.sendCustomerMessage({
+      customerId: profile.value.customer.id,
+      // Force WhatsApp; never let the dialog fall back to SMS silently.
+      channel: 'whatsapp',
+      message: messageBody.value.trim(),
+    });
+    if (res?.success) {
+      whatsAppDialog.value = false;
+      messageBody.value = '';
+      // Refresh logs filtered to this customer when the admin already has
+      // the notifications view open elsewhere — silently swallow if the
+      // logs endpoint isn't reachable for this user.
+      try {
+        await notificationSettingsStore.fetchLogs({
+          customerId: profile.value.customer.id,
+          limit: 20,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+  } catch {
+    // Store already surfaces an error toast.
+  } finally {
+    sendingMessage.value = false;
+  }
+};
 
 // ── KPI cards ────────────────────────────────────────────────────────────
 // We deliberately avoid summing across currencies. The KPI uses the
@@ -659,5 +838,24 @@ const loadProfile = async () => {
   }
 };
 
-onMounted(loadProfile);
+onMounted(async () => {
+  // Profile is the primary payload; messaging settings only matter when
+  // the current user has settings:manage. Fetch in parallel and never let
+  // a settings failure block the page render.
+  const tasks = [loadProfile()];
+  if (canSendCustomerMessages.value) {
+    tasks.push(ensureMessagingSettings());
+  }
+  await Promise.allSettled(tasks);
+});
 </script>
+
+<style scoped>
+.message-preview pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+</style>
