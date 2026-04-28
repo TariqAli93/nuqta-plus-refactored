@@ -1,122 +1,120 @@
 <template>
-  <v-container fluid class="reports-page">
-    <v-card rounded="xl" class="mb-4">
-      <v-card-text class="d-flex align-center justify-space-between flex-wrap ga-3">
-        <div>
-          <h1 class="text-h5 mb-1">التقارير المحاسبية</h1>
-          <div class="text-medium-emphasis">لوحة تفاعلية موحّدة للمبيعات والتحصيل والمخزون والديون</div>
-        </div>
-        <div class="d-flex ga-2">
-          <v-btn color="success" variant="tonal" :loading="exportingExcel" @click="downloadExcel">
-            تصدير Excel
-          </v-btn>
-          <v-btn color="primary" :loading="exportingPdf" @click="printArabicPdf">
-            طباعة / PDF
-          </v-btn>
-        </div>
-      </v-card-text>
-    </v-card>
+  <v-container fluid class="reports-page pa-3 pa-sm-4">
+    <ReportHeader
+      :date-from="filters.dateFrom"
+      :date-to="filters.dateTo"
+      :currency="filters.currency"
+      :branch-label="currentBranchLabel"
+      :generated-at="report?.meta?.generatedAt || ''"
+      :loading="loading"
+      :exporting-excel="exportingExcel"
+      :exporting-pdf="exportingPdf"
+      :has-data="!!report"
+      @refresh="load"
+      @export-excel="downloadExcel"
+      @export-pdf="downloadPdf"
+      @print="printArabicPdf"
+    />
 
-    <v-card rounded="xl" class="mb-4">
-      <v-card-title>الفلاتر</v-card-title>
-      <v-divider />
-      <v-card-text>
-        <v-row>
-          <v-col cols="12" md="2" v-if="showBranchFilter">
-            <v-select v-model="filters.branchId" :items="branchOptions" label="الفرع" clearable />
-          </v-col>
-          <v-col cols="12" md="2">
-            <v-select v-model="filters.currency" :items="currencyOptions" label="العملة" />
-          </v-col>
-          <v-col cols="12" md="2">
-            <v-select v-model="filters.period" :items="periodOptions" label="الفترة" @update:model-value="applyPreset" />
-          </v-col>
-          <v-col cols="12" md="2">
-            <v-text-field v-model="filters.dateFrom" type="date" label="من تاريخ" :disabled="filters.period !== 'custom'" />
-          </v-col>
-          <v-col cols="12" md="2">
-            <v-text-field v-model="filters.dateTo" type="date" label="إلى تاريخ" :disabled="filters.period !== 'custom'" />
-          </v-col>
-          <v-col cols="12" md="2" class="d-flex align-end">
-            <v-btn block color="primary" :loading="loading" @click="load">تحديث التقرير</v-btn>
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
+    <ReportFilters
+      v-model="filters"
+      :branches="inventoryStore.branches || []"
+      :available-currencies="settingsStore.availableCurrencies || ['USD', 'IQD']"
+      :show-branch-filter="showBranchFilter"
+      :loading="loading"
+      @apply="load"
+      @preset-change="onPresetChange"
+      @clear="clearFilters"
+    />
 
-    <v-alert v-if="report?.meta?.notes?.length" type="warning" class="mb-4" variant="tonal">
-      <div v-for="note in report.meta.notes" :key="note">{{ note }}</div>
+    <v-alert
+      v-if="report?.meta?.notes?.length"
+      type="warning"
+      variant="tonal"
+      density="comfortable"
+      border="start"
+      class="mb-4"
+      closable
+    >
+      <div class="text-subtitle-2 font-weight-bold mb-1">
+        تنبيهات على البيانات
+      </div>
+      <ul class="ms-4 mb-0">
+        <li v-for="note in report.meta.notes" :key="note" class="text-body-2">
+          {{ translateNote(note) }}
+        </li>
+      </ul>
     </v-alert>
 
-    <v-row v-if="loading"><v-col cols="12" class="text-center py-8"><v-progress-circular indeterminate color="primary" /></v-col></v-row>
-    <v-alert v-else-if="error" type="error" class="mb-4">{{ error }}</v-alert>
-    <v-alert v-else-if="!report" type="info">لا توجد بيانات ضمن الفلاتر الحالية.</v-alert>
+    <!-- Loading -->
+    <div v-if="loading && !report" class="loading-state">
+      <v-progress-circular indeterminate color="primary" size="48" />
+      <div class="text-body-2 text-medium-emphasis mt-3">
+        جاري تحميل بيانات التقرير...
+      </div>
+    </div>
 
+    <!-- Error -->
+    <v-alert
+      v-else-if="error"
+      type="error"
+      variant="tonal"
+      class="mb-4"
+      border="start"
+      closable
+    >
+      <div class="text-subtitle-2 font-weight-bold mb-1">
+        تعذّر تحميل التقرير
+      </div>
+      <div class="text-body-2">{{ error }}</div>
+      <template #append>
+        <v-btn
+          variant="text"
+          size="small"
+          color="error"
+          prepend-icon="mdi-refresh"
+          @click="load"
+        >
+          إعادة المحاولة
+        </v-btn>
+      </template>
+    </v-alert>
+
+    <!-- Empty -->
+    <EmptyState
+      v-else-if="!report"
+      title="لا توجد بيانات للعرض"
+      description="جرّب تعديل الفلاتر أو الضغط على تطبيق لاستعراض التقرير."
+      icon="mdi-file-search-outline"
+      :actions="[
+        { text: 'تطبيق الفلاتر', icon: 'mdi-check', onClick: load },
+      ]"
+    />
+
+    <!-- Data -->
     <template v-else>
-      <v-row class="mb-2">
-        <v-col cols="12" md="3" v-for="(kpi, cur) in report.kpisByCurrency" :key="cur">
-          <v-card rounded="xl" class="kpi-card">
-            <v-card-text>
-              <div class="text-overline">{{ cur }}</div>
-              <div class="text-body-2">إجمالي المبيعات: {{ money(kpi.sales) }}</div>
-              <div class="text-body-2">المدفوع: {{ money(kpi.totalPaid) }}</div>
-              <div class="text-body-2">المتبقي: {{ money(kpi.unpaidBalances) }}</div>
-              <div class="text-body-2">صافي الربح: {{ nullableMoney(kpi.netProfit) }}</div>
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
+      <ReportKpiCards
+        :kpis-by-currency="report.kpisByCurrency || {}"
+        :inventory="report.inventory || {}"
+        :expenses-summary="report.expensesSummary || {}"
+        :can-view-profit="canViewProfit"
+      />
 
-      <v-row>
-        <v-col cols="12" md="6">
-          <v-card rounded="xl">
-            <v-card-title>اتجاه المبيعات</v-card-title>
-            <v-card-text>
-              <apexchart type="line" height="280" :options="salesTrend.options" :series="salesTrend.series" />
-            </v-card-text>
-          </v-card>
-        </v-col>
-        <v-col cols="12" md="6">
-          <v-card rounded="xl">
-            <v-card-title>التحصيل حسب طريقة الدفع</v-card-title>
-            <v-card-text>
-              <apexchart type="bar" height="280" :options="paymentsChart.options" :series="paymentsChart.series" />
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
+      <ReportCharts
+        :trends="report.trends || {}"
+        :profit-loss="report.profitLoss || {}"
+        :expenses-summary="report.expensesSummary || {}"
+        :can-view-profit="canViewProfit"
+      />
 
-      <v-row class="mt-1">
-        <v-col cols="12" md="6">
-          <v-card rounded="xl">
-            <v-card-title>اتجاه الأقساط المتأخرة</v-card-title>
-            <v-card-text>
-              <apexchart type="area" height="280" :options="overdueChart.options" :series="overdueChart.series" />
-            </v-card-text>
-          </v-card>
-        </v-col>
-        <v-col cols="12" md="6">
-          <v-card rounded="xl">
-            <v-card-title>المنتجات منخفضة المخزون</v-card-title>
-            <v-data-table :headers="lowStockHeaders" :items="report.inventory.lowStockProducts" density="comfortable" />
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <v-row class="mt-1">
-        <v-col cols="12" md="6">
-          <v-card rounded="xl">
-            <v-card-title>أعلى العملاء مديونية</v-card-title>
-            <v-data-table :headers="debtHeaders" :items="report.customersDebt.topDebtCustomers" density="comfortable" />
-          </v-card>
-        </v-col>
-        <v-col cols="12" md="6">
-          <v-card rounded="xl">
-            <v-card-title>أعلى العملاء تسديدًا</v-card-title>
-            <v-data-table :headers="payingHeaders" :items="report.customersDebt.topPayingCustomers" density="comfortable" />
-          </v-card>
-        </v-col>
-      </v-row>
+      <ReportTables
+        :kpis-by-currency="report.kpisByCurrency || {}"
+        :installments-summary="report.installmentsSummary || {}"
+        :expenses-summary="report.expensesSummary || {}"
+        :inventory="report.inventory || {}"
+        :customers-debt="report.customersDebt || {}"
+        :can-view-profit="canViewProfit"
+      />
     </template>
   </v-container>
 </template>
@@ -127,6 +125,12 @@ import { useAuthStore } from '@/stores/auth';
 import { useReportStore } from '@/stores/report';
 import { useInventoryStore } from '@/stores/inventory';
 import { useSettingsStore } from '@/stores/settings';
+import EmptyState from '@/components/EmptyState.vue';
+import ReportHeader from '@/components/reports/ReportHeader.vue';
+import ReportFilters from '@/components/reports/ReportFilters.vue';
+import ReportKpiCards from '@/components/reports/ReportKpiCards.vue';
+import ReportCharts from '@/components/reports/ReportCharts.vue';
+import ReportTables from '@/components/reports/ReportTables.vue';
 
 const authStore = useAuthStore();
 const reportStore = useReportStore();
@@ -139,32 +143,39 @@ const error = ref('');
 const exportingExcel = ref(false);
 const exportingPdf = ref(false);
 
-const filters = ref({ branchId: null, currency: 'ALL', period: 'this_month', dateFrom: '', dateTo: '' });
-const periodOptions = [
-  { title: 'اليوم', value: 'today' },
-  { title: 'أمس', value: 'yesterday' },
-  { title: 'هذا الأسبوع', value: 'this_week' },
-  { title: 'هذا الشهر', value: 'this_month' },
-  { title: 'هذه السنة', value: 'this_year' },
-  { title: 'مخصص', value: 'custom' },
-];
+const defaultFilters = () => ({
+  branchId: null,
+  currency: 'ALL',
+  period: 'this_month',
+  dateFrom: '',
+  dateTo: '',
+});
+
+const filters = ref(defaultFilters());
 
 const showBranchFilter = computed(() => authStore.isGlobalAdmin);
-const branchOptions = computed(() => [
-  { title: 'كل الفروع', value: null },
-  ...(inventoryStore.branches || []).map((b) => ({ title: b.name, value: b.id })),
-]);
-const currencyOptions = computed(() => [
-  { title: 'كل العملات', value: 'ALL' },
-  ...((settingsStore.availableCurrencies || ['USD', 'IQD']).map((c) => ({ title: c, value: c }))),
-]);
 
-const money = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
-const nullableMoney = (n) => (n === null || n === undefined ? 'غير متاح' : money(n));
+// Profit-sensitive sections require manager-level role.
+const canViewProfit = computed(() => {
+  return (
+    authStore.hasPermission &&
+    authStore.hasPermission(['manage:sales'])
+  );
+});
+
+const currentBranchLabel = computed(() => {
+  const id = filters.value.branchId;
+  if (!id) return 'كل الفروع';
+  const branch = (inventoryStore.branches || []).find((b) => b.id === id);
+  return branch?.name || `فرع #${id}`;
+});
+
+function ymd(d) {
+  return d.toISOString().slice(0, 10);
+}
 
 function presetDates(period) {
   const now = new Date();
-  const ymd = (d) => d.toISOString().slice(0, 10);
   const start = new Date(now);
   const end = new Date(now);
   if (period === 'today') return { dateFrom: ymd(start), dateTo: ymd(end) };
@@ -188,19 +199,37 @@ function presetDates(period) {
   return { dateFrom: filters.value.dateFrom, dateTo: filters.value.dateTo };
 }
 
-function applyPreset() {
-  if (filters.value.period === 'custom') return;
+function onPresetChange(period) {
+  if (period === 'custom') return;
+  Object.assign(filters.value, presetDates(period));
+}
+
+function clearFilters() {
+  filters.value = defaultFilters();
   Object.assign(filters.value, presetDates(filters.value.period));
+}
+
+function translateNote(note) {
+  const map = {
+    'Currency conversion unavailable: totals are grouped by currency only.':
+      'تحويل العملات غير متاح: يتم تجميع الإجماليات حسب كل عملة على حدة.',
+    'Expenses module is not available in current schema; expenses shown as 0.':
+      'وحدة المصاريف غير متوفرة في المخطط الحالي، يتم عرض المصاريف كـ 0.',
+  };
+  return map[note] || note;
 }
 
 async function load() {
   error.value = '';
   try {
     if (!showBranchFilter.value) filters.value.branchId = null;
-    await reportStore.fetchDashboard({ ...filters.value, reportType: 'dashboard' });
+    await reportStore.fetchDashboard({
+      ...filters.value,
+      reportType: 'dashboard',
+    });
     localStorage.setItem('reports.filters', JSON.stringify(filters.value));
   } catch (e) {
-    error.value = e?.message || 'تعذّر تحميل التقرير';
+    error.value = e?.message || e?.error || 'تعذّر تحميل التقرير';
   }
 }
 
@@ -216,109 +245,107 @@ function saveBlob(blob, filename) {
 async function downloadExcel() {
   exportingExcel.value = true;
   try {
-    const blob = await reportStore.exportExcel({ ...filters.value, reportType: 'accounting-report' });
+    const blob = await reportStore.exportExcel({
+      ...filters.value,
+      reportType: 'accounting-report',
+    });
     saveBlob(blob, 'تقرير-محاسبي.xls');
+  } catch (e) {
+    error.value = e?.message || e?.error || 'تعذّر تصدير ملف Excel';
   } finally {
     exportingExcel.value = false;
   }
 }
 
-function printArabicPdf() {
+async function downloadPdf() {
   exportingPdf.value = true;
   try {
-    const d = report.value;
-    if (!d) return;
-    const rows = Object.entries(d.kpisByCurrency || {}).map(([cur, k]) => `
-      <tr>
-        <td>${cur}</td>
-        <td>${money(k.sales)}</td>
-        <td>${money(k.totalPaid)}</td>
-        <td>${money(k.unpaidBalances)}</td>
-        <td>${nullableMoney(k.netProfit)}</td>
-      </tr>`).join('');
-
-    const html = `
-      <html dir="rtl" lang="ar">
-      <head>
-        <meta charset="utf-8" />
-        <title>تقرير محاسبي</title>
-        <style>
-          body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#1f2937}
-          h1{margin:0 0 8px}
-          .meta{margin-bottom:18px;color:#4b5563}
-          .card{border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px}
-          table{width:100%;border-collapse:collapse}
-          th,td{border:1px solid #e5e7eb;padding:10px;text-align:center}
-          th{background:#f3f4f6}
-          .footer{margin-top:16px;color:#6b7280;font-size:12px}
-        </style>
-      </head>
-      <body>
-        <h1>التقرير المحاسبي</h1>
-        <div class="meta">الفلاتر: من ${filters.value.dateFrom} إلى ${filters.value.dateTo} | العملة: ${filters.value.currency}</div>
-        <div class="card">
-          <h3>ملخص المؤشرات</h3>
-          <table>
-            <thead>
-              <tr><th>العملة</th><th>إجمالي المبيعات</th><th>المدفوع</th><th>المتبقي</th><th>صافي الربح</th></tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-        <div class="card">
-          <h3>ملاحظات</h3>
-          ${(d.meta?.notes || []).map((n) => `<div>- ${n}</div>`).join('')}
-        </div>
-        <div class="footer">تم إنشاء التقرير بتاريخ ${new Date().toLocaleString('ar-IQ')}</div>
-      </body>
-      </html>`;
-
-    const win = window.open('', '_blank', 'width=1200,height=900');
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    win.print();
+    const blob = await reportStore.exportPdf({
+      ...filters.value,
+      reportType: 'accounting-report',
+    });
+    saveBlob(blob, 'تقرير-محاسبي.pdf');
+  } catch (e) {
+    error.value = e?.message || e?.error || 'تعذّر تصدير ملف PDF';
   } finally {
     exportingPdf.value = false;
   }
 }
 
-const lowStockHeaders = [
-  { title: 'المنتج', key: 'productName' },
-  { title: 'المخزن', key: 'warehouseName' },
-  { title: 'الكمية', key: 'quantity' },
-];
-const debtHeaders = [
-  { title: 'العميل', key: 'customerName' },
-  { title: 'المديونية', key: 'totalDebt' },
-];
-const payingHeaders = [
-  { title: 'العميل', key: 'customerName' },
-  { title: 'المدفوع', key: 'paid' },
-  { title: 'العملة', key: 'currency' },
-];
+const moneyFmt = (n) =>
+  Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const nullableMoney = (n) =>
+  n === null || n === undefined ? 'غير متاح' : moneyFmt(n);
 
-const salesTrend = computed(() => ({
-  chart: { toolbar: { show: false } },
-  options: { xaxis: { categories: (report.value?.trends?.salesOverTime || []).map((r) => r.day) } },
-  series: [
-    { name: 'المبيعات', data: (report.value?.trends?.salesOverTime || []).map((r) => Number(r.total || 0)) },
-  ],
-}));
+function printArabicPdf() {
+  const d = report.value;
+  if (!d) return;
+  const rows = Object.entries(d.kpisByCurrency || {})
+    .map(
+      ([cur, k]) => `
+      <tr>
+        <td>${cur}</td>
+        <td>${moneyFmt(k.sales)}</td>
+        <td>${moneyFmt(k.totalPaid)}</td>
+        <td>${moneyFmt(k.unpaidBalances)}</td>
+        <td>${canViewProfit.value ? nullableMoney(k.netProfit) : '—'}</td>
+      </tr>`,
+    )
+    .join('');
 
-const paymentsChart = computed(() => ({
-  options: { xaxis: { categories: (report.value?.trends?.paymentsByMethod || []).map((r) => `${r.method}-${r.currency}`) } },
-  series: [
-    { name: 'التحصيل', data: (report.value?.trends?.paymentsByMethod || []).map((r) => Number(r.total || 0)) },
-  ],
-}));
+  const html = `
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="utf-8" />
+      <title>تقرير محاسبي</title>
+      <style>
+        body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#1f2937}
+        h1{margin:0 0 8px}
+        .meta{margin-bottom:18px;color:#4b5563}
+        .card{border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px}
+        table{width:100%;border-collapse:collapse}
+        th,td{border:1px solid #e5e7eb;padding:10px;text-align:center}
+        th{background:#f3f4f6}
+        .footer{margin-top:16px;color:#6b7280;font-size:12px}
+      </style>
+    </head>
+    <body>
+      <h1>التقرير المحاسبي</h1>
+      <div class="meta">
+        الفلاتر: من ${filters.value.dateFrom} إلى ${filters.value.dateTo}
+        | العملة: ${filters.value.currency}
+        | الفرع: ${currentBranchLabel.value}
+      </div>
+      <div class="card">
+        <h3>ملخص المؤشرات</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>العملة</th>
+              <th>إجمالي المبيعات</th>
+              <th>المدفوع</th>
+              <th>المتبقي</th>
+              <th>صافي الربح</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>ملاحظات</h3>
+        ${(d.meta?.notes || []).map((n) => `<div>- ${translateNote(n)}</div>`).join('')}
+      </div>
+      <div class="footer">تم إنشاء التقرير بتاريخ ${new Date().toLocaleString('ar-IQ')}</div>
+    </body>
+    </html>`;
 
-const overdueChart = computed(() => ({
-  options: { xaxis: { categories: (report.value?.trends?.overdueInstallmentsTrend || []).map((r) => r.day) } },
-  series: [
-    { name: 'الأقساط المتأخرة', data: (report.value?.trends?.overdueInstallmentsTrend || []).map((r) => Number(r.overdueCount || 0)) },
-  ],
-}));
+  const win = window.open('', '_blank', 'width=1200,height=900');
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.print();
+}
 
 onMounted(async () => {
   await Promise.allSettled([
@@ -333,16 +360,34 @@ onMounted(async () => {
       // ignore broken cache
     }
   }
-  applyPreset();
+  if (filters.value.period !== 'custom') {
+    Object.assign(filters.value, presetDates(filters.value.period));
+  }
   await load();
 });
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .reports-page {
   direction: rtl;
+  max-width: 1600px;
+  margin: 0 auto;
 }
-.kpi-card {
-  border: 1px solid rgba(25, 118, 210, 0.2);
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  text-align: center;
+}
+
+@media print {
+  .reports-page :deep(.v-tabs),
+  .reports-page :deep(.export-actions),
+  .reports-page :deep(.report-filters) {
+    display: none !important;
+  }
 }
 </style>
