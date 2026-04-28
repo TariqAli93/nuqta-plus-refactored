@@ -1,561 +1,348 @@
 <template>
-  <v-app>
-    <v-container fluid>
-      <!-- Hero Header Section -->
-      <div class="d-flex align-center justify-space-between mb-4">
-        <h1 class="text-h4">التقارير والتحليلات</h1>
+  <v-container fluid class="reports-page">
+    <v-card rounded="xl" class="mb-4">
+      <v-card-text class="d-flex align-center justify-space-between flex-wrap ga-3">
+        <div>
+          <h1 class="text-h5 mb-1">التقارير المحاسبية</h1>
+          <div class="text-medium-emphasis">لوحة تفاعلية موحّدة للمبيعات والتحصيل والمخزون والديون</div>
+        </div>
+        <div class="d-flex ga-2">
+          <v-btn color="success" variant="tonal" :loading="exportingExcel" @click="downloadExcel">
+            تصدير Excel
+          </v-btn>
+          <v-btn color="primary" :loading="exportingPdf" @click="printArabicPdf">
+            طباعة / PDF
+          </v-btn>
+        </div>
+      </v-card-text>
+    </v-card>
 
-        <v-spacer />
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-file-export"
-          :disabled="!report"
-          @click="exportToPDF"
-        >
-          تصدير التقرير
-        </v-btn>
-      </div>
+    <v-card rounded="xl" class="mb-4">
+      <v-card-title>الفلاتر</v-card-title>
+      <v-divider />
+      <v-card-text>
+        <v-row>
+          <v-col cols="12" md="2" v-if="showBranchFilter">
+            <v-select v-model="filters.branchId" :items="branchOptions" label="الفرع" clearable />
+          </v-col>
+          <v-col cols="12" md="2">
+            <v-select v-model="filters.currency" :items="currencyOptions" label="العملة" />
+          </v-col>
+          <v-col cols="12" md="2">
+            <v-select v-model="filters.period" :items="periodOptions" label="الفترة" @update:model-value="applyPreset" />
+          </v-col>
+          <v-col cols="12" md="2">
+            <v-text-field v-model="filters.dateFrom" type="date" label="من تاريخ" :disabled="filters.period !== 'custom'" />
+          </v-col>
+          <v-col cols="12" md="2">
+            <v-text-field v-model="filters.dateTo" type="date" label="إلى تاريخ" :disabled="filters.period !== 'custom'" />
+          </v-col>
+          <v-col cols="12" md="2" class="d-flex align-end">
+            <v-btn block color="primary" :loading="loading" @click="load">تحديث التقرير</v-btn>
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
 
-      <!-- Main Content Layout -->
-      <v-row align="start" class="mt-2">
-        <!-- Left Sidebar - Filters -->
-        <v-col cols="12" md="3">
-          <v-card elevation="0" rounded="xl" class="mb-6">
-            <v-card-title class="pb-0">
-              <v-icon size="24" class="ml-2">mdi-filter</v-icon>
-              <span>فلترة البيانات</span>
-            </v-card-title>
-            <v-divider class="mb-3"></v-divider>
+    <v-alert v-if="report?.meta?.notes?.length" type="warning" class="mb-4" variant="tonal">
+      <div v-for="note in report.meta.notes" :key="note">{{ note }}</div>
+    </v-alert>
+
+    <v-row v-if="loading"><v-col cols="12" class="text-center py-8"><v-progress-circular indeterminate color="primary" /></v-col></v-row>
+    <v-alert v-else-if="error" type="error" class="mb-4">{{ error }}</v-alert>
+    <v-alert v-else-if="!report" type="info">لا توجد بيانات ضمن الفلاتر الحالية.</v-alert>
+
+    <template v-else>
+      <v-row class="mb-2">
+        <v-col cols="12" md="3" v-for="(kpi, cur) in report.kpisByCurrency" :key="cur">
+          <v-card rounded="xl" class="kpi-card">
             <v-card-text>
-              <v-form>
-                <v-row dense>
-                  <v-col cols="12" class="mb-2">
-                    <label class="mb-1 d-block">من تاريخ</label>
-                    <v-menu
-                      v-model="menus.start"
-                      :close-on-content-click="false"
-                      min-width="auto"
-                      transition="scale-transition"
-                    >
-                      <template #activator="{ props }">
-                        <v-text-field
-                          v-model="formattedStartDate"
-                          readonly
-                          prepend-inner-icon="mdi-calendar-start"
-                          v-bind="props"
-                          variant="outlined"
-                          density="comfortable"
-                          hide-details
-                        ></v-text-field>
-                      </template>
-                      <v-date-picker
-                        v-model="filters.startDate"
-                        elevation="4"
-                        view="date"
-                        color="primary"
-                        @update:model-value="
-                          (val) => {
-                            filters.startDate = val;
-                            menus.start = false;
-                          }
-                        "
-                        show-adjacent-months
-                        :show-current="true"
-                      ></v-date-picker>
-                    </v-menu>
-                  </v-col>
-                  <v-col cols="12" class="mb-2">
-                    <label class="mb-1 d-block">إلى تاريخ</label>
-                    <v-menu
-                      v-model="menus.end"
-                      :close-on-content-click="false"
-                      min-width="auto"
-                      transition="scale-transition"
-                    >
-                      <template #activator="{ props }">
-                        <v-text-field
-                          v-model="formattedEndDate"
-                          readonly
-                          prepend-inner-icon="mdi-calendar-end"
-                          v-bind="props"
-                          variant="outlined"
-                          density="comfortable"
-                          hide-details
-                        ></v-text-field>
-                      </template>
-                      <v-date-picker
-                        v-model="filters.endDate"
-                        elevation="4"
-                        view="date"
-                        color="primary"
-                        @update:model-value="
-                          (val) => {
-                            filters.endDate = val;
-                            menus.end = false;
-                          }
-                        "
-                        show-adjacent-months
-                        :show-current="true"
-                      ></v-date-picker>
-                    </v-menu>
-                  </v-col>
-                  <v-col cols="12" class="mb-2">
-                    <label class="mb-1 d-block">العملة</label>
-                    <v-select
-                      v-model="filters.currency"
-                      :items="currencyOptions"
-                      item-title="title"
-                      item-value="value"
-                      variant="outlined"
-                      density="comfortable"
-                      prepend-inner-icon="mdi-currency-usd"
-                      hide-details
-                    ></v-select>
-                  </v-col>
-                  <v-col cols="12" class="mt-4">
-                    <v-btn
-                      block
-                      color="primary"
-                      :loading="loading"
-                      @click="fetchReport"
-                    >
-                      <v-icon start>mdi-magnify</v-icon>
-                      عرض التقرير
-                    </v-btn>
-                  </v-col>
-                </v-row>
-              </v-form>
+              <div class="text-overline">{{ cur }}</div>
+              <div class="text-body-2">إجمالي المبيعات: {{ money(kpi.sales) }}</div>
+              <div class="text-body-2">المدفوع: {{ money(kpi.totalPaid) }}</div>
+              <div class="text-body-2">المتبقي: {{ money(kpi.unpaidBalances) }}</div>
+              <div class="text-body-2">صافي الربح: {{ nullableMoney(kpi.netProfit) }}</div>
             </v-card-text>
           </v-card>
         </v-col>
+      </v-row>
 
-        <!-- Main Content Area -->
-        <v-col cols="12" md="9">
-          <!-- Loading State -->
-          <v-row v-if="loading" align="center" justify="center">
-            <v-col cols="12" class="text-center py-12">
-              <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
-              <p class="mt-2 mb-0">جاري تحميل التقرير...</p>
-            </v-col>
-          </v-row>
-
-          <!-- Report Content -->
-          <div v-else-if="report">
-            <!-- Key Metrics -->
-            <v-card elevation="2" class="mb-4 pa-4">
-              <div class="d-flex align-center mb-4">
-                <v-icon size="24" class="ml-2">mdi-chart-box-outline</v-icon>
-                <h1 class="mb-0 text-h5">نظرة عامة على المبيعات</h1>
-              </div>
-              <v-row>
-                <v-col cols="12" md="4">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="36" color="primary" class="mb-2">mdi-counter</v-icon>
-                    <div class="text-h6 mt-2">{{ report.count ?? 0 }}</div>
-                    <div class="caption grey--text mt-1">عدد المبيعات</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="4">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="36" color="success" class="mb-2">mdi-check-circle</v-icon>
-                    <div class="text-h6 mt-2">{{ report.completedSales ?? 0 }}</div>
-                    <div class="caption grey--text mt-1">مبيعات مكتملة</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="4">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="36" color="warning" class="mb-2">mdi-clock-outline</v-icon>
-                    <div class="text-h6 mt-2">{{ report.pendingSales ?? 0 }}</div>
-                    <div class="caption grey--text mt-1">مبيعات معلقة</div>
-                  </v-card>
-                </v-col>
-              </v-row>
-            </v-card>
-
-            <!-- Financial Metrics -->
-            <v-card elevation="2" class="mb-4 pa-4">
-              <div class="d-flex align-center mb-4">
-                <v-icon size="24" class="ml-2">mdi-cash-multiple</v-icon>
-                <h1 class="mb-0 text-h5">
-                  المؤشرات المالية
-                  <span class="ml-2 currency-label">{{ reportByCurrency.currencyLabel }}</span>
-                </h1>
-              </div>
-              <v-row >
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="primary" class="mb-1">mdi-cash</v-icon>
-                    <div class="text-h6 mt-2">
-                      {{ reportByCurrency.format(reportByCurrency.sales ?? 0) }}
-                    </div>
-                    <div class="caption grey--text mt-1">إجمالي المبيعات</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="success" class="mb-1">mdi-cash-check</v-icon>
-                    <div class="text-h6 mt-2">
-                      {{ reportByCurrency.format(reportByCurrency.paid ?? 0) }}
-                    </div>
-                    <div class="caption grey--text mt-1">المدفوع</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="red" class="mb-1">mdi-tag-off</v-icon>
-                    <div class="text-h6 mt-2">
-                      {{ reportByCurrency.format(reportByCurrency.discount ?? 0) }}
-                    </div>
-                    <div class="caption grey--text mt-1">إجمالي الخصومات</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="orange" class="mb-1">mdi-percent</v-icon>
-                    <div class="text-h6 mt-2">
-                      {{ reportByCurrency.format(reportByCurrency.interest ?? 0) }}
-                    </div>
-                    <div class="caption grey--text mt-1">إجمالي الفائدة</div>
-                  </v-card>
-                </v-col>
-              </v-row>
-            </v-card>
-
-            <!-- Performance Metrics -->
-            <v-card elevation="2" class="pa-4">
-              <div class="d-flex align-center mb-4">
-                <v-icon size="24" class="ml-2">mdi-trending-up</v-icon>
-                <h1 class="mb-0 text-h5">مؤشرات الأداء</h1>
-              </div>
-              <v-row >
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="info" class="mb-1">mdi-finance</v-icon>
-                    <div class="text-h6 mt-2">
-                      {{ reportByCurrency.format(reportByCurrency.avgSale ?? 0) }}
-                    </div>
-                    <div class="caption grey--text mt-1">متوسط البيع</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="teal" class="mb-1">mdi-cash-plus</v-icon>
-                    <div class="text-h6 mt-2">
-                      {{ reportByCurrency.format(reportByCurrency.profit ?? 0) }}
-                    </div>
-                    <div class="caption grey--text mt-1">الربح</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="deep-purple" class="mb-1">mdi-poll</v-icon>
-                    <div class="text-h6 mt-2">
-                      {{ reportByCurrency.format(reportByCurrency.avgProfit ?? 0) }}
-                    </div>
-                    <div class="caption grey--text mt-1">متوسط الربح</div>
-                  </v-card>
-                </v-col>
-                <v-col cols="12" md="3">
-                  <v-card flat class="pa-4 text-center">
-                    <v-icon size="32" color="lime-darken-2" class="mb-1">mdi-percent-circle</v-icon>
-                    <div class="text-h6 mt-2">{{ reportByCurrency.profitMargin ?? 0 }}%</div>
-                    <div class="caption grey--text mt-1">هامش الربح</div>
-                  </v-card>
-                </v-col>
-              </v-row>
-            </v-card>
-          </div>
-
-          <!-- Empty State -->
-          <v-card v-else elevation="2" rounded="xl">
-            <div class="pa-8 text-center">
-              <div class="mb-2">
-                <v-icon size="80" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
-              </div>
-              <h3 class="mb-1">لا توجد بيانات</h3>
-              <p class="grey--text text--darken-1">يرجى تحديد الفترة المطلوبة وعرض التقرير</p>
-            </div>
+      <v-row>
+        <v-col cols="12" md="6">
+          <v-card rounded="xl">
+            <v-card-title>اتجاه المبيعات</v-card-title>
+            <v-card-text>
+              <apexchart type="line" height="280" :options="salesTrend.options" :series="salesTrend.series" />
+            </v-card-text>
+          </v-card>
+        </v-col>
+        <v-col cols="12" md="6">
+          <v-card rounded="xl">
+            <v-card-title>التحصيل حسب طريقة الدفع</v-card-title>
+            <v-card-text>
+              <apexchart type="bar" height="280" :options="paymentsChart.options" :series="paymentsChart.series" />
+            </v-card-text>
           </v-card>
         </v-col>
       </v-row>
-    </v-container>
-  </v-app>
+
+      <v-row class="mt-1">
+        <v-col cols="12" md="6">
+          <v-card rounded="xl">
+            <v-card-title>اتجاه الأقساط المتأخرة</v-card-title>
+            <v-card-text>
+              <apexchart type="area" height="280" :options="overdueChart.options" :series="overdueChart.series" />
+            </v-card-text>
+          </v-card>
+        </v-col>
+        <v-col cols="12" md="6">
+          <v-card rounded="xl">
+            <v-card-title>المنتجات منخفضة المخزون</v-card-title>
+            <v-data-table :headers="lowStockHeaders" :items="report.inventory.lowStockProducts" density="comfortable" />
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <v-row class="mt-1">
+        <v-col cols="12" md="6">
+          <v-card rounded="xl">
+            <v-card-title>أعلى العملاء مديونية</v-card-title>
+            <v-data-table :headers="debtHeaders" :items="report.customersDebt.topDebtCustomers" density="comfortable" />
+          </v-card>
+        </v-col>
+        <v-col cols="12" md="6">
+          <v-card rounded="xl">
+            <v-card-title>أعلى العملاء تسديدًا</v-card-title>
+            <v-data-table :headers="payingHeaders" :items="report.customersDebt.topPayingCustomers" density="comfortable" />
+          </v-card>
+        </v-col>
+      </v-row>
+    </template>
+  </v-container>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import { useSaleStore } from '@/stores/sale';
-import { useNotificationStore } from '@/stores/notification';
+import { computed, onMounted, ref } from 'vue';
+import { useAuthStore } from '@/stores/auth';
+import { useReportStore } from '@/stores/report';
+import { useInventoryStore } from '@/stores/inventory';
 import { useSettingsStore } from '@/stores/settings';
 
-const saleStore = useSaleStore();
-const notificationStore = useNotificationStore();
+const authStore = useAuthStore();
+const reportStore = useReportStore();
+const inventoryStore = useInventoryStore();
 const settingsStore = useSettingsStore();
-const loading = ref(false);
-const report = ref(null);
-const menus = ref({
-  start: false,
-  end: false,
-});
-const filters = ref({
-  startDate: null,
-  endDate: null,
-  currency: null,
-});
 
-// Use settingsStore.availableCurrencies as array (fix default and fallback)
-const currencyOptions = computed(() => {
-  let available = settingsStore.availableCurrencies;
-  if (!Array.isArray(available) || available.length === 0) {
-    available = ['IQD', 'USD'];
+const loading = computed(() => reportStore.loading);
+const report = computed(() => reportStore.data);
+const error = ref('');
+const exportingExcel = ref(false);
+const exportingPdf = ref(false);
+
+const filters = ref({ branchId: null, currency: 'ALL', period: 'this_month', dateFrom: '', dateTo: '' });
+const periodOptions = [
+  { title: 'اليوم', value: 'today' },
+  { title: 'أمس', value: 'yesterday' },
+  { title: 'هذا الأسبوع', value: 'this_week' },
+  { title: 'هذا الشهر', value: 'this_month' },
+  { title: 'هذه السنة', value: 'this_year' },
+  { title: 'مخصص', value: 'custom' },
+];
+
+const showBranchFilter = computed(() => authStore.isGlobalAdmin);
+const branchOptions = computed(() => [
+  { title: 'كل الفروع', value: null },
+  ...(inventoryStore.branches || []).map((b) => ({ title: b.name, value: b.id })),
+]);
+const currencyOptions = computed(() => [
+  { title: 'كل العملات', value: 'ALL' },
+  ...((settingsStore.availableCurrencies || ['USD', 'IQD']).map((c) => ({ title: c, value: c }))),
+]);
+
+const money = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const nullableMoney = (n) => (n === null || n === undefined ? 'غير متاح' : money(n));
+
+function presetDates(period) {
+  const now = new Date();
+  const ymd = (d) => d.toISOString().slice(0, 10);
+  const start = new Date(now);
+  const end = new Date(now);
+  if (period === 'today') return { dateFrom: ymd(start), dateTo: ymd(end) };
+  if (period === 'yesterday') {
+    start.setDate(start.getDate() - 1);
+    end.setDate(end.getDate() - 1);
+    return { dateFrom: ymd(start), dateTo: ymd(end) };
   }
-  return available.map((currency) => ({
-    title: currency === 'USD' ? 'دولار (USD)' : 'دينار عراقي (IQD)',
-    value: currency,
-  }));
-});
-
-// defaultCurrency fallback IQD
-const defaultCurrency = computed(() => settingsStore.settings?.defaultCurrency || 'IQD');
-
-// selectedCurrency always fallback to default if not available or selected
-const selectedCurrency = computed(() => {
-  let available = settingsStore.availableCurrencies;
-  if (!Array.isArray(available) || available.length === 0) {
-    available = ['IQD', 'USD'];
+  if (period === 'this_week') {
+    start.setDate(start.getDate() - start.getDay());
+    return { dateFrom: ymd(start), dateTo: ymd(end) };
   }
-  if (filters.value.currency && available.includes(filters.value.currency)) {
-    return filters.value.currency;
+  if (period === 'this_month') {
+    start.setDate(1);
+    return { dateFrom: ymd(start), dateTo: ymd(end) };
   }
-  return defaultCurrency.value;
-});
-
-const toYmd = (date) => {
-  if (!date) return '';
-  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return date;
+  if (period === 'this_year') {
+    start.setMonth(0, 1);
+    return { dateFrom: ymd(start), dateTo: ymd(end) };
   }
-  const d = new Date(date);
-  if (isNaN(d)) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
+  return { dateFrom: filters.value.dateFrom, dateTo: filters.value.dateTo };
+}
 
-// Fix: always format a number, even if input is null/undefined
-const formatUSD = (amount) =>
-  `$${parseFloat(amount ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-const formatIQD = (amount) =>
-  `${parseFloat(amount ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })} IQD`;
+function applyPreset() {
+  if (filters.value.period === 'custom') return;
+  Object.assign(filters.value, presetDates(filters.value.period));
+}
 
-const reportByCurrency = computed(() => {
-  const cur = selectedCurrency.value;
-  const r = report.value || {};
-  const isUSD = cur === 'USD';
-  return {
-    currency: cur,
-    sales: isUSD ? r.salesUSD : r.salesIQD,
-    paid: isUSD ? r.paidUSD : r.paidIQD,
-    discount: isUSD ? r.discountUSD : r.discountIQD,
-    interest: isUSD ? r.interestUSD : r.interestIQD,
-    profit: isUSD ? r.profitUSD : r.profitIQD,
-    avgSale: isUSD ? r.avgSaleUSD : r.avgSaleIQD,
-    avgProfit: isUSD ? r.avgProfitUSD : r.avgProfitIQD,
-    profitMargin: isUSD ? r.profitMarginUSD : r.profitMarginIQD,
-    format: isUSD ? formatUSD : formatIQD,
-    currencyLabel: isUSD ? 'USD' : 'IQD',
-  };
-});
-
-// Makes sure toYmd always returns a string for the field
-const formattedStartDate = computed({
-  get: () => toYmd(filters.value.startDate),
-  set: (val) => {
-    // Accept yyyy-mm-dd or Date
-    filters.value.startDate = val ? val : null;
-  },
-});
-const formattedEndDate = computed({
-  get: () => toYmd(filters.value.endDate),
-  set: (val) => {
-    filters.value.endDate = val ? val : null;
-  },
-});
-
-const fetchReport = async () => {
-  loading.value = true;
-
+async function load() {
+  error.value = '';
   try {
-    // Pass string dates for API compatibility
-    report.value = await saleStore.getSalesReport({
-      startDate: toYmd(filters.value.startDate),
-      endDate: toYmd(filters.value.endDate),
-      currency: filters.value.currency || defaultCurrency.value,
-    });
+    if (!showBranchFilter.value) filters.value.branchId = null;
+    await reportStore.fetchDashboard({ ...filters.value, reportType: 'dashboard' });
+    localStorage.setItem('reports.filters', JSON.stringify(filters.value));
   } catch (e) {
-    notificationStore.error('حدث خطأ أثناء تحميل التقرير');
-  } finally {
-    loading.value = false;
+    error.value = e?.message || 'تعذّر تحميل التقرير';
   }
-};
+}
 
-const exportToPDF = () => {
-  if (!report.value) return;
+function saveBlob(blob, filename) {
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  window.URL.revokeObjectURL(url);
+}
 
-  const win = window.open('', '', 'height=800,width=1000');
-  // Format date fields for the PDF
-  const startDateStr = formattedStartDate.value || '---';
-  const endDateStr = formattedEndDate.value || '---';
+async function downloadExcel() {
+  exportingExcel.value = true;
+  try {
+    const blob = await reportStore.exportExcel({ ...filters.value, reportType: 'accounting-report' });
+    saveBlob(blob, 'تقرير-محاسبي.xls');
+  } finally {
+    exportingExcel.value = false;
+  }
+}
 
-  win.document.write(`
-    <html dir="rtl">
+function printArabicPdf() {
+  exportingPdf.value = true;
+  try {
+    const d = report.value;
+    if (!d) return;
+    const rows = Object.entries(d.kpisByCurrency || {}).map(([cur, k]) => `
+      <tr>
+        <td>${cur}</td>
+        <td>${money(k.sales)}</td>
+        <td>${money(k.totalPaid)}</td>
+        <td>${money(k.unpaidBalances)}</td>
+        <td>${nullableMoney(k.netProfit)}</td>
+      </tr>`).join('');
+
+    const html = `
+      <html dir="rtl" lang="ar">
       <head>
-        <title>تقرير المبيعات</title>
+        <meta charset="utf-8" />
+        <title>تقرير محاسبي</title>
         <style>
-          body {
-            font-family: "Cairo", Arial, sans-serif;
-            padding: 30px;
-            direction: rtl;
-            color: #333;
-          }
-          h1 { text-align: center; color: #333; margin-bottom: 10px; }
-          .subtitle { text-align: center; color: #555; font-size: 14px; margin-bottom: 30px; }
-          .info-box {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            padding: 12px 20px;
-          }
-          .info-box div { font-size: 14px; color: #333; }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 25px;
-            border-radius: 8px;
-            overflow: hidden;
-          }
-          th {
-            background: #1976d2;
-            color: #fff;
-            padding: 12px;
-            font-size: 15px;
-          }
-          td {
-            border: 1px solid #ccc;
-            padding: 10px;
-            text-align: center;
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            font-size: 12px;
-            color: #888;
-          }
-          .currency-label {
-            font-weight: bold;
-            color: #1976d2;
-          }
+          body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#1f2937}
+          h1{margin:0 0 8px}
+          .meta{margin-bottom:18px;color:#4b5563}
+          .card{border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px}
+          table{width:100%;border-collapse:collapse}
+          th,td{border:1px solid #e5e7eb;padding:10px;text-align:center}
+          th{background:#f3f4f6}
+          .footer{margin-top:16px;color:#6b7280;font-size:12px}
         </style>
       </head>
       <body>
-        <h1>📊 تقرير المبيعات</h1>
-        <div class="subtitle">نظرة شاملة على الأداء المالي للفترة المحددة</div>
-        <div class="info-box">
-          <div><strong>من:</strong> ${startDateStr}</div>
-          <div><strong>إلى:</strong> ${endDateStr}</div>
+        <h1>التقرير المحاسبي</h1>
+        <div class="meta">الفلاتر: من ${filters.value.dateFrom} إلى ${filters.value.dateTo} | العملة: ${filters.value.currency}</div>
+        <div class="card">
+          <h3>ملخص المؤشرات</h3>
+          <table>
+            <thead>
+              <tr><th>العملة</th><th>إجمالي المبيعات</th><th>المدفوع</th><th>المتبقي</th><th>صافي الربح</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
         </div>
-        <table>
-          <tr>
-            <th>المقياس</th>
-            <th><span class="currency-label">${reportByCurrency.value.currencyLabel}</span></th>
-          </tr>
-          <tr>
-            <td>إجمالي المبيعات</td>
-            <td>${reportByCurrency.value.format(reportByCurrency.value.sales ?? 0)}</td>
-          </tr>
-          <tr>
-            <td>المدفوع</td>
-            <td>${reportByCurrency.value.format(reportByCurrency.value.paid ?? 0)}</td>
-          </tr>
-          <tr>
-            <td>إجمالي الخصومات</td>
-            <td>${reportByCurrency.value.format(reportByCurrency.value.discount ?? 0)}</td>
-          </tr>
-          <tr>
-            <td>إجمالي الفائدة</td>
-            <td>${reportByCurrency.value.format(reportByCurrency.value.interest ?? 0)}</td>
-          </tr>
-          <tr>
-            <td>متوسط البيع</td>
-            <td>${reportByCurrency.value.format(reportByCurrency.value.avgSale ?? 0)}</td>
-          </tr>
-          <tr>
-            <td>إجمالي الربح</td>
-            <td>${reportByCurrency.value.format(reportByCurrency.value.profit ?? 0)}</td>
-          </tr>
-          <tr>
-            <td>متوسط الربح</td>
-            <td>${reportByCurrency.value.format(reportByCurrency.value.avgProfit ?? 0)}</td>
-          </tr>
-          <tr>
-            <td>هامش الربح %</td>
-            <td>${reportByCurrency.value.profitMargin ?? 0}%</td>
-          </tr>
-          <tr>
-            <td>عدد الفواتير</td>
-            <td>${report.value.count ?? 0}</td>
-          </tr>
-          <tr>
-            <td>مبيعات مكتملة</td>
-            <td>${report.value.completedSales ?? 0}</td>
-          </tr>
-          <tr>
-            <td>مبيعات معلقة</td>
-            <td>${report.value.pendingSales ?? 0}</td>
-          </tr>
-          <tr>
-            <td>أقساط متأخرة</td>
-            <td>${report.value.overdueInstallments ?? 0}</td>
-          </tr>
-        </table>
-        <div class="footer">
-          <p>تم إنشاء هذا التقرير تلقائيًا بتاريخ ${new Date().toLocaleDateString('ar', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            numberingSystem: 'latn',
-          })}</p>
+        <div class="card">
+          <h3>ملاحظات</h3>
+          ${(d.meta?.notes || []).map((n) => `<div>- ${n}</div>`).join('')}
         </div>
+        <div class="footer">تم إنشاء التقرير بتاريخ ${new Date().toLocaleString('ar-IQ')}</div>
       </body>
-    </html>
-  `);
+      </html>`;
 
-  win.document.close();
-  win.print();
+    const win = window.open('', '_blank', 'width=1200,height=900');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  } finally {
+    exportingPdf.value = false;
+  }
+}
 
-  notificationStore.success('📄 تم تجهيز تقرير PDF للطباعة');
-};
+const lowStockHeaders = [
+  { title: 'المنتج', key: 'productName' },
+  { title: 'المخزن', key: 'warehouseName' },
+  { title: 'الكمية', key: 'quantity' },
+];
+const debtHeaders = [
+  { title: 'العميل', key: 'customerName' },
+  { title: 'المديونية', key: 'totalDebt' },
+];
+const payingHeaders = [
+  { title: 'العميل', key: 'customerName' },
+  { title: 'المدفوع', key: 'paid' },
+  { title: 'العملة', key: 'currency' },
+];
 
-onMounted(() => {
-  const load = async () => {
+const salesTrend = computed(() => ({
+  chart: { toolbar: { show: false } },
+  options: { xaxis: { categories: (report.value?.trends?.salesOverTime || []).map((r) => r.day) } },
+  series: [
+    { name: 'المبيعات', data: (report.value?.trends?.salesOverTime || []).map((r) => Number(r.total || 0)) },
+  ],
+}));
+
+const paymentsChart = computed(() => ({
+  options: { xaxis: { categories: (report.value?.trends?.paymentsByMethod || []).map((r) => `${r.method}-${r.currency}`) } },
+  series: [
+    { name: 'التحصيل', data: (report.value?.trends?.paymentsByMethod || []).map((r) => Number(r.total || 0)) },
+  ],
+}));
+
+const overdueChart = computed(() => ({
+  options: { xaxis: { categories: (report.value?.trends?.overdueInstallmentsTrend || []).map((r) => r.day) } },
+  series: [
+    { name: 'الأقساط المتأخرة', data: (report.value?.trends?.overdueInstallmentsTrend || []).map((r) => Number(r.overdueCount || 0)) },
+  ],
+}));
+
+onMounted(async () => {
+  await Promise.allSettled([
+    settingsStore.fetchCurrencySettings(),
+    showBranchFilter.value ? inventoryStore.fetchBranches() : Promise.resolve(),
+  ]);
+  const cached = localStorage.getItem('reports.filters');
+  if (cached) {
     try {
-      await settingsStore.fetchCurrencySettings();
-    } catch {}
-
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - 30);
-    // set start & end as yyyy-mm-dd, as expected by our UI and API
-    filters.value.startDate = start.toISOString().split('T')[0];
-    filters.value.endDate = end.toISOString().split('T')[0];
-    filters.value.currency = defaultCurrency.value;
-    fetchReport();
-  };
-
-  load();
+      filters.value = { ...filters.value, ...JSON.parse(cached) };
+    } catch {
+      // ignore broken cache
+    }
+  }
+  applyPreset();
+  await load();
 });
 </script>
+
+<style scoped>
+.reports-page {
+  direction: rtl;
+}
+.kpi-card {
+  border: 1px solid rgba(25, 118, 210, 0.2);
+}
+</style>

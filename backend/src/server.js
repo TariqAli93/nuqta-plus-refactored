@@ -36,6 +36,7 @@ import inventoryRoutes from './routes/inventoryRoutes.js';
 import warehouseTransferRoutes from './routes/warehouseTransferRoutes.js';
 import featureFlagsRoutes from './routes/featureFlagsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
 
 // Debug features - only in development
 const isProduction = config.server.env === 'production';
@@ -136,6 +137,7 @@ const start = async () => {
     await fastify.register(warehouseTransferRoutes, { prefix: '/api/warehouse-transfers' });
     await fastify.register(featureFlagsRoutes, { prefix: '/api/feature-flags' });
     await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
+    await fastify.register(reportRoutes, { prefix: '/api/reports' });
     // Only register debug routes in development
     if (!isProduction) {
       const { default: debugRoutes } = await import('./routes/debugRoutes.js');
