@@ -37,7 +37,34 @@ export default async function customerRoutes(fastify) {
     onRequest: [fastify.authenticate, fastify.authorize('customers:read')],
     handler: customerController.getById,
     schema: {
-      description: 'Get customer by ID',
+      description:
+        'Get customer by ID. Pass `?include=profile` to receive the full profile payload (financial summary, sales, installments, payments, debt timeline).',
+      tags: ['customers'],
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'number' },
+        },
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'string',
+            description: "Comma-separated includes. Supported: 'profile' (alias 'details').",
+          },
+        },
+      },
+    },
+  });
+
+  fastify.get('/:id/profile', {
+    onRequest: [fastify.authenticate, fastify.authorize('customers:read')],
+    handler: customerController.getProfile,
+    schema: {
+      description:
+        'Get the full customer profile: basic info, financial summary, sales/invoices, installments, payments, and debt timeline. Branch-scoped: non-global-admins only see customers active in their assigned branch.',
       tags: ['customers'],
       security: [{ bearerAuth: [] }],
       params: {

@@ -46,55 +46,67 @@ export const fluentBlueprint = {
       },
     },
   },
-    
-    defaults: {
-      VBtn: {
-        rounded: 'md',
-        elevation: 0,
-        style: {
-          textTransform: 'none',
-          letterSpacing: 'normal',
-          fontWeight: 600,
-        },
-      },
-      
-      VCard: {
-        rounded: 'lg',
-        elevation: 0,
-        border: 'sm',
-      },
-      
-      VTextField: {
-        rounded: 'md',
-        variant: 'outlined',
-        density: 'comfortable',
-        hideDetails: 'auto',
-      },
-      
-      VSelect: {
-        rounded: 'md',
-        variant: 'outlined',
-        density: 'comfortable',
-        hideDetails: 'auto',
-      },
-      
-      VDialog: {
-        rounded: 'xl',
-        elevation: 24,
-      },
-      
-      VList: {
-        rounded: 'lg',
-        density: 'comfortable',
-      },
-      
-      VListItem: {
-        rounded: 'md',
-      },
-      
-      VAppBar: {
-        elevation: 0,
-        border: 'b-sm',
+
+  defaults: {
+    VBtn: {
+      rounded: 'md',
+      elevation: 0,
+      style: {
+        textTransform: 'none',
+        letterSpacing: 'normal',
+        fontWeight: 600,
       },
     },
-  }
+
+    VCard: {
+      rounded: 'lg',
+      elevation: 0,
+      border: 'sm',
+    },
+
+    VTextField: {
+      rounded: 'md',
+      variant: 'outlined',
+      density: 'comfortable',
+      hideDetails: 'auto',
+    },
+
+    VSelect: {
+      rounded: 'md',
+      variant: 'outlined',
+      density: 'comfortable',
+      hideDetails: 'auto',
+    },
+
+    VDialog: {
+      rounded: 'xl',
+      elevation: 24,
+    },
+
+    VList: {
+      rounded: 'lg',
+      density: 'comfortable',
+    },
+
+    VListItem: {
+      rounded: 'md',
+    },
+
+    VAppBar: {
+      elevation: 0,
+      border: 'b-sm',
+    },
+    VTooltip: {
+      location: 'bottom',
+      theme: 'light',
+      disabled: false,
+      delay: 0,
+      offset: 0,
+      transition: 'slide-y-transition',
+      transitionProps: {
+        enterActiveClass: 'v-enter-active',
+        leaveActiveClass: 'v-leave-active',
+      },
+    },
+  },
+};

@@ -35,11 +35,27 @@ export class CustomerController {
   }
 
   async getById(request, reply) {
+    // Backward-compatible: opt-in to the full profile via `?include=profile`
+    // (or `?include=details`) without breaking existing consumers that just
+    // want the bare customer record.
+    const include = String(request.query?.include || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (include.includes('profile') || include.includes('details')) {
+      const profile = await customerService.getProfile(request.params.id, request.user);
+      return reply.send({ success: true, data: profile });
+    }
     const customer = await customerService.getById(request.params.id);
     return reply.send({
       success: true,
       data: customer,
     });
+  }
+
+  async getProfile(request, reply) {
+    const profile = await customerService.getProfile(request.params.id, request.user);
+    return reply.send({ success: true, data: profile });
   }
 
   async update(request, reply) {
