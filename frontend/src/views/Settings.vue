@@ -33,6 +33,10 @@
               <v-icon start>mdi-server-network</v-icon>
               <span>الاتصال</span>
             </v-tab>
+            <v-tab v-if="canManageMessaging" value="messaging">
+              <v-icon start>mdi-message-text</v-icon>
+              <span>الرسائل والإشعارات</span>
+            </v-tab>
             <v-tab value="backup">
               <v-icon start>mdi-backup-restore</v-icon>
               <span>إدارة النسخ الاحتياطي</span>
@@ -63,6 +67,10 @@
             <ServerConnectionInfo v-else />
           </v-window-item>
 
+          <v-window-item v-if="canManageMessaging" value="messaging" class="pa-0">
+            <MessagingSettings />
+          </v-window-item>
+
           <v-window-item value="backup" class="pa-0">
             <BackupManager />
           </v-window-item>
@@ -77,9 +85,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useSettingsStore } from '../stores/settings';
 import { useConnectionStore } from '@/stores/connection';
+import { useAuthStore } from '@/stores/auth';
 import { useRoute } from 'vue-router';
 import CompanyInfoForm from '@/components/settings/CompanyInfoForm.vue';
 import BackupManager from '@/components/settings/BackupManager.vue';
@@ -87,13 +96,20 @@ import CurrencySettings from '@/components/settings/CurrencySettings.vue';
 import LicenseStatus from '@/components/settings/LicenseStatus.vue';
 import ConnectionSettings from '@/components/settings/ConnectionSettings.vue';
 import ServerConnectionInfo from '@/components/settings/ServerConnectionInfo.vue';
+import MessagingSettings from '@/components/settings/MessagingSettings.vue';
 
 // Stores
 const settingsStore = useSettingsStore();
 const connectionStore = useConnectionStore();
+const authStore = useAuthStore();
 const route = useRoute();
 // State
 const activeTab = ref('company');
+
+const canManageMessaging = computed(() => {
+  const role = authStore.user?.role;
+  return role === 'admin' || role === 'global_admin';
+});
 
 onMounted(async () => {
   // Check for tab query parameter

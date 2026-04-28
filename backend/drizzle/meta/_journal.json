@@ -43,6 +43,13 @@
       "when": 1777400000000,
       "tag": "0005_credit_risk_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777500000000,
+      "tag": "0006_notifications",
+      "breakpoints": true
     }
   ]
 }

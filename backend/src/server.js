@@ -35,6 +35,7 @@ import warehouseRoutes from './routes/warehouseRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import warehouseTransferRoutes from './routes/warehouseTransferRoutes.js';
 import featureFlagsRoutes from './routes/featureFlagsRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 // Debug features - only in development
 const isProduction = config.server.env === 'production';
@@ -134,6 +135,7 @@ const start = async () => {
     await fastify.register(inventoryRoutes, { prefix: '/api/inventory' });
     await fastify.register(warehouseTransferRoutes, { prefix: '/api/warehouse-transfers' });
     await fastify.register(featureFlagsRoutes, { prefix: '/api/feature-flags' });
+    await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
     // Only register debug routes in development
     if (!isProduction) {
       const { default: debugRoutes } = await import('./routes/debugRoutes.js');
@@ -179,6 +181,17 @@ const start = async () => {
       registerDefaultJobs(fastify);
     } catch (error) {
       fastify.log.warn('Failed to register background jobs:', error.message);
+    }
+
+    // Notification queue worker — picks up pending notifications and dispatches
+    // them through the configured provider. The worker is a no-op when the
+    // notification system is disabled in settings, so it's always safe to start.
+    try {
+      const { startWorker } = await import('./services/notifications/notificationQueue.js');
+      const intervalMs = Number(process.env.NOTIFICATIONS_WORKER_INTERVAL_MS) || 10_000;
+      startWorker({ intervalMs, log: fastify.log });
+    } catch (error) {
+      fastify.log.warn('Failed to start notification worker:', error.message);
     }
 
     // Initialize ONNX credit scoring model (optional — falls back to rules if absent)

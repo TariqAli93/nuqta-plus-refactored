@@ -671,18 +671,24 @@ export class SaleService {
     const roundedRemainingAmount = roundByCurrency(sale.remainingAmount, currency);
     const paymentAmount = Math.min(roundedPaymentDataAmount, roundedRemainingAmount);
 
+    let insertedPaymentId = null;
+
     await withTransaction(async (tx) => {
-      await tx.insert(payments).values({
-        saleId,
-        customerId: sale.customerId,
-        amount: String(paymentAmount),
-        currency: paymentData.currency || sale.currency,
-        exchangeRate: String(paymentData.exchangeRate || sale.exchangeRate),
-        paymentMethod: paymentData.paymentMethod || 'cash',
-        paymentReference: paymentData.paymentReference || null,
-        notes: paymentData.notes,
-        createdBy: userId,
-      });
+      const [insertedPayment] = await tx
+        .insert(payments)
+        .values({
+          saleId,
+          customerId: sale.customerId,
+          amount: String(paymentAmount),
+          currency: paymentData.currency || sale.currency,
+          exchangeRate: String(paymentData.exchangeRate || sale.exchangeRate),
+          paymentMethod: paymentData.paymentMethod || 'cash',
+          paymentReference: paymentData.paymentReference || null,
+          notes: paymentData.notes,
+          createdBy: userId,
+        })
+        .returning({ id: payments.id });
+      insertedPaymentId = insertedPayment?.id || null;
 
       const roundedPaymentAmount = roundByCurrency(paymentAmount, currency);
       const newPaidAmount = roundByCurrency(sale.paidAmount + roundedPaymentAmount, currency);
@@ -740,6 +746,34 @@ export class SaleService {
     });
 
     alertBus.emit('alerts.changed', 'payment.added');
+
+    // Reload the sale + customer so we have the post-payment state for the
+    // confirmation message. Errors here MUST NOT roll back the payment — the
+    // notification system is optional, so we log and move on.
+    try {
+      const updatedSale = await this.getById(saleId);
+      if (updatedSale.customerId && insertedPaymentId) {
+        const db = await getDb();
+        const [c] = await db
+          .select()
+          .from(customers)
+          .where(eq(customers.id, updatedSale.customerId))
+          .limit(1);
+        if (c && c.phone) {
+          const notifications = await import('./notifications/notificationService.js');
+          await notifications.sendPaymentConfirmation({
+            sale: updatedSale,
+            payment: { id: insertedPaymentId, amount: paymentAmount },
+            customer: c,
+          });
+        }
+      }
+    } catch (err) {
+      // Non-fatal — payment is already committed.
+      // eslint-disable-next-line no-console
+      console.warn('[notifications] payment confirmation skipped:', err.message);
+    }
+
     return await this.getById(saleId);
   }
 
