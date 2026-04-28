@@ -453,12 +453,17 @@ export class SaleService {
 
   async getAll(filters = {}, actingUser = null) {
     const db = await getDb();
-    const { page = 1, limit = 10, status, startDate, endDate } = filters;
+    const { page = 1, limit = 10, status, startDate, endDate, paymentType } = filters;
 
     const conditions = [];
 
     if (status) {
       conditions.push(eq(sales.status, status));
+    }
+
+    // PosScreen passes paymentType='cash' to exclude installment drafts.
+    if (paymentType) {
+      conditions.push(eq(sales.paymentType, paymentType));
     }
 
     if (startDate) {
@@ -509,7 +514,9 @@ export class SaleService {
         createdAt: sales.createdAt,
         customer: customers.name,
         customerPhone: customers.phone,
+        customerId: sales.customerId,
         createdBy: users.username,
+        itemCount: sql`(SELECT COUNT(*) FROM ${saleItems} WHERE ${saleItems.saleId} = ${sales.id})`,
       })
       .from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
@@ -530,6 +537,7 @@ export class SaleService {
         total: n(row.total),
         paidAmount: n(row.paidAmount),
         remainingAmount: n(row.remainingAmount),
+        itemCount: Number(row.itemCount) || 0,
       })),
       meta: {
         total,
