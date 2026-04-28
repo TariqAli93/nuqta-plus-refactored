@@ -19,35 +19,39 @@ function contentDispositionFilename({ reportType, branchLabel, dateFrom, dateTo,
 
 function buildExcelXml(report) {
   const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const rows = Object.entries(report.kpisByCurrency || {}).map(([cur, v]) => `
-    <Row><Cell><Data ss:Type="String">${esc(cur)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.sales || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.totalPaid || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.unpaidBalances || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.netProfit || 0)}</Data></Cell></Row>`).join('');
+  const rows = Object.entries(report.kpisByCurrency || {})
+    .map(
+      ([cur, v]) => `
+    <Row><Cell><Data ss:Type="String">${esc(cur)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.sales || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.totalPaid || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.unpaidBalances || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.netProfit || 0)}</Data></Cell></Row>`
+    )
+    .join('');
 
   return `<?xml version="1.0"?>
   <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-    <Worksheet ss:Name="Summary"><Table>
-      <Row><Cell><Data ss:Type="String">Currency</Data></Cell><Cell><Data ss:Type="String">Sales</Data></Cell><Cell><Data ss:Type="String">Paid</Data></Cell><Cell><Data ss:Type="String">Unpaid</Data></Cell><Cell><Data ss:Type="String">Net Profit</Data></Cell></Row>
+    <Worksheet ss:Name="الملخص"><Table>
+      <Row><Cell><Data ss:Type="String">العملة</Data></Cell><Cell><Data ss:Type="String">إجمالي المبيعات</Data></Cell><Cell><Data ss:Type="String">المدفوع</Data></Cell><Cell><Data ss:Type="String">المتبقي</Data></Cell><Cell><Data ss:Type="String">صافي الربح</Data></Cell></Row>
       ${rows}
     </Table></Worksheet>
-    <Worksheet ss:Name="Sales"><Table>
-      <Row><Cell><Data ss:Type="String">Generated</Data></Cell><Cell><Data ss:Type="String">${esc(report.meta.generatedAt)}</Data></Cell></Row>
+    <Worksheet ss:Name="المبيعات"><Table>
+      <Row><Cell><Data ss:Type="String">تاريخ الإنشاء</Data></Cell><Cell><Data ss:Type="String">${esc(report.meta.generatedAt)}</Data></Cell></Row>
     </Table></Worksheet>
-    <Worksheet ss:Name="Payments"><Table><Row><Cell><Data ss:Type="String">Method groups are available in dashboard trends payload.</Data></Cell></Row></Table></Worksheet>
-    <Worksheet ss:Name="Installments"><Table><Row><Cell><Data ss:Type="String">Overdue, due, paid by currency included in summary.</Data></Cell></Row></Table></Worksheet>
-    <Worksheet ss:Name="Expenses"><Table><Row><Cell><Data ss:Type="String">Expenses module not available in schema.</Data></Cell></Row></Table></Worksheet>
-    <Worksheet ss:Name="Inventory"><Table><Row><Cell><Data ss:Type="String">Low/out of stock and stock value are in dashboard JSON.</Data></Cell></Row></Table></Worksheet>
-    <Worksheet ss:Name="Customers"><Table><Row><Cell><Data ss:Type="String">Debt and top paying customers in dashboard JSON.</Data></Cell></Row></Table></Worksheet>
+    <Worksheet ss:Name="المدفوعات"><Table><Row><Cell><Data ss:Type="String">تفاصيل طرق الدفع موجودة ضمن بيانات الاتجاهات.</Data></Cell></Row></Table></Worksheet>
+    <Worksheet ss:Name="الأقساط"><Table><Row><Cell><Data ss:Type="String">ملخص الأقساط (مستحقة/متأخرة/مسددة) حسب العملة.</Data></Cell></Row></Table></Worksheet>
+    <Worksheet ss:Name="المصاريف"><Table><Row><Cell><Data ss:Type="String">وحدة المصاريف غير متوفرة في المخطط الحالي.</Data></Cell></Row></Table></Worksheet>
+    <Worksheet ss:Name="المخزون"><Table><Row><Cell><Data ss:Type="String">القيمة المخزنية والحد الأدنى متاحة في التقرير.</Data></Cell></Row></Table></Worksheet>
+    <Worksheet ss:Name="العملاء"><Table><Row><Cell><Data ss:Type="String">ديون العملاء وأعلى العملاء سدادًا متاحة في التقرير.</Data></Cell></Row></Table></Worksheet>
   </Workbook>`;
 }
 
 function buildSimplePdf(report) {
   const lines = [
-    'Nuqta Plus Accounting Report',
-    `Generated: ${report.meta.generatedAt}`,
-    `Filters: ${JSON.stringify(report.meta.filters)}`,
+    'تقرير محاسبي - نقطة بلس',
+    `تاريخ الإنشاء: ${report.meta.generatedAt}`,
+    `الفلاتر: ${JSON.stringify(report.meta.filters)}`,
     '',
-    'KPI Summary',
+    'ملخص المؤشرات',
     ...Object.entries(report.kpisByCurrency || {}).flatMap(([cur, v]) => [
-      `${cur}: sales=${Number(v.sales || 0)} paid=${Number(v.totalPaid || 0)} unpaid=${Number(v.unpaidBalances || 0)} netProfit=${Number(v.netProfit || 0)}`,
+      `${cur}: المبيعات=${Number(v.sales || 0)} | المدفوع=${Number(v.totalPaid || 0)} | المتبقي=${Number(v.unpaidBalances || 0)} | صافي الربح=${Number(v.netProfit || 0)}`,
     ]),
   ];
 
