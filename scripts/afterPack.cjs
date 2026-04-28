@@ -54,6 +54,12 @@ const REQUIRED_AFTER_COPY = [
   // Drizzle migration files
   'drizzle',
 
+  // ── Credit-risk model artifacts ───────────────────────────────────────
+  // Both must ship — the runtime falls back to RULES_ONLY if either is
+  // missing, but a server installer that omits them is a packaging bug.
+  'models/credit-score.onnx',
+  'models/credit-score.meta.json',
+
   // ── Windows Service host (WinSW) ──────────────────────────────────────
   'NuqtaPlusBackend.exe',
   'NuqtaPlusBackend.xml',
@@ -144,15 +150,33 @@ exports.default = async function afterPack(context) {
     );
   }
 
-  // Informational: ONNX runtime and model (optional — not required for app to run)
+  // Informational: ONNX runtime (optional — runtime gracefully degrades
+  // to RULES_ONLY if missing).
   const ortPackaged = fs.existsSync(path.join(target, 'node_modules', 'onnxruntime-node'));
-  const modelPackaged = fs.existsSync(path.join(target, 'models', 'credit-score.onnx'));
   console.log(
     `[afterPack] ONNX runtime: ${ortPackaged ? '✓ present' : '– not present (rule-based fallback)'}`
   );
-  console.log(
-    `[afterPack] ONNX model:   ${modelPackaged ? '✓ present' : '– not present (rule-based fallback)'}`
-  );
+
+  // Cross-check the meta sidecar shape so a stale or corrupt file fails the
+  // build right here, not at customer install time.
+  try {
+    const metaAbs = path.join(target, 'models', 'credit-score.meta.json');
+    const meta = JSON.parse(fs.readFileSync(metaAbs, 'utf8'));
+    if (!Array.isArray(meta.feature_order) || !meta.feature_order.length) {
+      throw new Error('feature_order missing or empty');
+    }
+    if (!meta.version && !meta.model_version) {
+      throw new Error('version missing');
+    }
+    console.log(
+      `[afterPack] credit-score model: ✓ version=${meta.version ?? meta.model_version} ` +
+        `features=${meta.feature_order.length}`
+    );
+  } catch (err) {
+    throw new Error(
+      `[afterPack] credit-score.meta.json failed validation: ${err.message}`
+    );
+  }
 
   console.log('[afterPack] backend packaged and verified (PostgreSQL runtime)');
 };

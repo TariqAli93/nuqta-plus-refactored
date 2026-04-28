@@ -1,9 +1,17 @@
 import { getDb, getPool } from '../db.js';
-import { customers, sales, installments } from '../models/index.js';
+import {
+  customers,
+  sales,
+  installments,
+  creditScores,
+} from '../models/index.js';
 import { eq, sql } from 'drizzle-orm';
 import {
   isCreditScoreModelAvailable,
-  predictCreditScore,
+  assessCreditRisk,
+  getModelVersion,
+  getScoringMode,
+  SCORING_MODE,
 } from './onnxCreditScoringService.js';
 
 /**
@@ -109,6 +117,14 @@ async function gatherCustomerMetrics(customerId, db) {
       latePaid: sql`COALESCE(COUNT(CASE WHEN (${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate}) OR (${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE::text) THEN 1 END), 0)`,
       // average delay (days) on paid-late installments
       avgDelayDays: sql`COALESCE(AVG(CASE WHEN ${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate} THEN (${installments.paidDate}::date - ${installments.dueDate}::date) END), 0)`,
+      // worst-case delay observed — used by the hybrid engine for severity tiers
+      maxDelayDays: sql`COALESCE(MAX(CASE
+        WHEN ${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate}
+          THEN (${installments.paidDate}::date - ${installments.dueDate}::date)
+        WHEN ${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE::text
+          THEN (CURRENT_DATE - ${installments.dueDate}::date)
+        ELSE 0
+      END), 0)`,
     })
     .from(installments)
     .where(eq(installments.customerId, customerId));
@@ -118,8 +134,10 @@ async function gatherCustomerMetrics(customerId, db) {
     totalPaidOnTime: Number(installmentStats?.onTimePaid || 0),
     totalLatePayments: Number(installmentStats?.latePaid || 0),
     avgDelayDays: Number(installmentStats?.avgDelayDays || 0),
+    maxDelayDays: Number(installmentStats?.maxDelayDays || 0),
     currentOutstandingDebt: Number(saleStats?.outstandingDebt || 0),
     activeInstallmentsCount: Number(installmentStats?.activeInstallments || 0),
+    completedInstallmentsCount: Number(installmentStats?.totalPaidInstallments || 0),
     totalSalesValue: Number(saleStats?.totalSalesValue || 0),
   };
 }
@@ -199,22 +217,73 @@ export async function calculateCreditScore(customerId) {
   const db = await getDb();
   const metrics = await gatherCustomerMetrics(customerId, db);
 
-  // ONNX model first (skip for new customers — rule-based gives a sensible default)
-  if (isCreditScoreModelAvailable() && metrics.totalSalesOnInstallment > 0) {
+  // Hybrid scoring (model + rules) when usable. Skipped for empty-history
+  // customers — the rule engine has a calibrated default for them.
+  if (metrics.totalSalesOnInstallment > 0) {
     try {
-      const { score, riskProbability } = await predictCreditScore(metrics);
+      const r = await assessCreditRisk(metrics);
       return {
-        score,
-        recommendedLimit: computeRecommendedLimit(score, metrics),
-        riskProbability,
-        modelSource: 'onnx',
+        score: r.score,
+        recommendedLimit: computeRecommendedLimit(r.score, metrics),
+        riskProbability: r.risk_probability,
+        riskLevel: r.risk_level,
+        reasons: r.reasons,
+        modelSource: r.model_source === 'hybrid' ? 'onnx' : 'rule-based',
+        modelVersion: r.model_version,
       };
     } catch (err) {
-      console.error('[creditScoring] ONNX failed, using rules:', err.message);
+      console.error('[creditScoring] hybrid scoring failed, using rules:', err.message);
     }
   }
 
   return scoreFromMetrics(metrics);
+}
+
+/**
+ * Hybrid risk assessment + persistence into credit_scores. Read-only
+ * surface for the API: gathers metrics, scores them, logs the result, and
+ * returns a structured response with reasons and feature breakdown.
+ *
+ * Failure here NEVER throws — production safety. We return the assessment
+ * even if the audit insert fails, and we log the error.
+ */
+export async function assessAndLogCreditRisk(customerId) {
+  const db = await getDb();
+  let metrics;
+  try {
+    metrics = await gatherCustomerMetrics(customerId, db);
+  } catch (err) {
+    console.error('[creditScoring] gather metrics failed:', err.message);
+    return {
+      risk_probability: 0.5,
+      risk_level: 'MEDIUM',
+      reasons: [{ type: 'metrics_unavailable', impact: 'medium' }],
+      features_used: {},
+      scoring_mode: SCORING_MODE.RULES_ONLY,
+      model_version: getModelVersion(),
+      model_loaded: isCreditScoreModelAvailable(),
+      model_source: 'rules-only',
+      score: 50,
+    };
+  }
+
+  const result = await assessCreditRisk(metrics);
+
+  // Persistent inference log — fire-and-forget but caught.
+  try {
+    await db.insert(creditScores).values({
+      customerId,
+      modelVersion: result.model_version,
+      riskProbability: String(result.risk_probability),
+      riskLevel: result.risk_level,
+      reasons: result.reasons,
+      features: result.features_used,
+    });
+  } catch (err) {
+    console.error('[creditScoring] failed to persist score log:', err.message);
+  }
+
+  return result;
 }
 
 /**
@@ -307,6 +376,13 @@ export async function recalculateAllScores({
       avgDelayDays: sql`COALESCE(AVG(CASE WHEN ${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate} THEN (${installments.paidDate}::date - ${installments.dueDate}::date) END), 0)`.as(
         'avg_delay_days'
       ),
+      maxDelayDays: sql`COALESCE(MAX(CASE
+        WHEN ${installments.status} = 'paid' AND ${installments.paidDate} > ${installments.dueDate}
+          THEN (${installments.paidDate}::date - ${installments.dueDate}::date)
+        WHEN ${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE::text
+          THEN (CURRENT_DATE - ${installments.dueDate}::date)
+        ELSE 0
+      END), 0)`.as('max_delay_days'),
     })
     .from(installments)
     .groupBy(installments.customerId);
@@ -314,7 +390,7 @@ export async function recalculateAllScores({
   const saleMap = new Map(saleRows.map((r) => [r.customerId, r]));
   const instMap = new Map(instRows.map((r) => [r.customerId, r]));
 
-  // 4. Score all — ONNX model when available, rule-based fallback
+  // 4. Score all — hybrid (ONNX + rules) when usable, rule-only fallback
   const useOnnx = isCreditScoreModelAvailable();
   const updates = new Array(total);
   let onnxScored = 0;
@@ -328,18 +404,20 @@ export async function recalculateAllScores({
       totalPaidOnTime: Number(i.onTimePaid || 0),
       totalLatePayments: Number(i.latePaid || 0),
       avgDelayDays: Number(i.avgDelayDays || 0),
+      maxDelayDays: Number(i.maxDelayDays || 0),
       currentOutstandingDebt: Number(s.outstandingDebt || 0),
       activeInstallmentsCount: Number(i.activeInstallments || 0),
+      completedInstallmentsCount: Number(i.onTimePaid || 0) + Number(i.latePaid || 0),
       totalSalesValue: Number(s.totalSalesValue || 0),
     };
 
     let score, recommendedLimit;
-    if (useOnnx && metrics.totalSalesOnInstallment > 0) {
+    if (metrics.totalSalesOnInstallment > 0) {
       try {
-        const pred = await predictCreditScore(metrics);
-        score = pred.score;
+        const r = await assessCreditRisk(metrics);
+        score = r.score;
         recommendedLimit = computeRecommendedLimit(score, metrics);
-        onnxScored++;
+        if (useOnnx && r.model_source === 'hybrid') onnxScored++;
       } catch {
         ({ score, recommendedLimit } = scoreFromMetrics(metrics));
       }
@@ -428,5 +506,10 @@ export async function getCustomerCreditSnapshot(customerId) {
     totalDebt: row.totalDebt == null ? 0 : Number(row.totalDebt),
     riskLevel: getRiskLevel(creditScore),
     modelSource: isCreditScoreModelAvailable() ? 'onnx' : 'rule-based',
+    // Required production-safety contract — every credit-related API
+    // response advertises which engine produced the number.
+    scoring_mode: getScoringMode(),
+    model_version: getModelVersion(),
+    model_loaded: isCreditScoreModelAvailable(),
   };
 }

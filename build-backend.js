@@ -111,14 +111,67 @@ function installProductionDeps() {
   } else {
     warn('onnxruntime-node not found — ONNX credit scoring disabled, rule-based fallback active');
   }
+}
 
-  // Check for ONNX model file (optional — can be added later without code changes)
-  const modelFile = path.join(DIST_DIR, 'models', 'credit-score.onnx');
-  if (fs.existsSync(modelFile)) {
-    log('✓ ONNX model present: models/credit-score.onnx');
-  } else {
-    log('ℹ No ONNX model at models/credit-score.onnx — rule-based scoring will be used');
+// ── Credit-risk model artifacts ─────────────────────────────────────────
+// The model + meta sidecar must ship inside the backend bundle. They are
+// copied as part of copyBackendSource() (since they live under backend/models/),
+// so this step is purely a guard rail — fail loudly if either is missing,
+// non-empty, or has a meta.json shape that the runtime won't accept.
+function verifyCreditModelArtifacts() {
+  const modelPath = path.join(DIST_DIR, 'models', 'credit-score.onnx');
+  const metaPath = path.join(DIST_DIR, 'models', 'credit-score.meta.json');
+
+  // Allow opt-out only when explicitly building a no-model image (e.g. for
+  // CI smoke tests). Production builds MUST have both artifacts.
+  const optOut = process.env.SKIP_CREDIT_MODEL_CHECK === 'true';
+
+  if (!fs.existsSync(modelPath)) {
+    if (optOut) {
+      warn(`SKIP_CREDIT_MODEL_CHECK=true — shipping without ${path.relative(ROOT, modelPath)}`);
+      return;
+    }
+    fail(
+      `credit-score.onnx is missing at ${path.relative(ROOT, modelPath)}.\n` +
+        '  Run `pnpm run train:credit-model` (after exporting a dataset) ' +
+        'before building. Set SKIP_CREDIT_MODEL_CHECK=true to bypass for CI.'
+    );
   }
+  if (fs.statSync(modelPath).size === 0) {
+    fail(`credit-score.onnx is empty at ${path.relative(ROOT, modelPath)} — re-train.`);
+  }
+
+  if (!fs.existsSync(metaPath)) {
+    if (optOut) {
+      warn(`SKIP_CREDIT_MODEL_CHECK=true — shipping without ${path.relative(ROOT, metaPath)}`);
+      return;
+    }
+    fail(
+      `credit-score.meta.json is missing at ${path.relative(ROOT, metaPath)}.\n` +
+        '  The training script writes both files together — re-run train:credit-model.'
+    );
+  }
+
+  let meta;
+  try {
+    meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  } catch (err) {
+    fail(`credit-score.meta.json is not valid JSON: ${err.message}`);
+  }
+  if (!meta || typeof meta !== 'object') {
+    fail('credit-score.meta.json is not an object');
+  }
+  if (!Array.isArray(meta.feature_order) || meta.feature_order.length === 0) {
+    fail('credit-score.meta.json missing required field: feature_order');
+  }
+  if (!meta.version && !meta.model_version) {
+    fail('credit-score.meta.json missing required field: version');
+  }
+
+  log(
+    `✓ credit-risk model artifacts present (version=${meta.version ?? meta.model_version}, ` +
+      `features=${meta.feature_order.length})`
+  );
 }
 
 function bundleServiceHost() {
@@ -185,6 +238,7 @@ function main() {
   cleanDist();
   copyBackendSource();
   installProductionDeps();
+  verifyCreditModelArtifacts();
   bundleServiceHost();
 
   log('✅ Backend build complete — dist-backend is ready for packaging');

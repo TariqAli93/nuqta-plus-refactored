@@ -4,7 +4,13 @@ import {
   getCustomerCreditSnapshot,
   calculateAndPersistCreditScore,
   getRiskLevel,
+  assessAndLogCreditRisk,
 } from '../services/creditScoringService.js';
+import {
+  getScoringMode,
+  getModelVersion,
+  isCreditScoreModelAvailable,
+} from '../services/onnxCreditScoringService.js';
 
 const customerService = new CustomerService();
 
@@ -71,7 +77,28 @@ export class CustomerController {
     const result = await calculateAndPersistCreditScore(Number(request.params.id));
     return reply.send({
       success: true,
-      data: { ...result, riskLevel: getRiskLevel(result.score) },
+      data: {
+        ...result,
+        riskLevel: getRiskLevel(result.score),
+        scoring_mode: getScoringMode(),
+        model_version: result.modelVersion ?? getModelVersion(),
+        model_loaded: isCreditScoreModelAvailable(),
+      },
     });
+  }
+
+  /**
+   * Hybrid risk assessment for a single customer. Returns the structured
+   * explanation (probability + level + reasons + features) and persists the
+   * call into credit_scores for monitoring. Read-only — does NOT touch the
+   * cached customer.credit_score column (that's the daily job's responsibility).
+   */
+  async getCreditRiskAssessment(request, reply) {
+    const id = Number(request.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ success: false, message: 'Invalid customer id' });
+    }
+    const result = await assessAndLogCreditRisk(id);
+    return reply.send({ success: true, data: result });
   }
 }

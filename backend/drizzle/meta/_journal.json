@@ -36,6 +36,13 @@
       "when": 1777300000000,
       "tag": "0004_branch_default_warehouse",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777400000000,
+      "tag": "0005_credit_risk_tables",
+      "breakpoints": true
     }
   ]
 }
