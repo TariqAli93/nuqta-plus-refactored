@@ -208,7 +208,7 @@ export class CustomerService {
         active: sql`COALESCE(SUM(CASE WHEN ${installments.status} = 'pending' THEN 1 ELSE 0 END), 0)`.as('active'),
         completed: sql`COALESCE(SUM(CASE WHEN ${installments.status} = 'paid' THEN 1 ELSE 0 END), 0)`.as('completed'),
         cancelled: sql`COALESCE(SUM(CASE WHEN ${installments.status} = 'cancelled' THEN 1 ELSE 0 END), 0)`.as('cancelled'),
-        overdueAmount: sql`COALESCE(SUM(CASE WHEN ${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE THEN ${installments.remainingAmount}::numeric ELSE 0 END), 0)`.as('overdueAmount'),
+        overdueAmount: sql`COALESCE(SUM(CASE WHEN ${installments.status} = 'pending' AND ${installments.dueDate}::date < CURRENT_DATE THEN ${installments.remainingAmount}::numeric ELSE 0 END), 0)`.as('overdueAmount'),
       })
       .from(installments)
       .where(eq(installments.customerId, id));
@@ -250,7 +250,7 @@ export class CustomerService {
         status: installments.status,
         paidDate: installments.paidDate,
         overdueDays: sql`CASE
-          WHEN ${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE
+          WHEN ${installments.status} = 'pending' AND ${installments.dueDate}::date < CURRENT_DATE
             THEN (CURRENT_DATE - ${installments.dueDate}::date)
           ELSE 0
         END`.as('overdueDays'),
