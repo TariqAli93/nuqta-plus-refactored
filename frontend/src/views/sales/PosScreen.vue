@@ -31,22 +31,16 @@
         </div>
 
         <v-slide-group show-arrows>
+          <v-btn
+            class="flex items-center justify-between"
+            variant="elevated"
+            :color="selectedCategory === null ? 'primary' : 'secondary'"
+            density="default"
+            @click="selectedCategory = null"
+          >
+            <span>الكل</span>
+          </v-btn>
           <v-slide-group-item v-for="c in categoriesWithCounts" :key="c.id">
-            <v-btn
-              class="flex items-center justify-between"
-              variant="elevated"
-              :color="selectedCategory === null ? 'primary' : 'secondary'"
-              density="default"
-              @click="selectedCategory = null"
-            >
-              <v-spacer class="mx-1" />
-              <span>الكل</span>
-              <v-spacer class="mx-1" />
-              <v-chip size="small">
-                {{ c.count }}
-              </v-chip>
-            </v-btn>
-
             <v-divider vertical class="mx-2" />
 
             <v-btn
@@ -551,9 +545,7 @@ const authStore = useAuthStore();
 // Capability-driven UI: the "save as draft" button is only meaningful when
 // the draftInvoices module is enabled AND the user has the capability.
 // `canUse` collapses both checks into a single helper.
-const canUseDrafts = computed(() =>
-  authStore.canUse('draftInvoices', 'canUseDraftInvoices')
-);
+const canUseDrafts = computed(() => authStore.canUse('draftInvoices', 'canUseDraftInvoices'));
 const router = useRouter();
 const route = useRoute();
 

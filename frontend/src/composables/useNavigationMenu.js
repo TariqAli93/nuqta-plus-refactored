@@ -22,7 +22,7 @@ export function useNavigationMenu() {
 
   const sections = [
     {
-      title: 'الرئيسية',
+      title: 'لوحة التحكم',
       icon: 'mdi-view-dashboard',
       to: '/',
       permission: null,
@@ -45,9 +45,13 @@ export function useNavigationMenu() {
       to: '/operations',
       group: {
         items: [
-          
           { title: 'المبيعات', icon: 'mdi-cash-register', to: '/sales', permission: 'view:sales' },
-          { title: 'العملاء', icon: 'mdi-account-group', to: '/customers', permission: 'view:customers' },
+          {
+            title: 'العملاء',
+            icon: 'mdi-account-group',
+            to: '/customers',
+            permission: 'view:customers',
+          },
           {
             title: 'المنتجات',
             icon: 'mdi-package-variant',

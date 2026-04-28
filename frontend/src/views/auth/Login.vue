@@ -153,7 +153,7 @@ const handleLogin = async () => {
   error.value = '';
   try {
     await authStore.login(credentials.value);
-    router.push({ name: 'Dashboard' });
+    router.push({ path: '/sales/pos' });
   } catch (err) {
     error.value = err?.message || 'فشل تسجيل الدخول. تحقق من البيانات.';
   } finally {
