@@ -216,7 +216,7 @@ function saveBlob(blob, filename) {
 async function downloadExcel() {
   exportingExcel.value = true;
   try {
-    const blob = await reportStore.exportExcel({ ...filters.value, reportType: 'تقرير-محاسبي' });
+    const blob = await reportStore.exportExcel({ ...filters.value, reportType: 'accounting-report' });
     saveBlob(blob, 'تقرير-محاسبي.xls');
   } finally {
     exportingExcel.value = false;

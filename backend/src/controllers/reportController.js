@@ -14,7 +14,21 @@ function contentDispositionFilename({ reportType, branchLabel, dateFrom, dateTo,
   const from = dateFrom || 'start';
   const to = dateTo || 'end';
   const cur = currency || 'ALL';
-  return `${reportType}-${branchLabel}-${from}_${to}-${cur}.${ext}`.replace(/\s+/g, '_');
+  return `${reportType || 'report'}-${branchLabel}-${from}_${to}-${cur}.${ext}`.replace(/\s+/g, '_');
+}
+
+function sanitizeAsciiFilename(filename) {
+  const cleaned = String(filename || 'report')
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return cleaned || 'report';
+}
+
+function buildContentDisposition(filename) {
+  const ascii = sanitizeAsciiFilename(filename);
+  const encoded = encodeURIComponent(filename).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 function buildExcelXml(report) {
@@ -112,7 +126,7 @@ export class ReportController {
     const filename = contentDispositionFilename({ reportType: parsed.reportType, branchLabel, dateFrom: parsed.dateFrom, dateTo: parsed.dateTo, currency: parsed.currency, ext: 'xls' });
     const xml = buildExcelXml(report);
     reply.header('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
-    reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+    reply.header('Content-Disposition', buildContentDisposition(filename));
     return reply.send(xml);
   }
 
@@ -126,7 +140,7 @@ export class ReportController {
     const filename = contentDispositionFilename({ reportType: parsed.reportType, branchLabel, dateFrom: parsed.dateFrom, dateTo: parsed.dateTo, currency: parsed.currency, ext: 'pdf' });
     const pdf = buildSimplePdf(report);
     reply.header('Content-Type', 'application/pdf');
-    reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+    reply.header('Content-Disposition', buildContentDisposition(filename));
     return reply.send(pdf);
   }
 }
