@@ -30,15 +30,6 @@
     >
       PDF
     </v-btn>
-    <v-btn
-      color="primary"
-      variant="flat"
-      :disabled="disabled"
-      prepend-icon="mdi-printer"
-      @click="$emit('print')"
-    >
-      طباعة
-    </v-btn>
   </div>
 </template>
 

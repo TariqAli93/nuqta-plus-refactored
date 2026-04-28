@@ -91,7 +91,7 @@ defineProps({
 
 .empty-state-description {
   font-size: 0.875rem;
-  color: rgb(var(--v-theme-on-surface-variant));
+  color: rgb(var(--v-theme-on-surface));
   margin-bottom: 1.5rem;
   line-height: 1.5;
 }
