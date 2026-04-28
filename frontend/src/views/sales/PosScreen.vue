@@ -337,7 +337,7 @@
                 <input
                   :value="item.qty"
                   type="number"
-                  min="1"
+                  :min="1"
                   class="line__qty-input"
                   inputmode="numeric"
                   @click.stop
@@ -396,7 +396,7 @@
             <v-number-input
               v-model.number="saleDiscount.value"
               type="number"
-              min="0"
+              :min="0"
               variant="outlined"
               density="compact"
               hide-details
@@ -429,7 +429,7 @@
             <v-number-input
               v-model.number="tax.value"
               type="number"
-              min="0"
+              :min="0"
               variant="outlined"
               density="compact"
               hide-details
@@ -481,7 +481,7 @@
           <v-text-field
             v-model.number="lineEditDraft.discount"
             type="number"
-            min="0"
+            :min="0"
             label="خصم / وحدة"
             variant="outlined"
             density="comfortable"

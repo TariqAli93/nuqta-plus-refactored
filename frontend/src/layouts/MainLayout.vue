@@ -58,13 +58,7 @@
 
           <!-- Group items — each group has a unique `value` so v-list's
                `opened` model can toggle them independently. -->
-          <v-list-group
-            v-else
-            :value="item.title"
-            :ripple="false"
-            fluid
-            class="custom-group"
-          >
+          <v-list-group v-else :value="item.title" :ripple="false" fluid class="custom-group">
             <!-- Group activator -->
             <template #activator="{ props }">
               <v-list-item v-bind="props" variant="plain" :aria-label="item.title">
@@ -109,7 +103,7 @@
 
         <v-spacer></v-spacer>
 
-        <BranchWarehouseSelector v-if="!isMobile" class="mx-3" />
+        <BranchWarehouseSelector v-if="!isMobile" />
 
         <v-text-field
           v-if="!isMobile"
@@ -135,13 +129,7 @@
           </template>
         </v-text-field>
 
-        <v-btn
-          v-else
-          icon
-          variant="text"
-          aria-label="بحث سريع"
-          @click="openQuickSearch"
-        >
+        <v-btn v-else icon variant="text" aria-label="بحث سريع" @click="openQuickSearch">
           <v-icon>mdi-magnify</v-icon>
         </v-btn>
 
@@ -219,9 +207,7 @@
       <v-container>
         <v-row align="center" no-gutters>
           <v-col cols="12" md="12" class="flex justify-between items-center flex-wrap gap-2">
-            <div class="text-body-2">
-              <strong>نقطة بلس</strong> - نظام إدارة المبيعات
-            </div>
+            <div class="text-body-2"><strong>نقطة بلس</strong> - نظام إدارة المبيعات</div>
             <div class="text-body-2">كودل للحلول التقنية</div>
           </v-col>
         </v-row>
