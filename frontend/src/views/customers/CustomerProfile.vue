@@ -67,19 +67,20 @@
           <div class="d-flex flex-wrap gap-2">
             <v-btn
               v-if="profile.customer.phone"
-              :href="`tel:${profile.customer.phone}`"
               prepend-icon="mdi-phone"
               variant="tonal"
               color="success"
               size="small"
+              @click="showCustomerPhoneNumber = true"
             >
-              اتصال
+              اضهار رقم الهاتف
             </v-btn>
 
             <!-- WhatsApp message button — gated by notification settings ---- -->
             <v-tooltip
               v-if="canSendCustomerMessages"
               location="bottom"
+              :text="whatsAppDisabledReason"
               :disabled="canSendWhatsApp"
             >
               <template #activator="{ props: tooltipProps }">
@@ -108,16 +109,6 @@
               size="small"
             >
               تعديل
-            </v-btn>
-            <v-btn
-              v-if="canCreateNewSale"
-              :to="`/sales/new?customerId=${profile.customer.id}`"
-              prepend-icon="mdi-cart-plus"
-              variant="elevated"
-              color="primary"
-              size="small"
-            >
-              فاتورة جديدة
             </v-btn>
           </div>
         </div>
@@ -149,9 +140,7 @@
 
       <!-- Per-currency breakdown when more than one currency is in play --- -->
       <v-card v-if="profile.meta?.multiCurrency" class="mb-4" variant="outlined">
-        <v-card-title class="text-subtitle-1">
-          الأرصدة حسب العملة
-        </v-card-title>
+        <v-card-title class="text-subtitle-1"> الأرصدة حسب العملة </v-card-title>
         <v-divider />
         <v-table density="compact">
           <thead>
@@ -165,7 +154,9 @@
           </thead>
           <tbody>
             <tr v-for="row in profile.summary.byCurrency" :key="row.currency">
-              <td><v-chip size="x-small">{{ row.currency }}</v-chip></td>
+              <td>
+                <v-chip size="x-small">{{ row.currency }}</v-chip>
+              </td>
               <td class="text-end">{{ formatCurrency(row.totalPurchases, row.currency) }}</td>
               <td class="text-end text-success">
                 {{ formatCurrency(row.totalPaid, row.currency) }}
@@ -361,17 +352,6 @@
                   {{ installmentLabel(item) }}
                 </v-chip>
               </template>
-              <template #[`item.actions`]="{ item }">
-                <v-btn
-                  v-if="item.saleId && canAddPayment && item.remainingAmount > 0"
-                  size="x-small"
-                  variant="tonal"
-                  color="primary"
-                  :to="`/sales/${item.saleId}`"
-                >
-                  تسجيل دفعة
-                </v-btn>
-              </template>
             </v-data-table>
           </v-window-item>
 
@@ -461,10 +441,15 @@
                       {{ formatCurrency(row.credit, row.currency) }}
                     </span>
                   </td>
-                  <td class="text-end font-weight-bold" :class="row.balance > 0 ? 'text-error' : 'text-success'">
+                  <td
+                    class="text-end font-weight-bold"
+                    :class="row.balance > 0 ? 'text-error' : 'text-success'"
+                  >
                     {{ formatCurrency(row.balance, row.currency) }}
                   </td>
-                  <td><v-chip size="x-small">{{ row.currency }}</v-chip></td>
+                  <td>
+                    <v-chip size="x-small">{{ row.currency }}</v-chip>
+                  </td>
                 </tr>
               </tbody>
             </v-table>
@@ -483,12 +468,8 @@
         <v-divider />
         <v-card-text class="pt-4">
           <div class="text-body-2 mb-3">
-            <p class="mb-1">
-              <strong>العميل:</strong> {{ profile?.customer?.name }}
-            </p>
-            <p class="mb-0">
-              <strong>الهاتف:</strong> {{ profile?.customer?.phone }}
-            </p>
+            <p class="mb-1"><strong>العميل:</strong> {{ profile?.customer?.name }}</p>
+            <p class="mb-0"><strong>الهاتف:</strong> {{ profile?.customer?.phone }}</p>
           </div>
           <v-textarea
             v-model="messageBody"
@@ -527,6 +508,32 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- show customer phone number -->
+    <v-dialog v-model="showCustomerPhoneNumber" max-width="560" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-spacer />
+          <v-btn
+            variant="text"
+            icon="mdi-close"
+            size="small"
+            color="error"
+            @click="showCustomerPhoneNumber = false"
+          >
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+
+        <v-divider />
+
+        <v-card-text class="pt-4 text-center">
+          <v-btn block color="success" size="large" variant="tonal" @click="copyPhoneNumber">
+            <span>{{ profile?.customer?.phone }}</span>
+          </v-btn>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -557,17 +564,21 @@ const loading = ref(true);
 const error = ref(null);
 const profile = ref(null);
 const activeTab = ref('overview');
+const showCustomerPhoneNumber = ref(false);
 
 const userRole = computed(() => authStore.user?.role);
 const canEdit = computed(() => uiAccess.canManageCustomers(userRole.value));
-const canCreateNewSale = computed(() => uiAccess.canCreateSales(userRole.value));
 const canAddPayment = computed(() => uiAccess.canAddPayments(userRole.value));
 // Only admins / managers with settings:manage can read messaging settings,
 // so only they can know whether the WhatsApp gate is satisfied. Hide the
 // button for everyone else.
-const canSendCustomerMessages = computed(() =>
-  uiAccess.canManageSettings(userRole.value)
-);
+const canSendCustomerMessages = computed(() => uiAccess.canManageSettings(userRole.value));
+
+const copyPhoneNumber = () => {
+  navigator.clipboard.writeText(profile.value?.customer?.phone);
+  toastStore.success('تم النسخ بنجاح');
+  showCustomerPhoneNumber.value = false;
+};
 
 const errorTitle = computed(() => {
   if (error.value?.statusCode === 404) return 'العميل غير موجود';

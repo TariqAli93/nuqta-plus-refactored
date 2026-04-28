@@ -17,7 +17,7 @@
  * the network call throws.
  */
 
-const DEFAULT_BASE_URL = 'https://api.bulksmsiraq.com';
+const DEFAULT_BASE_URL = 'https://gateway.standingtech.com/api/v4/sms/send';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 function getBaseUrl() {
