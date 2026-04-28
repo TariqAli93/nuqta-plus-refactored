@@ -246,10 +246,23 @@
           <span class="cart__title-text">السلة</span>
           <span v-if="itemCount > 0" class="cart__badge">{{ itemCount }}</span>
         </div>
-        <button v-if="items.length > 0" type="button" class="cart__clear" @click="confirmClear">
-          <v-icon size="14">mdi-delete-sweep-outline</v-icon>
-          تفريغ
-        </button>
+        <div class="cart__header-actions">
+          <button
+            v-if="canUseDrafts"
+            type="button"
+            class="cart__drafts-btn"
+            :title="`المسودات${currentDraftId ? ' — مفتوحة #' + currentDraftId : ''}`"
+            @click="openDraftsList"
+          >
+            <v-icon size="14">mdi-archive-clock-outline</v-icon>
+            المسودات
+            <span v-if="currentDraftId" class="cart__drafts-flag">#{{ currentDraftId }}</span>
+          </button>
+          <button v-if="items.length > 0" type="button" class="cart__clear" @click="confirmClear">
+            <v-icon size="14">mdi-delete-sweep-outline</v-icon>
+            تفريغ
+          </button>
+        </div>
       </header>
 
       <!-- Lines -->
@@ -514,6 +527,136 @@
       cancel-text="إلغاء"
       @confirm="clear"
     />
+
+    <!-- Drafts list dialog (POS-compatible drafts only) -->
+    <v-dialog v-model="draftsOpen" max-width="640" scrollable>
+      <v-card class="drafts bg-surface-soft rounded-lg">
+        <v-card-title class="drafts__title">
+          <div class="drafts__title-row">
+            <v-icon size="22">mdi-archive-clock-outline</v-icon>
+            <span>المسودات (POS)</span>
+            <v-spacer />
+            <v-btn
+              icon="mdi-refresh"
+              variant="text"
+              size="small"
+              :loading="draftsLoading"
+              :title="'تحديث'"
+              @click="loadDrafts"
+            />
+          </div>
+          <v-text-field
+            v-model="draftsSearch"
+            density="comfortable"
+            variant="outlined"
+            hide-details
+            clearable
+            placeholder="بحث برقم الفاتورة أو اسم العميل"
+            prepend-inner-icon="mdi-magnify"
+            class="mt-2"
+          />
+        </v-card-title>
+
+        <v-card-text class="drafts__body">
+          <div v-if="draftsLoading && draftList.length === 0" class="drafts__state">
+            <v-progress-circular indeterminate color="primary" />
+            <div class="text-medium-emphasis mt-2">جاري التحميل…</div>
+          </div>
+          <div v-else-if="draftsError" class="drafts__state">
+            <v-icon size="40" color="error">mdi-alert-circle-outline</v-icon>
+            <div class="text-body-2 mt-2">{{ draftsError }}</div>
+            <v-btn class="mt-3" variant="outlined" size="small" @click="loadDrafts">
+              <v-icon start size="16">mdi-refresh</v-icon>
+              إعادة المحاولة
+            </v-btn>
+          </div>
+          <div v-else-if="filteredDrafts.length === 0" class="drafts__state">
+            <v-icon size="40" class="text-medium-emphasis">mdi-tray-remove</v-icon>
+            <div class="text-body-2 text-medium-emphasis mt-2">
+              {{ draftsSearch ? 'لا توجد مسودات مطابقة' : 'لا توجد مسودات للـ POS' }}
+            </div>
+          </div>
+          <ul v-else class="drafts__list">
+            <li v-for="d in filteredDrafts" :key="d.id" class="drafts__item">
+              <div class="drafts__item-main">
+                <div class="drafts__item-head">
+                  <span class="drafts__item-inv">{{ d.invoiceNumber || `#${d.id}` }}</span>
+                  <span class="drafts__item-total">
+                    {{ formatMoney(d.total, d.currency) }}
+                  </span>
+                </div>
+                <div class="drafts__item-meta">
+                  <span class="drafts__item-meta-cell">
+                    <v-icon size="14">mdi-account-outline</v-icon>
+                    {{ d.customer || 'بدون عميل' }}
+                  </span>
+                  <span class="drafts__item-meta-cell">
+                    <v-icon size="14">mdi-package-variant-closed</v-icon>
+                    {{ d.itemCount ?? 0 }} عنصر
+                  </span>
+                  <span class="drafts__item-meta-cell">
+                    <v-icon size="14">mdi-clock-outline</v-icon>
+                    {{ formatDraftDate(d.createdAt) }}
+                  </span>
+                </div>
+              </div>
+              <div class="drafts__item-actions">
+                <v-btn
+                  variant="flat"
+                  color="primary"
+                  size="small"
+                  :loading="continuingDraftId === d.id"
+                  :disabled="!!continuingDraftId || deletingDraftId === d.id"
+                  @click="continueDraft(d)"
+                >
+                  <v-icon start size="16">mdi-play-circle-outline</v-icon>
+                  متابعة
+                </v-btn>
+                <v-btn
+                  variant="text"
+                  color="error"
+                  size="small"
+                  :loading="deletingDraftId === d.id"
+                  :disabled="!!continuingDraftId || !!deletingDraftId"
+                  @click="askDeleteDraft(d)"
+                >
+                  <v-icon size="18">mdi-trash-can-outline</v-icon>
+                </v-btn>
+              </div>
+            </li>
+          </ul>
+        </v-card-text>
+
+        <v-card-actions class="drafts__actions">
+          <v-spacer />
+          <v-btn variant="text" @click="draftsOpen = false">إغلاق</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <ConfirmDialog
+      v-model="draftDeleteDialog"
+      title="حذف المسودة"
+      :message="
+        draftPendingDelete
+          ? `هل تريد حذف المسودة ${draftPendingDelete.invoiceNumber || '#' + draftPendingDelete.id}؟`
+          : ''
+      "
+      type="warning"
+      confirm-text="حذف"
+      cancel-text="إلغاء"
+      @confirm="confirmDeleteDraft"
+    />
+
+    <ConfirmDialog
+      v-model="draftReplaceDialog"
+      title="استبدال السلة الحالية"
+      message="السلة الحالية تحتوي عناصر. هل تريد تفريغها وتحميل المسودة؟"
+      type="warning"
+      confirm-text="استبدال"
+      cancel-text="إلغاء"
+      @confirm="confirmReplaceWithDraft"
+    />
   </div>
 </template>
 
@@ -532,6 +675,7 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import { usePosCart } from '@/composables/usePosCart';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import api from '@/plugins/axios';
 
 // ── Stores ──────────────────────────────────────────────────────────────────
 const productStore = useProductStore();
@@ -619,6 +763,21 @@ watch(
 const lineEditOpen = ref(false);
 const lineEditItem = ref(null);
 const lineEditDraft = reactive({ discount: 0, note: '' });
+
+// ── Drafts list dialog state ─────────────────────────────────────────────
+// Listing is restricted to POS-compatible (cash) drafts; installment drafts
+// stay handled by NewSale.vue and never appear here.
+const draftsOpen = ref(false);
+const draftsLoading = ref(false);
+const draftsError = ref('');
+const draftList = ref([]);
+const draftsSearch = ref('');
+const continuingDraftId = ref(null);
+const deletingDraftId = ref(null);
+const draftDeleteDialog = ref(false);
+const draftPendingDelete = ref(null);
+const draftReplaceDialog = ref(false);
+const draftPendingLoad = ref(null);
 
 // Flash effect: highlights a cart line when it's newly added or its qty grew —
 // gives the cashier positive confirmation that their click/scan landed.
@@ -940,6 +1099,153 @@ const onHold = async () => {
 
 const confirmClear = () => {
   clearDialog.value = true;
+};
+
+// ── Drafts list ──────────────────────────────────────────────────────────
+// Display only cash/POS drafts. Installment drafts stay in NewSale.vue.
+// Listing endpoint already enforces branch scope server-side, so we do not
+// need to refilter by branch in the client.
+const isPosCompatibleDraft = (d) => {
+  if (!d || d.status !== 'draft') return false;
+  const pt = String(d.paymentType || '').toLowerCase();
+  return pt === '' || pt === 'cash';
+};
+
+const loadDrafts = async () => {
+  if (!canUseDrafts.value) return;
+  draftsLoading.value = true;
+  draftsError.value = '';
+  try {
+    // Hit the API directly — the saleStore.fetch helper would clobber the
+    // shared `sales` cache and surface a toast that we already render inline.
+    const response = await api.get('/sales', {
+      params: { status: 'draft', paymentType: 'cash', limit: 100 },
+    });
+    const rows = response?.data || [];
+    // Defensive: re-filter client-side in case the backend returns
+    // mixed/installment drafts (older data, race with API change, etc.).
+    draftList.value = rows.filter(isPosCompatibleDraft);
+  } catch (err) {
+    // The axios interceptor rejects with either the response body or the
+    // original error, so check both shapes for a usable message.
+    console.error('Failed to load drafts:', err);
+    draftsError.value =
+      err?.message || err?.response?.data?.message || 'فشل تحميل المسودات';
+    draftList.value = [];
+  } finally {
+    draftsLoading.value = false;
+  }
+};
+
+const openDraftsList = () => {
+  draftsOpen.value = true;
+  loadDrafts();
+};
+
+const filteredDrafts = computed(() => {
+  const q = (draftsSearch.value || '').trim().toLowerCase();
+  if (!q) return draftList.value;
+  return draftList.value.filter((d) => {
+    const inv = String(d.invoiceNumber || '').toLowerCase();
+    const cus = String(d.customer || '').toLowerCase();
+    return inv.includes(q) || cus.includes(q);
+  });
+});
+
+const formatDraftDate = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('en-GB', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+// Hydrate the cart from a draft already loaded in the list. Mirrors the
+// route-driven `hydrateFromDraft`, but works in-place from the modal so the
+// cashier can switch drafts without leaving the screen.
+const applyDraftToCart = async (draftRow) => {
+  continuingDraftId.value = draftRow.id;
+  try {
+    const response = await saleStore.fetchSale(draftRow.id);
+    const draft = response?.data?.data || response?.data || response || null;
+    if (!draft || draft.status !== 'draft') {
+      notify.error('المسودة غير صالحة');
+      return;
+    }
+    if (!isPosCompatibleDraft(draft)) {
+      // Installment / non-cash drafts must be edited in NewSale.
+      notify.warning('هذه المسودة بالأقساط — تابعها من شاشة بيع جديد');
+      return;
+    }
+    // Restore payment method/reference if available on the draft items list
+    // record (paymentMethod is not on the sale row itself but the composable
+    // restores cart-level fields; method defaults to 'cash' which matches POS).
+    const ok = loadDraft(draft, products.value);
+    if (!ok) {
+      notify.error('تعذر تحميل المسودة');
+      return;
+    }
+    currentDraftId.value = draft.id;
+    paidInput.value = '';
+    notify.success('تم تحميل المسودة');
+    draftsOpen.value = false;
+  } catch (err) {
+    console.error('Failed to continue draft:', err);
+    notify.error(err?.response?.data?.message || 'فشل تحميل المسودة');
+  } finally {
+    continuingDraftId.value = null;
+  }
+};
+
+const continueDraft = (draftRow) => {
+  if (!isPosCompatibleDraft(draftRow)) {
+    notify.warning('مسودة غير متوافقة مع الـ POS');
+    return;
+  }
+  if (items.length > 0) {
+    // Don't silently clobber an in-progress cart — confirm first.
+    draftPendingLoad.value = draftRow;
+    draftReplaceDialog.value = true;
+    return;
+  }
+  applyDraftToCart(draftRow);
+};
+
+const confirmReplaceWithDraft = async () => {
+  const target = draftPendingLoad.value;
+  draftPendingLoad.value = null;
+  if (!target) return;
+  // Reset cart state first so loadDraft (which bails on non-empty cart) runs.
+  clear();
+  paidInput.value = '';
+  await applyDraftToCart(target);
+};
+
+const askDeleteDraft = (draftRow) => {
+  draftPendingDelete.value = draftRow;
+  draftDeleteDialog.value = true;
+};
+
+const confirmDeleteDraft = async () => {
+  const target = draftPendingDelete.value;
+  draftPendingDelete.value = null;
+  if (!target) return;
+  deletingDraftId.value = target.id;
+  try {
+    await saleStore.removeSale(target.id);
+    draftList.value = draftList.value.filter((d) => d.id !== target.id);
+    if (currentDraftId.value === target.id) currentDraftId.value = null;
+  } catch (err) {
+    console.error('Failed to delete draft:', err);
+    // saleStore already surfaces a notification for delete failures.
+  } finally {
+    deletingDraftId.value = null;
+  }
 };
 
 // ── Keyboard: global shortcuts ─────────────────────────────────────────────
@@ -2282,6 +2588,148 @@ onUnmounted(() => {
 
 .line-edit__actions {
   padding: var(--pos-space-2) var(--pos-space-4) var(--pos-space-3);
+}
+
+/* ══════════════════ Cart header secondary actions ══════════════════ */
+.cart__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cart__drafts-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--pos-border);
+  background: transparent;
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--pos-primary-soft);
+    border-color: var(--pos-primary);
+  }
+}
+
+.cart__drafts-flag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--pos-primary);
+  color: rgb(var(--v-theme-on-primary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════ Drafts dialog ══════════════════ */
+.drafts__title {
+  padding: 12px 16px 4px !important;
+}
+
+.drafts__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.drafts__body {
+  padding: 4px 16px 12px !important;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.drafts__state {
+  padding: 32px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.drafts__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.drafts__item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius-md);
+  background: var(--pos-surface);
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    border-color: var(--pos-primary);
+    background: var(--pos-primary-soft);
+  }
+}
+
+.drafts__item-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.drafts__item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.drafts__item-inv {
+  font-weight: 800;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drafts__item-total {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--pos-primary);
+  white-space: nowrap;
+}
+
+.drafts__item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: rgba(var(--v-theme-on-surface), 0.75);
+}
+
+.drafts__item-meta-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drafts__item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drafts__actions {
+  padding: 4px 12px 12px !important;
 }
 
 /* ══════════════════ Overlays ══════════════════ */
