@@ -6,7 +6,7 @@ import {
   users,
   branches,
 } from '../models/index.js';
-import { eq, and, desc, gte, lte, sql, isNull } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, sql } from 'drizzle-orm';
 import { NotFoundError, ValidationError, AuthorizationError } from '../utils/errors.js';
 import { isGlobalAdmin, branchFilterFor } from './scopeService.js';
 import auditService from './auditService.js';
@@ -145,21 +145,36 @@ export class CashSessionService {
   }
 
   /**
-   * Find the user's open session for a branch, or null.
-   * Used to enforce "open session required" before a cash POS sale.
+   * Find the user's open session that should cover a sale in `branchId`, or
+   * null. Used to enforce "open session required" before a cash POS sale.
+   *
+   * Matching rules (in order):
+   *   1. Exact branch match — open session whose branch_id === branchId.
+   *   2. Branch-less session — open session with branch_id IS NULL (global
+   *      admins / single-branch deployments where the cashier didn't pin a
+   *      branch when opening the shift).
+   *   3. Any open session for the user — defensive fallback so a user with
+   *      a single shift open in a different branch still gets matched
+   *      instead of silently rejecting valid sales. The partial unique
+   *      index prevents the user from having more than one open session per
+   *      branch, so this is safe.
    */
   async findOpenSession(userId, branchId) {
     if (!userId) return null;
     const db = await getDb();
-    const conds = [eq(cashSessions.userId, userId), eq(cashSessions.status, 'open')];
-    conds.push(branchId ? eq(cashSessions.branchId, branchId) : isNull(cashSessions.branchId));
-    const [row] = await db
+    const openSessions = await db
       .select()
       .from(cashSessions)
-      .where(and(...conds))
-      .orderBy(desc(cashSessions.openedAt))
-      .limit(1);
-    return row || null;
+      .where(and(eq(cashSessions.userId, userId), eq(cashSessions.status, 'open')))
+      .orderBy(desc(cashSessions.openedAt));
+    if (openSessions.length === 0) return null;
+    if (branchId) {
+      const exact = openSessions.find((s) => Number(s.branchId) === Number(branchId));
+      if (exact) return exact;
+    }
+    const branchless = openSessions.find((s) => s.branchId === null);
+    if (branchless) return branchless;
+    return openSessions[0];
   }
 
   /**
@@ -168,8 +183,11 @@ export class CashSessionService {
    */
   async getCurrent(user) {
     if (!user?.id) return null;
-    const branchId = user.assignedBranchId || null;
-    const session = await this.findOpenSession(user.id, branchId);
+    // Pass the user's assigned branch as a hint, but findOpenSession falls
+    // back to a branch-less session (or any open session) — important for
+    // global admins / unassigned users whose sale.branchId is resolved
+    // dynamically and may not match the session.branchId stored at open.
+    const session = await this.findOpenSession(user.id, user.assignedBranchId || null);
     if (!session) return null;
     const summary = await this.computeSessionTotals(session.id);
     const expected = round4(n(session.openingCash) + summary.cashIn - summary.cashOut);
