@@ -248,17 +248,20 @@ export async function createNotification({
 export async function sendPaymentConfirmation({ sale, payment, customer }) {
   if (!sale || !payment) return null;
   if (!customer || !customer.phone) return null;
+
+  const formatedPhone = normalizeIraqPhone(customer.phone);
+  if (!formatedPhone) return null;
   return createNotification({
     type: TYPES.PAYMENT_CONFIRMATION,
     channel: 'auto',
-    recipientPhone: customer.phone,
+    recipientPhone: formatedPhone,
     customerId: customer.id,
     saleId: sale.id,
     paymentId: payment.id,
     template: TEMPLATE_KEYS.PAYMENT_CONFIRMATION,
     payload: {
       customerName: customer.name,
-      customerPhone: customer.phone,
+      customerPhone: formatedPhone,
       paidAmount: formatAmount(payment.amount, sale.currency),
       remainingAmount: formatAmount(sale.remainingAmount, sale.currency),
       invoiceNumber: sale.invoiceNumber,

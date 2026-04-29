@@ -38,13 +38,7 @@
       {{ store.error }}
     </v-alert>
 
-    <v-alert
-      v-if="!form.enabled"
-      type="info"
-      variant="tonal"
-      class="mb-4"
-      icon="mdi-power-off"
-    >
+    <v-alert v-if="!form.enabled" type="info" variant="tonal" class="mb-4" icon="mdi-power-off">
       نظام الرسائل معطّل. فعّله من الزر أعلاه لعرض إعدادات المزوّد والقنوات والميزات.
     </v-alert>
 
@@ -216,162 +210,17 @@
                 inset
               />
             </v-col>
-            <v-col cols="12" md="6">
-              <v-switch
-                v-model="form.singleCustomerMessagingEnabled"
-                label="السماح بإرسال رسالة لعميل واحد"
-                color="primary"
-                density="comfortable"
-                hide-details
-                inset
-              />
-            </v-col>
-            <v-col cols="12" md="6">
-              <v-switch
-                v-model="form.bulkMessagingEnabled"
-                label="السماح بالإرسال الجماعي"
-                color="primary"
-                density="comfortable"
-                hide-details
-                inset
-              />
-            </v-col>
           </v-row>
-          <div class="d-flex justify-end mt-2">
-            <v-btn color="primary" prepend-icon="mdi-content-save" :loading="store.isSaving" @click="saveAll">
+          <div class="d-flex justify-start mt-2">
+            <v-btn
+              color="primary"
+              prepend-icon="mdi-content-save"
+              :loading="store.isSaving"
+              @click="saveAll"
+            >
               حفظ التغييرات
             </v-btn>
           </div>
-        </v-card-text>
-      </v-card>
-
-      <!-- Manual sending -->
-      <v-card class="mb-4" elevation="1">
-        <v-card-title class="d-flex align-center">
-          <v-icon class="me-2" color="primary">mdi-send</v-icon>
-          إرسال يدوي
-        </v-card-title>
-        <v-card-text>
-          <v-tabs v-model="manualTab" color="primary" density="compact">
-            <v-tab value="single" :disabled="!form.singleCustomerMessagingEnabled">
-              <v-icon start>mdi-account</v-icon>
-              عميل واحد
-            </v-tab>
-            <v-tab value="bulk" :disabled="!form.bulkMessagingEnabled">
-              <v-icon start>mdi-account-group</v-icon>
-              جميع العملاء
-            </v-tab>
-          </v-tabs>
-
-          <v-window v-model="manualTab" class="mt-3">
-            <v-window-item value="single">
-              <v-row>
-                <v-col cols="12" md="6">
-                  <v-autocomplete
-                    v-model="manual.customerId"
-                    :items="customerItems"
-                    item-title="label"
-                    item-value="id"
-                    label="العميل *"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-account"
-                    :loading="customerStore.loading"
-                    no-data-text="لا يوجد عميل مطابق"
-                  />
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-select
-                    v-model="manual.channel"
-                    :items="channelItems"
-                    item-title="text"
-                    item-value="value"
-                    label="القناة"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-arrow-decision"
-                  />
-                </v-col>
-                <v-col cols="12">
-                  <v-textarea
-                    v-model="manual.message"
-                    label="الرسالة *"
-                    variant="outlined"
-                    density="comfortable"
-                    rows="3"
-                    auto-grow
-                    counter="1600"
-                    :rules="[(v) => !!v || 'الرسالة مطلوبة']"
-                  />
-                </v-col>
-              </v-row>
-              <div class="d-flex flex-wrap ga-2 justify-end">
-                <v-btn variant="outlined" color="info" :disabled="!manual.message" prepend-icon="mdi-eye" @click="previewVisible = true">
-                  معاينة
-                </v-btn>
-                <v-btn
-                  color="primary"
-                  prepend-icon="mdi-send"
-                  :disabled="!manual.customerId || !manual.message"
-                  :loading="sending"
-                  @click="sendSingle"
-                >
-                  إرسال
-                </v-btn>
-              </div>
-            </v-window-item>
-
-            <v-window-item value="bulk">
-              <v-row>
-                <v-col cols="12" md="6">
-                  <v-select
-                    v-model="manual.channel"
-                    :items="channelItems"
-                    item-title="text"
-                    item-value="value"
-                    label="القناة"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-arrow-decision"
-                  />
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-checkbox
-                    v-model="manual.all"
-                    label="إرسال إلى جميع العملاء النشطين"
-                    color="primary"
-                    density="comfortable"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="12">
-                  <v-textarea
-                    v-model="manual.message"
-                    label="الرسالة *"
-                    variant="outlined"
-                    density="comfortable"
-                    rows="3"
-                    auto-grow
-                    counter="1600"
-                  />
-                </v-col>
-              </v-row>
-              <div class="d-flex flex-wrap ga-2 justify-end">
-                <v-btn variant="outlined" color="info" :disabled="!manual.message" prepend-icon="mdi-eye" @click="previewVisible = true">
-                  معاينة
-                </v-btn>
-                <v-btn
-                  color="primary"
-                  prepend-icon="mdi-send-circle"
-                  :disabled="!manual.message || !manual.all"
-                  :loading="sending"
-                  @click="sendBulk"
-                >
-                  إرسال للجميع
-                </v-btn>
-              </div>
-            </v-window-item>
-          </v-window>
         </v-card-text>
       </v-card>
 
@@ -508,9 +357,7 @@ const form = reactive({
 const apiKeyInput = ref('');
 const showApiKey = ref(false);
 const previewVisible = ref(false);
-const sending = ref(false);
 
-const manualTab = ref('single');
 const manual = reactive({
   customerId: null,
   all: false,
@@ -522,12 +369,12 @@ const apiKeyLabel = computed(() =>
   store.settings.apiKeyConfigured ? 'مفتاح API الجديد (اتركه فارغاً للإبقاء)' : 'مفتاح API *'
 );
 const apiKeyPlaceholder = computed(() =>
-  store.settings.apiKeyConfigured ? store.settings.apiKeyMasked || '••••••••' : 'أدخل مفتاح BulkSMSIraq'
+  store.settings.apiKeyConfigured
+    ? store.settings.apiKeyMasked || '••••••••'
+    : 'أدخل مفتاح BulkSMSIraq'
 );
 
-const canTest = computed(
-  () => !!apiKeyInput.value || store.settings.apiKeyConfigured
-);
+const canTest = computed(() => !!apiKeyInput.value || store.settings.apiKeyConfigured);
 
 const providerItems = computed(() =>
   store.availableProviders.map((p) => ({ text: providerLabel(p), value: p }))
@@ -538,13 +385,6 @@ const channelItems = [
   { text: 'SMS', value: 'sms' },
   { text: 'WhatsApp', value: 'whatsapp' },
 ];
-
-const customerItems = computed(() =>
-  (customerStore.customers || []).map((c) => ({
-    id: c.id,
-    label: `${c.name}${c.phone ? ' — ' + c.phone : ''}`,
-  }))
-);
 
 function providerLabel(p) {
   if (p === 'bulksmsiraq') return 'BulkSMSIraq';
@@ -655,40 +495,6 @@ async function testConnection() {
     await store.testConnection(apiKeyInput.value || null);
   } catch {
     /* handled by store */
-  }
-}
-
-async function sendSingle() {
-  sending.value = true;
-  try {
-    await store.sendCustomerMessage({
-      customerId: manual.customerId,
-      channel: manual.channel,
-      message: manual.message,
-    });
-    manual.message = '';
-    await store.fetchLogs();
-  } catch {
-    /* handled */
-  } finally {
-    sending.value = false;
-  }
-}
-
-async function sendBulk() {
-  sending.value = true;
-  try {
-    await store.sendBulkMessage({
-      all: manual.all,
-      channel: manual.channel,
-      message: manual.message,
-    });
-    manual.message = '';
-    await store.fetchLogs();
-  } catch {
-    /* handled */
-  } finally {
-    sending.value = false;
   }
 }
 

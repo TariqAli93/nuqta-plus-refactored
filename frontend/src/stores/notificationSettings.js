@@ -106,6 +106,7 @@ export const useNotificationSettingsStore = defineStore('notificationSettings', 
     } catch (err) {
       error.value = err.response?.data?.message || err.message;
       notificationStore.error(error.value || 'فشل اختبار الاتصال');
+      console.log(err);
       // Still refresh to surface lastTestStatus
       try {
         await fetchSettings();

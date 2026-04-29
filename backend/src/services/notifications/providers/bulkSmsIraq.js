@@ -85,20 +85,16 @@ export function createBulkSmsIraqAdapter({ apiKey, senderId } = {}) {
 
   async function send({ phone, message, channel }) {
     const url = `${base}${channel === 'whatsapp' ? '/whatsapp/send' : '/sms/send'}`;
-    const body = {
-      recipient: phone,
-      sender_id: senderId,
-      type: channel === 'whatsapp' ? 'whatsapp' : 'plain',
-      message,
-      lang: 'ar',
-    };
-
-    console.log(body);
-    console.log(url);
-    console.log(apiKey);
 
     try {
-      const res = await postJson(url, { apiKey, ...body });
+      const res = await postJson(url, {
+        apiKey,
+        phone,
+        message,
+        senderId,
+        channel,
+        lang: 'ar',
+      });
       const ok = isSuccessBody(res.body, res.ok);
       return {
         ok,
@@ -132,8 +128,9 @@ export function createBulkSmsIraqAdapter({ apiKey, senderId } = {}) {
      */
     async testConnection() {
       try {
-        const res = await postJson(base, {
-          apiKey: apiKey,
+        const url = `${base}/sms/send`;
+        const res = await postJson(url, {
+          apiKey,
           phone: '9647824082356',
           message: 'Test message',
           senderId: 'Nuqta Plus',
