@@ -494,6 +494,29 @@ export const notificationLogs = pgTable(
   })
 );
 
+// ── Idempotency Keys ──────────────────────────────────────────────────────
+// Cache of (Idempotency-Key, scope) → cached response. Lets the API safely
+// dedupe double-click / retry storms on POST/DELETE endpoints that would
+// otherwise create duplicate rows (sale create, add payment, remove payment,
+// complete draft). The scope segregates keys per-endpoint so a key reused
+// across logical operations doesn't collide.
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    id: serial('id').primaryKey(),
+    key: text('key').notNull(),
+    scope: text('scope').notNull(),
+    userId: integer('user_id'),
+    response: jsonb('response'),
+    statusCode: integer('status_code').notNull().default(200),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    keyScopeIdx: uniqueIndex('idempotency_keys_key_scope_unique').on(t.key, t.scope),
+    createdAtIdx: index('idempotency_keys_created_at_idx').on(t.createdAt),
+  })
+);
+
 // ── Audit Log ─────────────────────────────────────────────────────────────
 // New table for tracking all important user actions.
 export const auditLog = pgTable('audit_log', {
