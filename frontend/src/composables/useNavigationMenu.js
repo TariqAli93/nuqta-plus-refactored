@@ -70,6 +70,13 @@ export function useNavigationMenu() {
             to: '/reports',
             permission: 'view:reports',
           },
+          {
+            title: 'الورديات',
+            icon: 'mdi-cash-register',
+            to: '/sales/shifts',
+            permission: 'view:sales',
+            feature: 'pos',
+          },
         ],
       },
     },

@@ -320,3 +320,23 @@ export const settingsSchema = z.object({
   value: z.any(),
 });
 
+// ── Cash session / shift closing schemas ──────────────────────────────────
+export const openCashSessionSchema = z.object({
+  openingCash: z
+    .number({ invalid_type_error: 'Opening cash must be a number' })
+    .nonnegative('Opening cash cannot be negative')
+    .default(0),
+  currency: z.enum(['USD', 'IQD']).default('USD'),
+  notes: z.string().nullable().optional(),
+  // branchId is only honoured for global admins; the service falls back to
+  // the user's assigned branch otherwise.
+  branchId: z.number().int().positive().nullable().optional(),
+});
+
+export const closeCashSessionSchema = z.object({
+  closingCash: z
+    .number({ invalid_type_error: 'Closing cash must be a number' })
+    .nonnegative('Closing cash cannot be negative'),
+  notes: z.string().nullable().optional(),
+});
+

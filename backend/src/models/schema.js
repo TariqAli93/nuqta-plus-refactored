@@ -197,6 +197,40 @@ export const warehouseTransfers = pgTable(
   })
 );
 
+// ── Cash Sessions ─────────────────────────────────────────────────────────
+// Tracks per-cashier cash drawer accountability for POS shifts. A user can
+// have only one open session per branch at a time. Cash POS sales are blocked
+// unless an open session exists, and POS cash sales/payments are linked back
+// to the session via `cashSessionId` on the sales/payments tables. Closed
+// sessions are immutable (no edits to opening_cash, closing_cash, variance).
+export const cashSessions = pgTable(
+  'cash_sessions',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id),
+    branchId: integer('branch_id').references(() => branches.id),
+    openingCash: numeric('opening_cash', { precision: 18, scale: 4 }).notNull().default('0'),
+    closingCash: numeric('closing_cash', { precision: 18, scale: 4 }),
+    expectedCash: numeric('expected_cash', { precision: 18, scale: 4 }),
+    variance: numeric('variance', { precision: 18, scale: 4 }),
+    currency: text('currency').notNull().default('USD'),
+    status: text('status').notNull().default('open'), // 'open' | 'closed'
+    notes: text('notes'),
+    openedAt: timestamp('opened_at').defaultNow(),
+    closedAt: timestamp('closed_at'),
+  },
+  (t) => ({
+    userIdx: index('cash_sessions_user_idx').on(t.userId),
+    branchIdx: index('cash_sessions_branch_idx').on(t.branchId),
+    statusIdx: index('cash_sessions_status_idx').on(t.status),
+    // Partial unique "one open session per user/branch" index is created in
+    // the SQL migration (0008_cash_sessions.sql) — Drizzle's schema DSL only
+    // describes the table here; the migration is the source of truth.
+  })
+);
+
 // ── Sales ─────────────────────────────────────────────────────────────────
 export const sales = pgTable('sales', {
   id: serial('id').primaryKey(),
@@ -204,6 +238,7 @@ export const sales = pgTable('sales', {
   customerId: integer('customer_id').references(() => customers.id),
   branchId: integer('branch_id').references(() => branches.id),
   warehouseId: integer('warehouse_id').references(() => warehouses.id),
+  cashSessionId: integer('cash_session_id').references(() => cashSessions.id),
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
   discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),
   tax: numeric('tax', { precision: 18, scale: 4 }).default('0'),
@@ -252,6 +287,7 @@ export const payments = pgTable('payments', {
   paymentMethod: text('payment_method').notNull(),
   paymentReference: text('payment_reference'),
   paymentDate: timestamp('payment_date').defaultNow(),
+  cashSessionId: integer('cash_session_id').references(() => cashSessions.id),
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow(),
   createdBy: integer('created_by').references(() => users.id),

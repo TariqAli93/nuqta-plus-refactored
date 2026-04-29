@@ -3,6 +3,56 @@
     <!-- ═══════════════════ Products zone ═══════════════════ -->
     <section class="pos__products" aria-label="المنتجات">
       <header class="products__toolbar">
+        <!-- Shift status / open / close shift bar -->
+        <div class="shift-bar">
+          <template v-if="hasOpenSession">
+            <v-chip
+              size="small"
+              color="success"
+              variant="flat"
+              prepend-icon="mdi-cash-register"
+            >
+              وردية #{{ currentSession.id }} — افتتاحي
+              {{ formatMoney(currentSession.openingCash, currentSession.currency) }}
+            </v-chip>
+            <span class="shift-bar__metric">
+              <v-icon size="14">mdi-cash-plus</v-icon>
+              مستلم: {{ formatMoney(currentSession.cashIn, currentSession.currency) }}
+            </span>
+            <span class="shift-bar__metric shift-bar__metric--strong">
+              <v-icon size="14">mdi-scale-balance</v-icon>
+              متوقع: {{ formatMoney(currentSession.expectedCash, currentSession.currency) }}
+            </span>
+            <v-spacer />
+            <v-btn
+              size="small"
+              variant="outlined"
+              color="warning"
+              :loading="shiftLoading"
+              @click="requestCloseShift"
+            >
+              <v-icon start size="16">mdi-cash-lock</v-icon>
+              إغلاق الوردية
+            </v-btn>
+          </template>
+          <template v-else>
+            <v-chip size="small" color="warning" variant="flat" prepend-icon="mdi-alert-circle-outline">
+              لا توجد وردية مفتوحة
+            </v-chip>
+            <v-spacer />
+            <v-btn
+              size="small"
+              color="primary"
+              variant="elevated"
+              :loading="shiftLoading"
+              @click="openShiftDialog = true"
+            >
+              <v-icon start size="16">mdi-cash-register</v-icon>
+              فتح وردية
+            </v-btn>
+          </template>
+        </div>
+
         <div class="toolbar__row">
           <v-text-field
             ref="searchRef"
@@ -657,6 +707,23 @@
       cancel-text="إلغاء"
       @confirm="confirmReplaceWithDraft"
     />
+
+    <!-- Cash session: open/close shift dialogs -->
+    <OpenShiftDialog
+      v-model="openShiftDialog"
+      :loading="shiftLoading"
+      :default-currency="currency"
+      :cancelable="hasOpenSession"
+      @confirm="onOpenShiftConfirm"
+      @cancel="openShiftDialog = false"
+    />
+    <CloseShiftDialog
+      v-model="closeShiftDialog"
+      :loading="shiftLoading"
+      :session="currentSession"
+      @confirm="onCloseShiftConfirm"
+      @cancel="closeShiftDialog = false"
+    />
   </div>
 </template>
 
@@ -673,8 +740,11 @@ import {
   useSaleStore,
 } from '@/stores';
 import { useAuthStore } from '@/stores/auth';
+import { useCashSessionStore } from '@/stores/cashSession';
 import { usePosCart } from '@/composables/usePosCart';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import OpenShiftDialog from '@/components/cashSession/OpenShiftDialog.vue';
+import CloseShiftDialog from '@/components/cashSession/CloseShiftDialog.vue';
 import api from '@/plugins/axios';
 
 // ── Stores ──────────────────────────────────────────────────────────────────
@@ -685,6 +755,7 @@ const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
 const saleStore = useSaleStore();
 const authStore = useAuthStore();
+const cashSessionStore = useCashSessionStore();
 
 // Capability-driven UI: the "save as draft" button is only meaningful when
 // the draftInvoices module is enabled AND the user has the capability.
@@ -696,6 +767,55 @@ const route = useRoute();
 // Tracks the draft id we resumed from, so checkout can complete it instead of
 // creating a brand-new sale (and leaving the draft orphaned in the DB).
 const currentDraftId = ref(null);
+
+// ── Cash session / shift state ─────────────────────────────────────────────
+// `currentSession` mirrors the open shift for the acting user. The POS cannot
+// record cash sales without one, so we surface explicit Open/Close dialogs.
+const openShiftDialog = ref(false);
+const closeShiftDialog = ref(false);
+const shiftLoading = ref(false);
+const currentSession = computed(() => cashSessionStore.current);
+const hasOpenSession = computed(() => cashSessionStore.hasOpenSession);
+
+const refreshCurrentSession = async () => {
+  await cashSessionStore.fetchCurrent();
+};
+
+const onOpenShiftConfirm = async ({ openingCash, currency: cur, notes }) => {
+  shiftLoading.value = true;
+  try {
+    await cashSessionStore.openSession({ openingCash, currency: cur, notes });
+    openShiftDialog.value = false;
+  } catch {
+    /* notification already raised by the store */
+  } finally {
+    shiftLoading.value = false;
+  }
+};
+
+const onCloseShiftConfirm = async ({ closingCash, notes }) => {
+  if (!currentSession.value?.id) return;
+  shiftLoading.value = true;
+  try {
+    await cashSessionStore.closeSession(currentSession.value.id, { closingCash, notes });
+    closeShiftDialog.value = false;
+  } catch {
+    /* notification already raised by the store */
+  } finally {
+    shiftLoading.value = false;
+  }
+};
+
+const requestCloseShift = async () => {
+  // Refresh totals before showing the dialog so the cashier sees the latest
+  // expectedCash figure (newly recorded sales since they last looked).
+  await refreshCurrentSession();
+  if (!hasOpenSession.value) {
+    openShiftDialog.value = true;
+    return;
+  }
+  closeShiftDialog.value = true;
+};
 
 const { mobile: isMobile } = useDisplay();
 
@@ -1047,6 +1167,15 @@ const saveLineEdit = () => {
 
 const checkout = async () => {
   if (!canSubmit.value) return;
+  // Cash POS sales require an open shift. Card sales bypass this check —
+  // the drawer doesn't move on a card transaction.
+  const isCashSale =
+    payment.method === 'cash' && Number(payment.paidAmount) > 0;
+  if (isCashSale && !hasOpenSession.value) {
+    notify.warning('افتح وردية قبل تسجيل بيع نقدي');
+    openShiftDialog.value = true;
+    return;
+  }
   try {
     const sale = await submit();
     // If we resumed a draft, remove it now that a real sale has replaced it.
@@ -1059,6 +1188,8 @@ const checkout = async () => {
       }
       currentDraftId.value = null;
     }
+    // Refresh shift totals so the header chip reflects the new cash-in.
+    refreshCurrentSession();
     if (sale?.id) {
       notify.success('تم حفظ البيع بنجاح');
       clear();
@@ -1340,6 +1471,13 @@ onMounted(async () => {
 
   await hydrateFromDraft();
 
+  // Cash session: load the user's open shift; if there isn't one, surface
+  // the Open Shift dialog before the cashier tries to ring up a sale.
+  await refreshCurrentSession();
+  if (!hasOpenSession.value) {
+    openShiftDialog.value = true;
+  }
+
   window.addEventListener('keydown', onKeydown);
   nextTick(() => barcodeRef.value?.focus?.());
 });
@@ -1443,6 +1581,30 @@ onUnmounted(() => {
   gap: var(--pos-space-2);
   align-items: center;
   margin-bottom: var(--pos-space-2);
+}
+
+.shift-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--pos-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--pos-space-2);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  font-size: 0.85rem;
+
+  &__metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: rgba(var(--v-theme-on-surface), 0.7);
+    font-variant-numeric: tabular-nums;
+    &--strong {
+      color: rgb(var(--v-theme-on-surface));
+      font-weight: 600;
+    }
+  }
 }
 
 .barcode-input {

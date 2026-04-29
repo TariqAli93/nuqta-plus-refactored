@@ -46,6 +46,13 @@ const PERMISSION_MATRIX = {
   'sales:delete': MANAGER,
   'sales.override_credit_limit': MANAGER,
 
+  // ── Cash sessions / shift closing ────────────────────────────────────────
+  // Any cashier (and above) opens / closes their own shift. Reading a session
+  // is allowed for everyone in scope so reports and audit screens render.
+  'cash_sessions:open': CASHIER,
+  'cash_sessions:close': CASHIER,
+  'cash_sessions:read': ALL,
+
   // ── Products ─────────────────────────────────────────────────────────────
   'products:create': MANAGER,
   'products:read': ALL,
