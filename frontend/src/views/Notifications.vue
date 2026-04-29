@@ -195,6 +195,9 @@
         </v-card-text>
       </v-card>
     </div>
+
+    <!-- Outbound notification failures (admin only) -->
+    <NotificationFailures v-if="authStore.isGlobalAdmin" class="mt-4" />
   </div>
 </template>
 
@@ -202,9 +205,12 @@
 import { computed, onMounted } from 'vue';
 import { useAlertStore } from '@/stores/alert';
 import { useNotificationStore } from '@/stores/notification';
+import { useAuthStore } from '@/stores/auth';
+import NotificationFailures from '@/components/notifications/NotificationFailures.vue';
 
 const alertStore = useAlertStore();
 const notificationStore = useNotificationStore();
+const authStore = useAuthStore();
 
 const hasUnreadAlerts = computed(() => {
   let hasUnread = false;
