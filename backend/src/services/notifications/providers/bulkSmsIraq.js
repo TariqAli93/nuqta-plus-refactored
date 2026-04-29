@@ -17,7 +17,7 @@
  * the network call throws.
  */
 
-const DEFAULT_BASE_URL = 'https://gateway.standingtech.com/api/v4/sms/send';
+const DEFAULT_BASE_URL = 'https://gateway.standingtech.com/api/v5/';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 function getBaseUrl() {
@@ -28,20 +28,23 @@ async function postJson(url, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: 'Bearer ' + body.apiKey || '',
+      },
+      body: JSON.stringify({
+        recipient: body.phone,
+        sender_id: body.senderId,
+        type: body.channel === 'whatsapp' ? 'whatsapp' : 'sms',
+        message: body.message,
+        lang: 'ar',
+      }),
       signal: controller.signal,
     });
-    const text = await res.text();
-    let parsed = null;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = { raw: text };
-    }
-    return { httpStatus: res.status, ok: res.ok, body: parsed };
+    return { httpStatus: response.status, ok: response.ok, body: await response.json() };
   } finally {
     clearTimeout(timer);
   }
@@ -81,17 +84,21 @@ export function createBulkSmsIraqAdapter({ apiKey, senderId } = {}) {
   const base = getBaseUrl();
 
   async function send({ phone, message, channel }) {
-    const path = channel === 'whatsapp' ? '/whatsapp/send' : '/sms/send';
-    const url = `${base}${path}`;
+    const url = `${base}${channel === 'whatsapp' ? '/whatsapp/send' : '/sms/send'}`;
     const body = {
-      api_key: apiKey,
-      to: phone,
+      recipient: phone,
+      sender_id: senderId,
+      type: channel === 'whatsapp' ? 'whatsapp' : 'plain',
       message,
-      ...(senderId ? { sender: senderId } : {}),
+      lang: 'ar',
     };
 
+    console.log(body);
+    console.log(url);
+    console.log(apiKey);
+
     try {
-      const res = await postJson(url, body);
+      const res = await postJson(url, { apiKey, ...body });
       const ok = isSuccessBody(res.body, res.ok);
       return {
         ok,
@@ -124,9 +131,15 @@ export function createBulkSmsIraqAdapter({ apiKey, senderId } = {}) {
      * error on bad keys and succeeds cheaply on good ones.
      */
     async testConnection() {
-      const url = `${base}/account/balance`;
       try {
-        const res = await postJson(url, { api_key: apiKey });
+        const res = await postJson(base, {
+          apiKey: apiKey,
+          phone: '9647824082356',
+          message: 'Test message',
+          senderId: 'Nuqta Plus',
+          channel: 'sms',
+          lang: 'ar',
+        });
         const ok = isSuccessBody(res.body, res.ok);
         return {
           ok,

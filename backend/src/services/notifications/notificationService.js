@@ -116,7 +116,15 @@ async function insertNotificationRow(values) {
   return row;
 }
 
-async function insertLog({ notificationId, provider, channel, requestPayload, responsePayload, status, error }) {
+async function insertLog({
+  notificationId,
+  provider,
+  channel,
+  requestPayload,
+  responsePayload,
+  status,
+  error,
+}) {
   const db = await getDb();
   // Strip the api_key from any stored request payload — defence in depth so
   // the secret never leaks even if an admin downloads the audit table.
@@ -278,7 +286,10 @@ export async function sendOverdueInstallmentReminder({ installment, sale, custom
     payload: {
       customerName: customer.name,
       customerPhone: customer.phone,
-      amount: formatAmount(installment.remainingAmount ?? installment.dueAmount, installment.currency),
+      amount: formatAmount(
+        installment.remainingAmount ?? installment.dueAmount,
+        installment.currency
+      ),
       dueDate: installment.dueDate,
       invoiceNumber: sale?.invoiceNumber || '',
       installmentNumber: String(installment.installmentNumber || ''),
@@ -299,7 +310,12 @@ function formatAmount(amount, currency) {
  * Enqueue a freeform message to a single customer. Sanitizes the body
  * (trims length, strips control chars) before persisting.
  */
-export async function sendCustomerMessage({ customerId, channel = 'auto', message, createdBy = null }) {
+export async function sendCustomerMessage({
+  customerId,
+  channel = 'auto',
+  message,
+  createdBy = null,
+}) {
   if (!message || !String(message).trim()) {
     throw new ValidationError('Message body is required');
   }
@@ -344,10 +360,7 @@ export async function sendBulkCustomerMessage({
   const db = await getDb();
   let rows;
   if (all) {
-    rows = await db
-      .select()
-      .from(customers)
-      .where(eq(customers.isActive, true));
+    rows = await db.select().from(customers).where(eq(customers.isActive, true));
   } else {
     if (!Array.isArray(customerIds) || customerIds.length === 0) {
       throw new ValidationError('customerIds is required when not sending to all');
@@ -576,9 +589,7 @@ export async function markSent(id, { resolvedChannel }) {
 
 export async function markFailed(id, { error, attempts, willRetry }) {
   const db = await getDb();
-  const next = willRetry
-    ? new Date(Date.now() + backoffDelayMs(attempts))
-    : null;
+  const next = willRetry ? new Date(Date.now() + backoffDelayMs(attempts)) : null;
   await db
     .update(notifications)
     .set({
