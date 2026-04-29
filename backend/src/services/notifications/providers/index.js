@@ -17,12 +17,12 @@ export function listProviders() {
  * Build a provider adapter for the given settings row. Returns `null` when
  * the configured provider is unknown or the API key is missing.
  */
-export function createAdapter({ provider, apiKey, senderId } = {}) {
+export function createAdapter({ provider, apiKey, senderId, phoneFormat } = {}) {
   if (!provider || !apiKey) return null;
   const factory = REGISTRY[provider];
   if (!factory) return null;
   try {
-    return factory({ apiKey, senderId });
+    return factory({ apiKey, senderId, phoneFormat });
   } catch {
     return null;
   }

@@ -8,6 +8,7 @@ import { runOnce } from '../services/notifications/notificationQueue.js';
 import { ValidationError } from '../utils/errors.js';
 
 const channelEnum = z.enum(['sms', 'whatsapp', 'auto']);
+const phoneFormatEnum = z.enum(['e164', 'international', 'local']);
 
 const settingsPatchSchema = z
   .object({
@@ -19,6 +20,7 @@ const settingsPatchSchema = z
     whatsappEnabled: z.boolean().optional(),
     autoFallbackEnabled: z.boolean().optional(),
     defaultChannel: channelEnum.optional(),
+    phoneFormat: z.union([phoneFormatEnum, z.null()]).optional(),
     overdueReminderEnabled: z.boolean().optional(),
     paymentConfirmationEnabled: z.boolean().optional(),
     bulkMessagingEnabled: z.boolean().optional(),

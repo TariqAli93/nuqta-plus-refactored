@@ -417,6 +417,9 @@ export const notificationSettings = pgTable('notification_settings', {
     .default(true),
   // Optional per-template body overrides. When NULL, the in-code defaults are used.
   templates: jsonb('templates'),
+  // Wire-format the provider expects for phone numbers. NULL → adapter default
+  // ('e164' for BulkSMSIraq). Allowed: 'e164' | 'international' | 'local'.
+  phoneFormat: text('phone_format'),
   lastTestAt: timestamp('last_test_at'),
   lastTestStatus: text('last_test_status'),
   lastTestMessage: text('last_test_message'),

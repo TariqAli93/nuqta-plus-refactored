@@ -28,12 +28,14 @@ const DEFAULTS = Object.freeze({
   bulkMessagingEnabled: false,
   singleCustomerMessagingEnabled: true,
   templates: null,
+  phoneFormat: null,
   lastTestAt: null,
   lastTestStatus: null,
   lastTestMessage: null,
 });
 
 const ALLOWED_CHANNELS = new Set(['sms', 'whatsapp', 'auto']);
+const ALLOWED_PHONE_FORMATS = new Set(['e164', 'international', 'local']);
 
 let cached = null;
 let cachedAt = 0;
@@ -59,6 +61,7 @@ function rowToInternal(row) {
       row.templates && typeof row.templates === 'object' && !Array.isArray(row.templates)
         ? row.templates
         : null,
+    phoneFormat: ALLOWED_PHONE_FORMATS.has(row.phoneFormat) ? row.phoneFormat : null,
     lastTestAt: row.lastTestAt || null,
     lastTestStatus: row.lastTestStatus || null,
     lastTestMessage: row.lastTestMessage || null,
@@ -135,6 +138,7 @@ export function toPublic(internal) {
     bulkMessagingEnabled: s.bulkMessagingEnabled,
     singleCustomerMessagingEnabled: s.singleCustomerMessagingEnabled,
     templates: s.templates,
+    phoneFormat: s.phoneFormat,
     lastTestAt: s.lastTestAt,
     lastTestStatus: s.lastTestStatus,
     lastTestMessage: s.lastTestMessage,
@@ -176,6 +180,12 @@ export async function update(patch = {}) {
     defaultChannel: ALLOWED_CHANNELS.has(patch.defaultChannel)
       ? patch.defaultChannel
       : current.defaultChannel,
+    phoneFormat:
+      patch.phoneFormat === null
+        ? null
+        : ALLOWED_PHONE_FORMATS.has(patch.phoneFormat)
+          ? patch.phoneFormat
+          : current.phoneFormat,
     overdueReminderEnabled: pickBoolean(
       patch.overdueReminderEnabled,
       current.overdueReminderEnabled

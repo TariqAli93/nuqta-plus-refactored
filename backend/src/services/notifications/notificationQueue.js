@@ -39,6 +39,7 @@ function buildAdapter(settings) {
     provider: settings.provider,
     apiKey: settings.apiKey,
     senderId: settings.senderId,
+    phoneFormat: settings.phoneFormat,
   });
 }
 

@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   whatsappEnabled: false,
   autoFallbackEnabled: true,
   defaultChannel: 'auto',
+  phoneFormat: null,
   overdueReminderEnabled: true,
   paymentConfirmationEnabled: true,
   bulkMessagingEnabled: false,
@@ -173,6 +174,17 @@ export const useNotificationSettingsStore = defineStore('notificationSettings', 
     return res;
   }
 
+  /** Fetch the provider-call audit rows for a single notification. */
+  async function fetchLogDetails(id) {
+    try {
+      const res = await api.get(`/notifications/${id}/logs`);
+      return Array.isArray(res?.data) ? res.data : [];
+    } catch (err) {
+      error.value = err.response?.data?.message || err.message;
+      return [];
+    }
+  }
+
   async function processNow() {
     const res = await api.post('/notifications/process-now');
     if (res?.success) {
@@ -209,6 +221,7 @@ export const useNotificationSettingsStore = defineStore('notificationSettings', 
     sendCustomerMessage,
     sendBulkMessage,
     fetchLogs,
+    fetchLogDetails,
     retryNotification,
     processNow,
     scanOverdue,

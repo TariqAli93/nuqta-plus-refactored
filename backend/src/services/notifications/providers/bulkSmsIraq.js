@@ -73,19 +73,48 @@ function extractError(body) {
   return null;
 }
 
-export function createBulkSmsIraqAdapter({ apiKey, senderId } = {}) {
+/**
+ * Translate the canonical "digits only, with country code" phone produced by
+ * `normalizeIraqPhone` into the wire format BulkSMSIraq expects.
+ *
+ *   e164          → '+9647901234567'  (default — what the published docs use)
+ *   international → '9647901234567'   (no plus, original 0006 behaviour)
+ *   local         → '07901234567'     (Iraq local format; some accounts need this)
+ *
+ * Inputs that don't start with the Iraq country code are returned as-is so we
+ * don't accidentally mangle a legitimate non-Iraq number.
+ */
+function formatPhone(phone, mode) {
+  const digits = String(phone || '').replace(/[^\d]/g, '');
+  if (!digits) return phone;
+  switch (mode) {
+    case 'international':
+      return digits;
+    case 'local':
+      if (digits.startsWith('964')) return '0' + digits.slice(3);
+      return digits;
+    case 'e164':
+    default:
+      return '+' + digits;
+  }
+}
+
+const ALLOWED_PHONE_FORMATS = new Set(['e164', 'international', 'local']);
+
+export function createBulkSmsIraqAdapter({ apiKey, senderId, phoneFormat } = {}) {
   if (!apiKey || typeof apiKey !== 'string') {
     throw new Error('BulkSMSIraq adapter requires an API key');
   }
 
   const base = getBaseUrl();
+  const mode = ALLOWED_PHONE_FORMATS.has(phoneFormat) ? phoneFormat : 'e164';
 
   async function send({ phone, message, channel }) {
     const path = channel === 'whatsapp' ? '/whatsapp/send' : '/sms/send';
     const url = `${base}${path}`;
     const body = {
       api_key: apiKey,
-      to: phone,
+      to: formatPhone(phone, mode),
       message,
       ...(senderId ? { sender: senderId } : {}),
     };

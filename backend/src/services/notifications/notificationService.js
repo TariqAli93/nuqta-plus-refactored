@@ -497,6 +497,7 @@ export async function testConnection({ apiKeyOverride } = {}) {
     provider: internal.provider,
     apiKey,
     senderId: internal.senderId,
+    phoneFormat: internal.phoneFormat,
   });
   if (!adapter) {
     return { ok: false, error: `Unsupported provider: ${internal.provider}` };

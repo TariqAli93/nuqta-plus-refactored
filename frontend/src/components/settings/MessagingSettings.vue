@@ -79,6 +79,20 @@
                 placeholder="مثال: NuqtaPlus"
               />
             </v-col>
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="form.phoneFormat"
+                :items="phoneFormatItems"
+                item-title="text"
+                item-value="value"
+                label="تنسيق رقم الهاتف عند الإرسال"
+                variant="outlined"
+                density="comfortable"
+                prepend-inner-icon="mdi-phone-dial"
+                hint="جرّب التنسيق الذي يقبله مزوّدك إذا فشلت الرسائل بسبب رفض الرقم"
+                persistent-hint
+              />
+            </v-col>
             <v-col cols="12">
               <v-text-field
                 v-model="apiKeyInput"
@@ -426,36 +440,87 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in store.logs" :key="row.id">
-                <td>{{ formatDate(row.createdAt) }}</td>
-                <td>{{ typeLabel(row.type) }}</td>
-                <td>
-                  <v-chip size="x-small">
-                    {{ row.resolvedChannel || row.channel }}
-                  </v-chip>
-                </td>
-                <td dir="ltr" class="text-mono">{{ row.recipientPhone }}</td>
-                <td>
-                  <v-chip :color="statusColor(row.status)" size="x-small">
-                    {{ statusLabel(row.status) }}
-                  </v-chip>
-                </td>
-                <td class="text-error" style="max-width: 240px">
-                  <span class="text-caption">{{ row.error || '' }}</span>
-                </td>
-                <td>
-                  <v-btn
-                    v-if="row.status === 'failed'"
-                    size="x-small"
-                    variant="text"
-                    color="primary"
-                    prepend-icon="mdi-replay"
-                    @click="store.retryNotification(row.id)"
-                  >
-                    إعادة
-                  </v-btn>
-                </td>
-              </tr>
+              <template v-for="row in store.logs" :key="row.id">
+                <tr>
+                  <td>{{ formatDate(row.createdAt) }}</td>
+                  <td>{{ typeLabel(row.type) }}</td>
+                  <td>
+                    <v-chip size="x-small">
+                      {{ row.resolvedChannel || row.channel }}
+                    </v-chip>
+                  </td>
+                  <td dir="ltr" class="text-mono">{{ row.recipientPhone }}</td>
+                  <td>
+                    <v-chip :color="statusColor(row.status)" size="x-small">
+                      {{ statusLabel(row.status) }}
+                    </v-chip>
+                  </td>
+                  <td class="text-error" style="max-width: 240px">
+                    <span class="text-caption">{{ row.error || '' }}</span>
+                  </td>
+                  <td>
+                    <div class="d-flex ga-1">
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        :color="expandedLogs[row.id] ? 'primary' : 'default'"
+                        :prepend-icon="expandedLogs[row.id] ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+                        @click="toggleLogDetails(row.id)"
+                      >
+                        تفاصيل
+                      </v-btn>
+                      <v-btn
+                        v-if="row.status === 'failed'"
+                        size="x-small"
+                        variant="text"
+                        color="primary"
+                        prepend-icon="mdi-replay"
+                        @click="store.retryNotification(row.id)"
+                      >
+                        إعادة
+                      </v-btn>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="expandedLogs[row.id]">
+                  <td colspan="7" class="bg-grey-lighten-4">
+                    <div v-if="logDetailsLoading[row.id]" class="text-center py-2">
+                      <v-progress-circular indeterminate size="20" width="2" />
+                    </div>
+                    <div v-else-if="!logDetails[row.id] || !logDetails[row.id].length" class="text-medium-emphasis text-caption py-2">
+                      لا توجد محاولات مسجّلة لهذه الرسالة بعد.
+                    </div>
+                    <div v-else class="py-2">
+                      <div
+                        v-for="entry in logDetails[row.id]"
+                        :key="entry.id"
+                        class="mb-3 pa-2 border rounded"
+                      >
+                        <div class="text-caption text-medium-emphasis mb-1">
+                          {{ formatDate(entry.createdAt) }} ·
+                          {{ entry.provider }} · {{ entry.channel }} ·
+                          <v-chip :color="entry.status === 'ok' ? 'success' : 'error'" size="x-small">
+                            {{ entry.status }}
+                          </v-chip>
+                        </div>
+                        <div v-if="entry.error" class="text-error text-caption mb-1">
+                          خطأ المزوّد: <span dir="ltr">{{ entry.error }}</span>
+                        </div>
+                        <div v-if="entry.requestPayload" class="text-caption">
+                          <strong>الطلب (to):</strong>
+                          <span dir="ltr" class="text-mono">{{ entry.requestPayload?.to ?? '—' }}</span>
+                        </div>
+                        <pre
+                          v-if="entry.responsePayload"
+                          class="text-caption text-mono mt-1"
+                          dir="ltr"
+                          style="white-space: pre-wrap; word-break: break-all"
+                        >{{ formatJson(entry.responsePayload) }}</pre>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
               <tr v-if="!store.logs.length && !store.isLoading">
                 <td colspan="7" class="text-center text-medium-emphasis py-6">
                   لا توجد رسائل في السجل بعد.
@@ -499,6 +564,7 @@ const form = reactive({
   whatsappEnabled: false,
   autoFallbackEnabled: true,
   defaultChannel: 'auto',
+  phoneFormat: 'e164',
   overdueReminderEnabled: true,
   paymentConfirmationEnabled: true,
   bulkMessagingEnabled: false,
@@ -509,6 +575,10 @@ const apiKeyInput = ref('');
 const showApiKey = ref(false);
 const previewVisible = ref(false);
 const sending = ref(false);
+
+const expandedLogs = reactive({});
+const logDetails = reactive({});
+const logDetailsLoading = reactive({});
 
 const manualTab = ref('single');
 const manual = reactive({
@@ -537,6 +607,12 @@ const channelItems = [
   { text: 'تلقائي', value: 'auto' },
   { text: 'SMS', value: 'sms' },
   { text: 'WhatsApp', value: 'whatsapp' },
+];
+
+const phoneFormatItems = [
+  { text: 'دولي مع + (E.164، الافتراضي)', value: 'e164' },
+  { text: 'دولي بدون + (مثل 9647...)', value: 'international' },
+  { text: 'محلي (مثل 0790...)', value: 'local' },
 ];
 
 const customerItems = computed(() =>
@@ -607,6 +683,30 @@ function formatDate(value) {
   }
 }
 
+function formatJson(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+async function toggleLogDetails(id) {
+  if (expandedLogs[id]) {
+    expandedLogs[id] = false;
+    return;
+  }
+  expandedLogs[id] = true;
+  if (!logDetails[id]) {
+    logDetailsLoading[id] = true;
+    try {
+      logDetails[id] = await store.fetchLogDetails(id);
+    } finally {
+      logDetailsLoading[id] = false;
+    }
+  }
+}
+
 function applyFromStore() {
   const s = store.settings;
   form.enabled = !!s.enabled;
@@ -616,6 +716,7 @@ function applyFromStore() {
   form.whatsappEnabled = !!s.whatsappEnabled;
   form.autoFallbackEnabled = !!s.autoFallbackEnabled;
   form.defaultChannel = s.defaultChannel || 'auto';
+  form.phoneFormat = s.phoneFormat || 'e164';
   form.overdueReminderEnabled = !!s.overdueReminderEnabled;
   form.paymentConfirmationEnabled = !!s.paymentConfirmationEnabled;
   form.bulkMessagingEnabled = !!s.bulkMessagingEnabled;
