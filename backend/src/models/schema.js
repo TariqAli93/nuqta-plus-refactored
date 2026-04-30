@@ -256,10 +256,35 @@ export const sales = pgTable('sales', {
   remainingAmount: numeric('remaining_amount', { precision: 18, scale: 4 }).default('0'),
   status: text('status').notNull().default('pending'),
   notes: text('notes'),
+  // Set when a real (sequenced) invoice number is assigned. NULL while the row
+  // is a draft. A DB trigger forbids changing invoice_number / issued_at /
+  // branch_id once issued_at is non-null — see migration 0011.
+  issuedAt: timestamp('issued_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   createdBy: integer('created_by').references(() => users.id),
 });
+
+// ── Invoice Sequences ─────────────────────────────────────────────────────
+// Per-(branch, year) counter row. The saleService allocates a number with an
+// atomic INSERT ... ON CONFLICT DO UPDATE ... RETURNING inside the same
+// transaction that inserts the sale, so concurrent LAN clients can never
+// collide and a rollback never burns a number that ends up unused.
+export const invoiceSequences = pgTable(
+  'invoice_sequences',
+  {
+    id: serial('id').primaryKey(),
+    branchId: integer('branch_id')
+      .notNull()
+      .references(() => branches.id, { onDelete: 'cascade' }),
+    year: integer('year').notNull(),
+    nextValue: integer('next_value').notNull().default(1),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    branchYearIdx: uniqueIndex('invoice_sequences_branch_year_unique').on(t.branchId, t.year),
+  })
+);
 
 // ── Sale Items ────────────────────────────────────────────────────────────
 export const saleItems = pgTable('sale_items', {

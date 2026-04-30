@@ -21,7 +21,7 @@ import {
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import { generateInvoiceNumber, calculateSaleTotals } from '../utils/helpers.js';
+import { generateDraftInvoicePlaceholder, calculateSaleTotals } from '../utils/helpers.js';
 import { eq, desc, and, or, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
 import settingsService from './settingsService.js';
 import alertBus from '../events/alertBus.js';
@@ -129,6 +129,49 @@ async function withTransaction(callback) {
 }
 
 /**
+ * Allocate the next invoice number for a branch within the current
+ * transaction. Backed by the invoice_sequences counter row — the upsert
+ * acquires a row-level lock, so concurrent callers serialize and the returned
+ * sequence value is unique per (branchId, year).
+ *
+ * If the surrounding transaction rolls back, the increment rolls back too —
+ * no number is burned on a failed sale.
+ *
+ * @param {object} tx Drizzle transaction handle (must run inside withTransaction)
+ * @param {number} branchId
+ * @returns {Promise<{invoiceNumber: string, issuedAt: Date}>}
+ */
+async function allocateInvoiceNumber(tx, branchId) {
+  if (!branchId || !Number.isInteger(branchId) || branchId <= 0) {
+    throw new ValidationError('A branch is required to issue an invoice number');
+  }
+  const issuedAt = new Date();
+  const year = issuedAt.getFullYear();
+
+  const result = await tx.execute(sql`
+    INSERT INTO invoice_sequences (branch_id, year, next_value)
+    VALUES (${branchId}, ${year}, 2)
+    ON CONFLICT (branch_id, year)
+    DO UPDATE SET next_value = invoice_sequences.next_value + 1,
+                  updated_at = now()
+    RETURNING (next_value - 1) AS sequence
+  `);
+
+  const rows = result.rows ?? result;
+  const seq = Number(rows?.[0]?.sequence);
+  if (!Number.isFinite(seq) || seq <= 0) {
+    throw new Error('Invoice sequence allocation failed');
+  }
+
+  const branchStr = String(branchId).padStart(3, '0');
+  const seqStr = String(seq).padStart(6, '0');
+  return {
+    invoiceNumber: `BR${branchStr}-${year}-${seqStr}`,
+    issuedAt,
+  };
+}
+
+/**
  * Round amount based on currency
  * For IQD: round to nearest multiple of 250 (smallest denomination)
  * For USD: round to nearest integer
@@ -225,7 +268,6 @@ export class SaleService {
     }
 
     const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
-    const invoiceNumber = generateInvoiceNumber();
 
     // ── Normalise saleSource / saleType / paymentType ──────────────────────
     // New callers send `saleSource` + `saleType`; legacy callers only send
@@ -344,10 +386,16 @@ export class SaleService {
     }
 
     const newSaleId = await withTransaction(async (tx) => {
+      // Allocate inside the transaction so a rollback releases the number
+      // back (the counter increment rolls back too) and concurrent inserts
+      // serialize on the row-level lock.
+      const { invoiceNumber, issuedAt } = await allocateInvoiceNumber(tx, branchId);
+
       const [newSale] = await tx
         .insert(sales)
         .values({
           invoiceNumber,
+          issuedAt,
           customerId,
           branchId,
           warehouseId,
@@ -609,6 +657,7 @@ export class SaleService {
         remainingAmount: sales.remainingAmount,
         status: sales.status,
         notes: sales.notes,
+        issuedAt: sales.issuedAt,
         createdAt: sales.createdAt,
         createdBy: users.username,
       })
@@ -1559,7 +1608,11 @@ export class SaleService {
       totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
     }
 
-    const invoiceNumber = generateInvoiceNumber();
+    // Drafts use a non-conflicting placeholder. A real invoice number is only
+    // allocated from invoice_sequences when the draft is completed — so a
+    // draft that never ships does not burn a number, and per-branch sequences
+    // stay densely packed.
+    const invoiceNumber = generateDraftInvoicePlaceholder();
     const currency = saleData.currency || currencySettings.defaultCurrency;
     const exchangeRate =
       saleData.exchangeRate ||
@@ -1720,9 +1773,18 @@ export class SaleService {
     const updatedSaleId = await withTransaction(async (tx) => {
       await tx.delete(saleItems).where(eq(saleItems.saleId, draftId));
 
+      // Drafts arrive with a DRAFT- placeholder; promotion to a real invoice
+      // happens here, inside the same transaction that flips status off
+      // 'draft'. allocateInvoiceNumber holds a row lock on the sequence row
+      // so two cashiers completing drafts at the same instant get distinct
+      // numbers, and a rollback gives the number back.
+      const { invoiceNumber, issuedAt } = await allocateInvoiceNumber(tx, branchId);
+
       const [updatedSale] = await tx
         .update(sales)
         .set({
+          invoiceNumber,
+          issuedAt,
           customerId: saleData.customerId || draft.customerId,
           branchId,
           warehouseId,

@@ -35,15 +35,18 @@ export async function comparePassword(password, hash) {
 }
 
 /**
- * Generate unique invoice number with timestamp and random suffix
- * @returns {string} Invoice number in format INV-{timestamp}-{random}
+ * Placeholder identifier for sales saved with status='draft'. Drafts must NOT
+ * consume a real invoice sequence — that only happens at completion via
+ * saleService.allocateInvoiceNumber(). The DRAFT- prefix keeps the column
+ * non-null and globally distinct from finalized invoices (BR{branch}-...).
+ * @returns {string}
  */
-export function generateInvoiceNumber() {
+export function generateDraftInvoicePlaceholder() {
   const timestamp = Date.now();
-  const random = Math.floor(Math.random() * 1000)
+  const random = Math.floor(Math.random() * 1_000_000)
     .toString()
-    .padStart(3, '0');
-  return `INV-${timestamp}-${random}`;
+    .padStart(6, '0');
+  return `DRAFT-${timestamp}-${random}`;
 }
 
 /**
