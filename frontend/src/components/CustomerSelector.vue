@@ -48,6 +48,9 @@
             <v-text-field
               v-model="newCustomerData.phone"
               label="رقم الهاتف"
+              :hint="phoneHint"
+              :error-messages="phoneError ? [phoneError] : []"
+              persistent-hint
               density="comfortable"
               variant="outlined"
               class="mb-3"
@@ -83,6 +86,36 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Duplicate-phone confirmation: shared family numbers are allowed but
+         only after the user explicitly opts in. -->
+    <v-dialog v-model="duplicateDialog" max-width="480" persistent>
+      <v-card>
+        <v-card-title class="text-warning">
+          <v-icon start color="warning">mdi-alert-circle</v-icon>
+          رقم الهاتف مستخدم بالفعل
+        </v-card-title>
+        <v-card-text>
+          <p class="mb-2">
+            هذا الرقم مسجّل لدى عميل آخر:
+            <strong v-if="duplicateExisting">
+              {{ duplicateExisting.name }}
+              <span v-if="duplicateExisting.phone" class="text-grey">({{ duplicateExisting.phone }})</span>
+            </strong>
+          </p>
+          <p class="text-body-2 text-grey">
+            لن يتم دمج العميلين. هل تريد المتابعة وإضافة هذا العميل بنفس الرقم؟
+          </p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="duplicateDialog = false">إلغاء</v-btn>
+          <v-btn color="warning" :loading="creating" @click="confirmDuplicateCreate">
+            متابعة الإضافة
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -90,6 +123,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useCustomerStore } from '@/stores/customer';
 import { useNotificationStore } from '@/stores/notification';
+import { normalizeIraqPhone } from '@/utils/phone';
 
 const props = defineProps({
   modelValue: { type: [Number, Object], default: null },
@@ -112,15 +146,29 @@ const showNewCustomerForm = ref(false);
 const newCustomerForm = ref(null);
 const creating = ref(false);
 const newCustomerData = ref({ name: '', phone: '', city: '', address: '', notes: '' });
+const duplicateDialog = ref(false);
+const duplicateExisting = ref(null);
 
 const rules = { required: (v) => !!v || 'هذا الحقل مطلوب' };
 
-// Generate default phone number based on next customer ID
-function generateDefaultPhone() {
-  if (customers.value.length === 0) return '1';
-  const maxId = Math.max(...customers.value.map((c) => c.id || 0));
-  return String(maxId + 1);
-}
+// Live phone normalization preview / format guard.
+const phoneNormalised = computed(() => normalizeIraqPhone(newCustomerData.value.phone));
+const phoneHint = computed(() => {
+  const raw = (newCustomerData.value.phone || '').trim();
+  if (!raw) return '';
+  if (phoneNormalised.value && phoneNormalised.value !== raw.replace(/\D/g, '')) {
+    return `سيتم البحث وحفظ هذا الرقم بصيغة موحّدة: ${phoneNormalised.value}`;
+  }
+  return '';
+});
+const phoneError = computed(() => {
+  const raw = (newCustomerData.value.phone || '').trim();
+  if (!raw) return '';
+  if (!phoneNormalised.value) {
+    return 'تنسيق رقم الهاتف غير مفهوم — تأكّد من الأرقام';
+  }
+  return '';
+});
 
 // Autocomplete items with "add new" option
 const autocompleteItems = computed(() => {
@@ -133,15 +181,11 @@ const autocompleteItems = computed(() => {
 
     // إذا لم يوجد اسم مطابق أو يوجد تكرار، أظهر خيار إضافة جديد
     if (duplicateNames.length === 0 || duplicateNames.length > 1) {
-      // إنشاء رقم هاتف افتراضي من customerId (آخر ID + 1 أو timestamp)
-      const defaultPhone = generateDefaultPhone();
-
       items.unshift({
         id: 'new-customer',
         name: `إضافة عميل جديد: "${query}"`,
         isNewCustomer: true,
         searchText: query,
-        defaultPhone: defaultPhone,
       });
     }
   }
@@ -178,7 +222,10 @@ function handleSelect(value) {
   if (value === 'new-customer') {
     const newCustomerItem = autocompleteItems.value.find((item) => item.id === 'new-customer');
     newCustomerData.value.name = newCustomerItem?.searchText || searchQuery.value;
-    newCustomerData.value.phone = newCustomerItem?.defaultPhone || generateDefaultPhone();
+    // Phone left blank intentionally — never auto-fabricate a phone
+    // (it silently created junk numbers like "1", "2", … and tripped the
+    // duplicate guard for legitimate later entries).
+    newCustomerData.value.phone = '';
     showNewCustomerForm.value = true;
     selectedId.value = null;
     emit('update:modelValue', null);
@@ -200,49 +247,52 @@ function selectCustomer(customer) {
   emit('customer-selected', customer);
 }
 
-// Create new customer
-async function createNewCustomer() {
-  if (!newCustomerForm.value?.validate) {
-    notification.error('حدث خطأ في النموذج');
-    return;
-  }
-
-  const { valid } = await newCustomerForm.value.validate();
-  if (!valid || !newCustomerData.value.name?.trim()) {
-    notification.error('اسم العميل مطلوب');
-    return;
-  }
-
-  // Check phone uniqueness
-  if (newCustomerData.value.phone?.trim()) {
-    const exists = customers.value.some((c) => c.phone === newCustomerData.value.phone.trim());
-    if (exists) {
-      notification.error('رقم الهاتف مستخدم بالفعل من قبل عميل آخر');
-      return;
-    }
-  }
-
+// Submit the new-customer payload. The duplicate-phone path is delegated
+// entirely to the backend (which knows the canonical normalized form);
+// the local list might be paginated and miss a duplicate, so we never
+// short-circuit on the in-memory `customers` array.
+async function submitNewCustomer({ allowDuplicatePhone = false } = {}) {
   creating.value = true;
   try {
-    const response = await customerStore.createCustomer(newCustomerData.value);
+    const payload = { ...newCustomerData.value };
+    if (allowDuplicatePhone) payload.allowDuplicatePhone = true;
+    const response = await customerStore.createCustomer(payload);
     const newCustomer = response.data;
     if (!newCustomer) throw new Error('Invalid response');
 
     customers.value.unshift(newCustomer);
     selectCustomer(newCustomer);
+    duplicateDialog.value = false;
     resetNewCustomerForm();
     notification.success(`تم إضافة العميل: ${newCustomer.name}`);
   } catch (error) {
-    const msg = error?.response?.data?.message || error?.message || 'فشل في إضافة العميل الجديد';
-    if (msg.includes('phone') || msg.includes('Phone')) {
-      notification.error('رقم الهاتف مستخدم بالفعل من قبل عميل آخر');
-    } else {
-      notification.error(msg);
+    const data = error?.response?.data;
+    if (data?.code === 'CUSTOMER_PHONE_DUPLICATE') {
+      duplicateExisting.value = data.details?.existingCustomer || null;
+      duplicateDialog.value = true;
+      return;
     }
+    const msg = data?.message || error?.message || 'فشل في إضافة العميل الجديد';
+    notification.error(msg);
   } finally {
     creating.value = false;
   }
 }
+
+async function createNewCustomer() {
+  if (!newCustomerForm.value?.validate) {
+    notification.error('حدث خطأ في النموذج');
+    return;
+  }
+  const { valid } = await newCustomerForm.value.validate();
+  if (!valid || !newCustomerData.value.name?.trim()) {
+    notification.error('اسم العميل مطلوب');
+    return;
+  }
+  await submitNewCustomer();
+}
+
+const confirmDuplicateCreate = () => submitNewCustomer({ allowDuplicatePhone: true });
 
 function cancelNewCustomer() {
   showNewCustomerForm.value = false;
@@ -252,6 +302,8 @@ function cancelNewCustomer() {
 function resetNewCustomerForm() {
   newCustomerData.value = { name: '', phone: '', city: '', address: '', notes: '' };
   showNewCustomerForm.value = false;
+  duplicateDialog.value = false;
+  duplicateExisting.value = null;
   newCustomerForm.value?.resetValidation?.();
   searchQuery.value = '';
 }

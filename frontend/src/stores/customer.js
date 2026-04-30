@@ -88,7 +88,12 @@ export const useCustomerStore = defineStore('customer', {
         return response;
       } catch (error) {
         this.customers = this.customers.filter((c) => c.id !== tempId);
-        notificationStore.error(error.response?.data?.message || 'فشل إضافة العميل');
+        // Phone-duplicate is handled by the caller (it shows a confirm
+        // dialog, retries with allowDuplicatePhone). Don't toast it here
+        // or the user will see the error twice.
+        if (error.response?.data?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
+          notificationStore.error(error.response?.data?.message || 'فشل إضافة العميل');
+        }
         throw error;
       }
     },
@@ -115,7 +120,9 @@ export const useCustomerStore = defineStore('customer', {
         if (index !== -1 && originalCustomer) {
           this.customers[index] = originalCustomer;
         }
-        notificationStore.error(error.response?.data?.message || 'فشل تحديث العميل');
+        if (error.response?.data?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
+          notificationStore.error(error.response?.data?.message || 'فشل تحديث العميل');
+        }
         throw error;
       }
     },

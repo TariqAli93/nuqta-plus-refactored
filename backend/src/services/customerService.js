@@ -9,27 +9,62 @@ import {
   currencySettings,
 } from '../models/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
-import { eq, like, or, desc, sql, and, asc } from 'drizzle-orm';
+import { normalizeIraqPhone } from '../utils/phone.js';
+import { eq, like, or, desc, sql, and, asc, ne } from 'drizzle-orm';
 import { isGlobalAdmin } from './scopeService.js';
+
+/**
+ * Build a ConflictError for a duplicate phone, with the existing customer
+ * attached as `details` so the UI can surface "this number is already used
+ * by X — save anyway?" without a second roundtrip.
+ */
+function phoneDuplicateError(existing) {
+  const err = new ConflictError(
+    `Phone number is already used by customer "${existing.name}" (#${existing.id})`
+  );
+  err.code = 'CUSTOMER_PHONE_DUPLICATE';
+  err.details = {
+    existingCustomer: {
+      id: existing.id,
+      name: existing.name,
+      phone: existing.phone,
+    },
+  };
+  return err;
+}
 
 export class CustomerService {
   async create(customerData, userId) {
     const db = await getDb();
-    // Check for duplicate phone
-    const [existing] = await db
-      .select()
-      .from(customers)
-      .where(eq(customers.phone, customerData.phone))
-      .limit(1);
 
-    if (existing && customerData.phone.trim() !== '') {
-      throw new ConflictError(`Customer with phone ${customerData.phone} already exists`);
+    // Pull the override flag out — it must never reach the row insert.
+    const { allowDuplicatePhone, ...rowData } = customerData;
+
+    const rawPhone = typeof rowData.phone === 'string' ? rowData.phone.trim() : rowData.phone;
+    const normalizedPhone = normalizeIraqPhone(rawPhone);
+
+    // Duplicate guard runs only when we have a normalised phone to compare.
+    // Empty / un-normalisable phones (incl. legitimate edge cases) skip the
+    // check so they never silently collide on NULL.
+    if (normalizedPhone && !allowDuplicatePhone) {
+      const [existing] = await db
+        .select({ id: customers.id, name: customers.name, phone: customers.phone })
+        .from(customers)
+        .where(eq(customers.normalizedPhone, normalizedPhone))
+        .limit(1);
+      if (existing) {
+        throw phoneDuplicateError(existing);
+      }
     }
 
     const [newCustomer] = await db
       .insert(customers)
       .values({
-        ...customerData,
+        ...rowData,
+        // Persist the user's exact input as `phone` (no silent rewrites),
+        // and the canonical form as `normalizedPhone` for lookup/dedupe.
+        phone: rawPhone || null,
+        normalizedPhone: normalizedPhone,
         createdBy: userId,
       })
       .returning();
@@ -43,21 +78,38 @@ export class CustomerService {
     const db = await getDb();
     const { page = 1, limit = 10, search } = filters;
 
-    let query = db.select().from(customers);
+    // Build the search predicate once. Phone matching ORs three forms:
+    //   1. raw match against the user-entered `phone` (handles non-Iraq
+    //      phones and partial typed digits the user remembers)
+    //   2. normalized match against `normalized_phone` using the same
+    //      normaliser the API uses on save — so "0773 123 4567",
+    //      "+964773 123 4567" and "9647731234567" all find the same row
+    //   3. fall-back: digits-only LIKE on normalized_phone for partials
+    //      (e.g. user typed "31234" hoping to match a phone ending in
+    //      that — we strip non-digits from the search and substring-match)
+    const searchTerm = typeof search === 'string' ? search.trim() : '';
+    const buildWhere = () => {
+      if (!searchTerm) return null;
+      const digitsOnly = searchTerm.replace(/\D/g, '');
+      const normalised = normalizeIraqPhone(searchTerm);
+      const conds = [like(customers.name, `%${searchTerm}%`)];
+      conds.push(like(customers.phone, `%${searchTerm}%`));
+      if (digitsOnly.length >= 3) {
+        conds.push(like(customers.normalizedPhone, `%${digitsOnly}%`));
+      }
+      if (normalised) {
+        conds.push(eq(customers.normalizedPhone, normalised));
+      }
+      return or(...conds);
+    };
 
-    if (search) {
-      query = query.where(
-        or(like(customers.name, `%${search}%`), like(customers.phone, `%${search}%`))
-      );
-    }
+    let query = db.select().from(customers);
+    const where = buildWhere();
+    if (where) query = query.where(where);
 
     // Get total count for pagination metadata
     let countQuery = db.select({ count: sql`count(*)` }).from(customers);
-    if (search) {
-      countQuery = countQuery.where(
-        or(like(customers.name, `%${search}%`), like(customers.phone, `%${search}%`))
-      );
-    }
+    if (where) countQuery = countQuery.where(where);
     const [countResult] = await countQuery;
     const total = Number(countResult?.count || 0);
 
@@ -481,12 +533,38 @@ export class CustomerService {
 
   async update(id, customerData) {
     const db = await getDb();
+
+    const { allowDuplicatePhone, ...rowData } = customerData;
+
+    // Only re-normalise (and only re-check duplicates) when the caller
+    // actually sent a phone field. Partial updates that don't touch phone
+    // must not clobber the stored normalized_phone.
+    const phoneSent = Object.prototype.hasOwnProperty.call(rowData, 'phone');
+    let setPayload = { ...rowData, updatedAt: new Date() };
+
+    if (phoneSent) {
+      const rawPhone = typeof rowData.phone === 'string' ? rowData.phone.trim() : rowData.phone;
+      const normalizedPhone = normalizeIraqPhone(rawPhone);
+      setPayload.phone = rawPhone || null;
+      setPayload.normalizedPhone = normalizedPhone;
+
+      if (normalizedPhone && !allowDuplicatePhone) {
+        const [existing] = await db
+          .select({ id: customers.id, name: customers.name, phone: customers.phone })
+          .from(customers)
+          .where(
+            and(eq(customers.normalizedPhone, normalizedPhone), ne(customers.id, Number(id)))
+          )
+          .limit(1);
+        if (existing) {
+          throw phoneDuplicateError(existing);
+        }
+      }
+    }
+
     const [updated] = await db
       .update(customers)
-      .set({
-        ...customerData,
-        updatedAt: new Date(),
-      })
+      .set(setPayload)
       .where(eq(customers.id, id))
       .returning();
 

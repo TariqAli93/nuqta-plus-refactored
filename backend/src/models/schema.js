@@ -36,6 +36,11 @@ export const customers = pgTable('customers', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
   phone: text('phone'),
+  // Canonical Iraq-formatted phone for lookup/dedupe. Computed from `phone`
+  // by the service layer (and by a SQL function during migration backfill).
+  // Nullable so customers without a phone — or with a phone that can't be
+  // normalised — are still allowed.
+  normalizedPhone: text('normalized_phone'),
   address: text('address'),
   city: text('city'),
   notes: text('notes'),

@@ -48,12 +48,22 @@ export const loginSchema = z.object({
 });
 
 // Customer schemas
+//
+// `phone` is stored exactly as the user typed it (so the receipt/contact form
+// matches what they entered) and is *optional* — the customers table allows
+// NULL phones and the UI does not require it. The service layer separately
+// computes `normalized_phone` for de-dupe and search.
+//
+// `allowDuplicatePhone` is a deliberate override: duplicates are blocked by
+// default, but legitimate shared family numbers can be saved by passing
+// `true` (the UI surfaces a confirmation dialog before doing so).
 export const customerSchema = z.object({
   name: z.string().min(2, 'Customer name must be at least 2 characters'),
-  phone: z.string().min(1, 'Phone number is required'),
+  phone: z.string().trim().nullable().optional(),
   address: z.string().nullable().optional(),
   city: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
+  allowDuplicatePhone: z.boolean().optional(),
 });
 
 // Product schemas

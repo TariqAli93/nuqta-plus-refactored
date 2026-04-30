@@ -30,6 +30,9 @@ async function errorHandlerPlugin(fastify) {
         // Stable error code (e.g. SOURCE_WAREHOUSE_NOT_ALLOWED) for the
         // frontend to render a localized, field-aware message.
         ...(error.code ? { code: error.code } : {}),
+        // Optional structured payload (e.g. existing customer when a phone
+        // duplicate is detected) so the UI can offer a contextual prompt.
+        ...(error.details ? { details: error.details } : {}),
         timestamp: error.timestamp,
       });
     }
