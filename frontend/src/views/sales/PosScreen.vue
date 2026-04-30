@@ -256,17 +256,27 @@
         <v-divider class="my-3" />
         <!-- Actions -->
         <div class="pay__actions">
-          <v-btn
-            v-if="canUseDrafts"
-            variant="outlined"
-            size="large"
-            class="pay__draft-btn"
-            :disabled="items.length === 0 || submitting"
-            @click="onHold"
+          <v-tooltip
+            v-if="draftsVisible"
+            location="top"
+            :text="draftsReason"
+            :disabled="!draftsDisabled"
           >
-            <v-icon start size="18">mdi-content-save-outline</v-icon>
-            مسودة
-          </v-btn>
+            <template #activator="{ props: tipProps }">
+              <span v-bind="tipProps" class="pay__draft-wrap">
+                <v-btn
+                  variant="outlined"
+                  size="large"
+                  class="pay__draft-btn"
+                  :disabled="draftsDisabled || items.length === 0 || submitting"
+                  @click="onHold"
+                >
+                  <v-icon start size="18">mdi-content-save-outline</v-icon>
+                  مسودة
+                </v-btn>
+              </span>
+            </template>
+          </v-tooltip>
           <v-btn
             size="large"
             color="primary"
@@ -298,15 +308,25 @@
         </div>
         <div class="cart__header-actions">
           <button
-            v-if="canUseDrafts"
+            v-if="draftsVisible"
             type="button"
             class="cart__drafts-btn"
-            :title="`المسودات${currentDraftId ? ' — مفتوحة #' + currentDraftId : ''}`"
+            :class="{ 'cart__drafts-btn--disabled': draftsDisabled }"
+            :title="
+              draftsDisabled
+                ? draftsReason
+                : `المسودات${currentDraftId ? ' — مفتوحة #' + currentDraftId : ''}`
+            "
+            :disabled="draftsDisabled"
             @click="openDraftsList"
           >
-            <v-icon size="14">mdi-archive-clock-outline</v-icon>
+            <v-icon size="14">{{
+              draftsDisabled ? 'mdi-lock-outline' : 'mdi-archive-clock-outline'
+            }}</v-icon>
             المسودات
-            <span v-if="currentDraftId" class="cart__drafts-flag">#{{ currentDraftId }}</span>
+            <span v-if="currentDraftId && !draftsDisabled" class="cart__drafts-flag">
+              #{{ currentDraftId }}
+            </span>
           </button>
           <button v-if="items.length > 0" type="button" class="cart__clear" @click="confirmClear">
             <v-icon size="14">mdi-delete-sweep-outline</v-icon>
@@ -739,9 +759,9 @@ import {
   useNotificationStore,
   useSaleStore,
 } from '@/stores';
-import { useAuthStore } from '@/stores/auth';
 import { useCashSessionStore } from '@/stores/cashSession';
 import { usePosCart } from '@/composables/usePosCart';
+import { useFeatureGate } from '@/composables/useFeatureGate';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import OpenShiftDialog from '@/components/cashSession/OpenShiftDialog.vue';
 import CloseShiftDialog from '@/components/cashSession/CloseShiftDialog.vue';
@@ -754,13 +774,17 @@ const inventoryStore = useInventoryStore();
 const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
 const saleStore = useSaleStore();
-const authStore = useAuthStore();
 const cashSessionStore = useCashSessionStore();
 
 // Capability-driven UI: the "save as draft" button is only meaningful when
 // the draftInvoices module is enabled AND the user has the capability.
-// `canUse` collapses both checks into a single helper.
-const canUseDrafts = computed(() => authStore.canUse('draftInvoices', 'canUseDraftInvoices'));
+// We split the check so that users who hold the capability still see the
+// button — disabled with a tooltip — when only the feature flag is off.
+const draftsGate = useFeatureGate('draftInvoices', 'canUseDraftInvoices');
+const canUseDrafts = computed(() => draftsGate.enabled.value);
+const draftsVisible = draftsGate.visible;
+const draftsDisabled = draftsGate.disabled;
+const draftsReason = draftsGate.reason;
 const router = useRouter();
 const route = useRoute();
 
@@ -2784,6 +2808,14 @@ onUnmounted(() => {
     background: var(--pos-primary-soft);
     border-color: var(--pos-primary);
   }
+}
+
+.cart__drafts-btn--disabled,
+.cart__drafts-btn--disabled:hover {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: transparent;
+  border-color: var(--pos-border);
 }
 
 .cart__drafts-flag {

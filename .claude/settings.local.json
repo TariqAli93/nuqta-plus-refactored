@@ -29,7 +29,8 @@
       "Bash(npx --no-install eslint src/views/sales/Sales.vue src/views/sales/PosScreen.vue src/composables/usePosCart.js)",
       "Bash(grep -E \"\\\\.\\(js|ts|vue\\)$\")",
       "Bash(npx eslint *)",
-      "Bash(grep -E \"\\\\.\\(js|vue\\)$\")"
+      "Bash(grep -E \"\\\\.\\(js|vue\\)$\")",
+      "Bash(npx vue-tsc *)"
     ]
   }
 }

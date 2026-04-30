@@ -3,18 +3,30 @@
     <v-card class="mb-4">
       <div class="flex justify-space-between items-center pa-3">
         <div class="text-h6 font-semibold text-primary">إدارة المبيعات</div>
-        <!-- Installment shortcut: only show when the installments capability
-             is granted (feature on AND user role allows it). -->
-        <v-btn
-          v-if="canUseInstallments"
-          color="primary"
-          prepend-icon="mdi-plus"
-          size="default"
-          to="/sales/new"
-          aria-label="إنشاء بيع جديد"
+        <!-- Installment shortcut: hidden when the user lacks the capability
+             entirely; rendered disabled with a tooltip when the feature flag
+             is off so admins still see the entry point. -->
+        <v-tooltip
+          v-if="installmentsVisible"
+          location="bottom"
+          :text="installmentsReason"
+          :disabled="!installmentsDisabled"
         >
-          قسط جديد
-        </v-btn>
+          <template #activator="{ props: tipProps }">
+            <span v-bind="tipProps">
+              <v-btn
+                color="primary"
+                prepend-icon="mdi-plus"
+                size="default"
+                :to="installmentsDisabled ? undefined : '/sales/new'"
+                :disabled="installmentsDisabled"
+                aria-label="إنشاء بيع جديد"
+              >
+                قسط جديد
+              </v-btn>
+            </span>
+          </template>
+        </v-tooltip>
       </div>
     </v-card>
 
@@ -176,17 +188,28 @@
         <template #[`item.actions`]="{ item }">
           <!-- أزرار المسودات -->
           <template v-if="item.status === 'draft'">
-            <v-btn
-              v-if="canUseDrafts"
-              size="small"
-              variant="text"
-              color="primary"
-              icon
-              title="إكمال المسودة"
-              @click.stop="completeDraft(item.id)"
+            <v-tooltip
+              v-if="draftsVisible"
+              location="top"
+              :text="draftsReason || 'إكمال المسودة'"
+              :disabled="!draftsDisabled"
             >
-              <v-icon size="20">mdi-check</v-icon>
-            </v-btn>
+              <template #activator="{ props: tipProps }">
+                <span v-bind="tipProps">
+                  <v-btn
+                    size="small"
+                    variant="text"
+                    :color="draftsDisabled ? 'grey' : 'primary'"
+                    icon
+                    :disabled="draftsDisabled"
+                    :title="draftsDisabled ? draftsReason : 'إكمال المسودة'"
+                    @click.stop="completeDraft(item.id)"
+                  >
+                    <v-icon size="20">mdi-check</v-icon>
+                  </v-btn>
+                </span>
+              </template>
+            </v-tooltip>
             <v-btn
               size="small"
               variant="text"
@@ -279,6 +302,7 @@ import TableSkeleton from '@/components/TableSkeleton.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
 import { useExport } from '@/composables/useExport';
+import { useFeatureGate } from '@/composables/useFeatureGate';
 import { useNotificationStore } from '@/stores/notification';
 
 const router = useRouter();
@@ -297,14 +321,21 @@ const customers = ref([]);
 const isAdmin = computed(() => authStore.hasPermission(['sales:delete', 'manage:sales']));
 const canDelete = computed(() => isAdmin.value);
 
-// Draft-related actions are hidden when the draftInvoices feature is off.
-const canUseDrafts = computed(() =>
-  authStore.canUse('draftInvoices', 'canUseDraftInvoices')
-);
-// Installment-sale shortcut is hidden when installments are off.
-const canUseInstallments = computed(() =>
-  authStore.canUse('installments', 'canUseInstallments')
-);
+// Draft-related actions: visible when the user holds the capability; the
+// button renders disabled with an explanation tooltip when the feature flag
+// is off, so admins can see the entry point exists.
+const draftsGate = useFeatureGate('draftInvoices', 'canUseDraftInvoices');
+const canUseDrafts = computed(() => draftsGate.enabled.value);
+const draftsVisible = draftsGate.visible;
+const draftsDisabled = draftsGate.disabled;
+const draftsReason = draftsGate.reason;
+
+// Installment-sale shortcut: same disabled-with-tooltip pattern.
+const installmentsGate = useFeatureGate('installments', 'canUseInstallments');
+const canUseInstallments = computed(() => installmentsGate.enabled.value);
+const installmentsVisible = installmentsGate.visible;
+const installmentsDisabled = installmentsGate.disabled;
+const installmentsReason = installmentsGate.reason;
 
 // "New sale" empty-state action is the installment-sale entry point — only
 // surface it when installments are enabled AND the user can use them.
