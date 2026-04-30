@@ -331,6 +331,91 @@ export const installmentSchema = z.object({
   notes: z.string().nullable().optional(),
 });
 
+// ── Installment collection actions ────────────────────────────────────────
+// One schema covers all action types — type-specific fields are validated in
+// the superRefine below so the API surface stays a single endpoint.
+export const INSTALLMENT_ACTION_TYPES = [
+  'call',
+  'visit',
+  'promise_to_pay',
+  'reschedule',
+  'note',
+  'payment',
+];
+
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format');
+
+export const installmentActionSchema = z
+  .object({
+    actionType: z.enum(INSTALLMENT_ACTION_TYPES, {
+      errorMap: () => ({ message: 'Invalid action type' }),
+    }),
+    note: z.string().trim().max(2000).optional().nullable(),
+    // promise_to_pay
+    promisedAmount: z.coerce.number().positive().optional(),
+    promisedDate: ymd.optional(),
+    // reschedule
+    newDueDate: ymd.optional(),
+    // payment — delegated to the existing payment service
+    amount: z.coerce.number().positive().optional(),
+    currency: z.enum(['USD', 'IQD']).optional(),
+    exchangeRate: z.coerce.number().positive().optional(),
+    paymentMethod: z.enum(['cash', 'card']).optional(),
+    paymentReference: z.string().trim().min(1).max(120).optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.actionType === 'promise_to_pay') {
+      if (!data.promisedAmount) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['promisedAmount'],
+          message: 'Promised amount is required',
+        });
+      }
+      if (!data.promisedDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['promisedDate'],
+          message: 'Promised date is required',
+        });
+      }
+    }
+    if (data.actionType === 'reschedule' && !data.newDueDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['newDueDate'],
+        message: 'New due date is required',
+      });
+    }
+    if (data.actionType === 'payment') {
+      if (!data.amount) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['amount'],
+          message: 'Payment amount is required',
+        });
+      }
+      if (!data.paymentMethod) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentMethod'],
+          message: 'Payment method is required',
+        });
+      }
+      if (data.paymentMethod === 'card') {
+        const ref =
+          typeof data.paymentReference === 'string' ? data.paymentReference.trim() : '';
+        if (!ref) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['paymentReference'],
+            message: 'Card reference number is required.',
+          });
+        }
+      }
+    }
+  });
+
 // Query schemas
 export const paginationSchema = z.object({
   page: z.number().int().positive().default(1),

@@ -192,6 +192,12 @@
               {{ profile.payments.length }}
             </v-chip>
           </v-tab>
+          <v-tab v-if="canCollect" value="collections">
+            التحصيل
+            <v-chip v-if="overdueInstallments.length" size="x-small" color="error" class="ms-2">
+              {{ overdueInstallments.length }}
+            </v-chip>
+          </v-tab>
           <v-tab value="timeline">سجل الديون</v-tab>
         </v-tabs>
 
@@ -352,7 +358,190 @@
                   {{ installmentLabel(item) }}
                 </v-chip>
               </template>
+              <template #[`item.actions`]="{ item }">
+                <v-btn
+                  v-if="canCollect && item.status !== 'cancelled'"
+                  icon="mdi-clipboard-text-clock-outline"
+                  size="x-small"
+                  variant="text"
+                  color="primary"
+                  aria-label="إجراء تحصيل"
+                  @click="openActionDialog(item)"
+                />
+              </template>
             </v-data-table>
+          </v-window-item>
+
+          <!-- Collections -------------------------------------------------- -->
+          <v-window-item v-if="canCollect" value="collections">
+            <div class="pa-4">
+              <!-- Overdue summary --------------------------------------- -->
+              <div class="text-subtitle-1 font-weight-bold mb-2">
+                المتأخرات ({{ overdueInstallments.length }})
+              </div>
+              <v-card v-if="!overdueInstallments.length" variant="tonal" class="pa-4 mb-4">
+                <div class="text-body-2 text-success">
+                  <v-icon start size="20" color="success">mdi-check-circle</v-icon>
+                  لا توجد أقساط متأخرة على هذا العميل
+                </div>
+              </v-card>
+              <v-data-table
+                v-else
+                :headers="collectionsInstallmentHeaders"
+                :items="overdueInstallments"
+                :items-per-page="5"
+                density="comfortable"
+                class="mb-4"
+              >
+                <template #[`item.invoiceNumber`]="{ item }">
+                  <RouterLink
+                    v-if="item.saleId"
+                    :to="`/sales/${item.saleId}`"
+                    class="text-primary text-decoration-none"
+                  >
+                    {{ item.invoiceNumber || `#${item.saleId}` }}
+                  </RouterLink>
+                </template>
+                <template #[`item.dueAmount`]="{ item }">
+                  {{ formatCurrency(item.dueAmount, item.currency) }}
+                </template>
+                <template #[`item.remainingAmount`]="{ item }">
+                  <span class="text-error font-weight-bold">
+                    {{ formatCurrency(item.remainingAmount, item.currency) }}
+                  </span>
+                </template>
+                <template #[`item.overdueDays`]="{ item }">
+                  <span class="text-error font-weight-bold">{{ item.overdueDays }} يوم</span>
+                </template>
+                <template #[`item.actions`]="{ item }">
+                  <v-btn
+                    size="x-small"
+                    color="primary"
+                    variant="tonal"
+                    prepend-icon="mdi-clipboard-text-clock-outline"
+                    @click="openActionDialog(item)"
+                  >
+                    إجراء
+                  </v-btn>
+                </template>
+              </v-data-table>
+
+              <!-- Upcoming summary -------------------------------------- -->
+              <div class="text-subtitle-1 font-weight-bold mb-2">
+                القادمة ({{ upcomingInstallments.length }})
+              </div>
+              <v-data-table
+                v-if="upcomingInstallments.length"
+                :headers="collectionsInstallmentHeaders"
+                :items="upcomingInstallments"
+                :items-per-page="5"
+                density="comfortable"
+                class="mb-4"
+              >
+                <template #[`item.invoiceNumber`]="{ item }">
+                  <RouterLink
+                    v-if="item.saleId"
+                    :to="`/sales/${item.saleId}`"
+                    class="text-primary text-decoration-none"
+                  >
+                    {{ item.invoiceNumber || `#${item.saleId}` }}
+                  </RouterLink>
+                </template>
+                <template #[`item.dueAmount`]="{ item }">
+                  {{ formatCurrency(item.dueAmount, item.currency) }}
+                </template>
+                <template #[`item.remainingAmount`]="{ item }">
+                  {{ formatCurrency(item.remainingAmount, item.currency) }}
+                </template>
+                <template #[`item.overdueDays`]>—</template>
+                <template #[`item.actions`]="{ item }">
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    prepend-icon="mdi-clipboard-text-clock-outline"
+                    @click="openActionDialog(item)"
+                  >
+                    إجراء
+                  </v-btn>
+                </template>
+              </v-data-table>
+              <v-card
+                v-else
+                variant="tonal"
+                color="grey-lighten-3"
+                class="pa-4 mb-4 text-body-2 text-grey"
+              >
+                لا توجد أقساط قادمة
+              </v-card>
+
+              <!-- Action history ---------------------------------------- -->
+              <div class="text-subtitle-1 font-weight-bold mb-2">
+                سجل الإجراءات ({{ collectionHistory.length }})
+              </div>
+              <v-card v-if="collectionsLoading" variant="outlined" class="pa-4 text-center">
+                <v-progress-circular indeterminate size="24" />
+              </v-card>
+              <v-card v-else-if="!collectionHistory.length" variant="tonal" class="pa-4">
+                <div class="text-body-2 text-grey">
+                  لم يتم تسجيل أي إجراء تحصيل لهذا العميل بعد.
+                </div>
+              </v-card>
+              <v-table v-else density="comfortable">
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>النوع</th>
+                    <th>القسط</th>
+                    <th>التفاصيل</th>
+                    <th>المستخدم</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in collectionHistory" :key="row.id">
+                    <td>{{ formatDate(row.createdAt) }}</td>
+                    <td>
+                      <v-chip size="x-small" :color="actionTypeColor(row.actionType)">
+                        {{ actionTypeLabel(row.actionType) }}
+                      </v-chip>
+                    </td>
+                    <td>
+                      <RouterLink
+                        v-if="row.saleId"
+                        :to="`/sales/${row.saleId}`"
+                        class="text-primary text-decoration-none"
+                      >
+                        {{ row.invoiceNumber || `#${row.saleId}` }}
+                      </RouterLink>
+                      <span v-if="row.installmentNumber" class="text-grey ms-1">
+                        / قسط {{ row.installmentNumber }}
+                      </span>
+                    </td>
+                    <td class="text-body-2">
+                      <div v-if="row.actionType === 'promise_to_pay'">
+                        وعد بدفع
+                        {{ formatCurrency(row.promisedAmount, row.installmentCurrency) }}
+                        بتاريخ {{ row.promisedDate || '—' }}
+                      </div>
+                      <div v-else-if="row.actionType === 'reschedule'">
+                        تأجيل من {{ row.oldDueDate || '—' }} إلى {{ row.newDueDate || '—' }}
+                      </div>
+                      <div v-else-if="row.actionType === 'payment'">
+                        تم تسجيل دفعة (#{{ row.paymentId || '—' }})
+                      </div>
+                      <div v-if="row.note" class="text-caption text-grey">{{ row.note }}</div>
+                      <span
+                        v-if="
+                          !row.note &&
+                          !['promise_to_pay', 'reschedule', 'payment'].includes(row.actionType)
+                        "
+                        >—</span
+                      >
+                    </td>
+                    <td>{{ row.username || '—' }}</td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </div>
           </v-window-item>
 
           <!-- Payments --------------------------------------------------- -->
@@ -509,6 +698,137 @@
       </v-card>
     </v-dialog>
 
+    <!-- Collection action dialog --------------------------------------- -->
+    <v-dialog v-model="actionDialog" max-width="560" persistent>
+      <v-card v-if="actionTarget">
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="primary">mdi-clipboard-text-clock-outline</v-icon>
+          <span>إجراء تحصيل</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <div class="text-body-2 mb-3">
+            <p class="mb-1">
+              <strong>الفاتورة:</strong>
+              {{ actionTarget.invoiceNumber || `#${actionTarget.saleId}` }}
+              / قسط {{ actionTarget.installmentNumber }}
+            </p>
+            <p class="mb-1"><strong>الاستحقاق:</strong> {{ actionTarget.dueDate || '—' }}</p>
+            <p class="mb-0">
+              <strong>المتبقي:</strong>
+              <span :class="actionTarget.remainingAmount > 0 ? 'text-error' : ''">
+                {{ formatCurrency(actionTarget.remainingAmount, actionTarget.currency) }}
+              </span>
+            </p>
+          </div>
+
+          <v-select
+            v-model="actionForm.actionType"
+            :items="actionTypeOptions"
+            label="نوع الإجراء"
+            variant="outlined"
+            density="comfortable"
+            class="mb-4"
+          />
+
+          <!-- promise_to_pay fields -->
+          <template v-if="actionForm.actionType === 'promise_to_pay'">
+            <v-text-field
+              v-model.number="actionForm.promisedAmount"
+              type="number"
+              label="المبلغ الموعود"
+              variant="outlined"
+              density="comfortable"
+              :prefix="actionTarget.currency"
+              class="mb-4"
+            />
+            <v-text-field
+              v-model="actionForm.promisedDate"
+              type="date"
+              label="تاريخ الوعد"
+              variant="outlined"
+              density="comfortable"
+              class="mb-4"
+            />
+          </template>
+
+          <!-- reschedule field -->
+          <template v-if="actionForm.actionType === 'reschedule'">
+            <v-text-field
+              v-model="actionForm.newDueDate"
+              type="date"
+              label="تاريخ الاستحقاق الجديد"
+              variant="outlined"
+              density="comfortable"
+              class="mb-4"
+            />
+          </template>
+
+          <!-- payment fields -->
+          <template v-if="actionForm.actionType === 'payment'">
+            <v-text-field
+              v-model.number="actionForm.amount"
+              type="number"
+              label="مبلغ الدفعة"
+              variant="outlined"
+              density="comfortable"
+              :prefix="actionTarget.currency"
+              :hint="`المتبقي: ${formatCurrency(actionTarget.remainingAmount, actionTarget.currency)}`"
+              persistent-hint
+              class="mb-4"
+            />
+            <v-select
+              v-model="actionForm.paymentMethod"
+              :items="[
+                { title: 'نقد', value: 'cash' },
+                { title: 'بطاقة', value: 'card' },
+              ]"
+              label="طريقة الدفع"
+              variant="outlined"
+              density="comfortable"
+              class="mb-4"
+            />
+            <v-text-field
+              v-if="actionForm.paymentMethod === 'card'"
+              v-model="actionForm.paymentReference"
+              label="مرجع البطاقة"
+              variant="outlined"
+              density="comfortable"
+              class="mb-4"
+            />
+          </template>
+
+          <v-textarea
+            v-model="actionForm.note"
+            label="ملاحظة (اختياري)"
+            rows="3"
+            variant="outlined"
+            density="comfortable"
+            counter="2000"
+            :max-length="2000"
+            auto-grow
+            class="mb-4"
+          />
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" :disabled="actionSubmitting" @click="actionDialog = false">
+            إلغاء
+          </v-btn>
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-content-save"
+            :loading="actionSubmitting"
+            :disabled="!canSubmitAction"
+            @click="submitAction"
+          >
+            حفظ
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- show customer phone number -->
     <v-dialog v-model="showCustomerPhoneNumber" max-width="560" persistent>
       <v-card>
@@ -538,12 +858,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationSettingsStore } from '@/stores/notificationSettings';
 import { useNotificationStore } from '@/stores/notification';
+import { useCollectionsStore } from '@/stores/collections';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
 import {
@@ -559,6 +880,7 @@ const customerStore = useCustomerStore();
 const authStore = useAuthStore();
 const notificationSettingsStore = useNotificationSettingsStore();
 const toastStore = useNotificationStore();
+const collectionsStore = useCollectionsStore();
 
 const loading = ref(true);
 const error = ref(null);
@@ -569,6 +891,10 @@ const showCustomerPhoneNumber = ref(false);
 const userRole = computed(() => authStore.user?.role);
 const canEdit = computed(() => uiAccess.canManageCustomers(userRole.value));
 const canAddPayment = computed(() => uiAccess.canAddPayments(userRole.value));
+// Collections actions reuse the sales:update permission gate (same backend
+// rule as adding a payment), so the UI surfaces the workflow exactly when
+// the user could already record a payment elsewhere.
+const canCollect = computed(() => uiAccess.canAddPayments(userRole.value));
 // Only admins / managers with settings:manage can read messaging settings,
 // so only they can know whether the WhatsApp gate is satisfied. Hide the
 // button for everyone else.
@@ -782,6 +1108,15 @@ const installmentHeaders = [
   { title: '', key: 'actions', sortable: false },
 ];
 
+const collectionsInstallmentHeaders = [
+  { title: 'الفاتورة', key: 'invoiceNumber' },
+  { title: 'الاستحقاق', key: 'dueDate' },
+  { title: 'المبلغ', key: 'dueAmount', align: 'end' },
+  { title: 'المتبقي', key: 'remainingAmount', align: 'end' },
+  { title: 'تأخر', key: 'overdueDays' },
+  { title: '', key: 'actions', sortable: false },
+];
+
 const paymentHeaders = [
   { title: 'التاريخ', key: 'date' },
   { title: 'المبلغ', key: 'amount', align: 'end' },
@@ -834,6 +1169,151 @@ const warningText = (warning) => {
   }
   return warning.message;
 };
+
+// ── Collections workflow ────────────────────────────────────────────────
+const collectionsLoading = ref(false);
+const collectionHistory = ref([]);
+const actionDialog = ref(false);
+const actionTarget = ref(null);
+const actionSubmitting = ref(false);
+const actionForm = ref({
+  actionType: 'call',
+  note: '',
+  promisedAmount: null,
+  promisedDate: null,
+  newDueDate: null,
+  amount: null,
+  paymentMethod: 'cash',
+  paymentReference: '',
+});
+
+const overdueInstallments = computed(() =>
+  (profile.value?.installments || []).filter(
+    (i) => i.status === 'pending' && (i.overdueDays || 0) > 0
+  )
+);
+
+const upcomingInstallments = computed(() =>
+  (profile.value?.installments || []).filter(
+    (i) => i.status === 'pending' && (i.overdueDays || 0) === 0
+  )
+);
+
+const actionTypeOptions = [
+  { title: 'مكالمة', value: 'call' },
+  { title: 'زيارة', value: 'visit' },
+  { title: 'وعد بالدفع', value: 'promise_to_pay' },
+  { title: 'تأجيل الاستحقاق', value: 'reschedule' },
+  { title: 'ملاحظة', value: 'note' },
+  { title: 'تسجيل دفعة', value: 'payment' },
+];
+
+const actionTypeLabel = (type) => actionTypeOptions.find((o) => o.value === type)?.title || type;
+
+const actionTypeColor = (type) => {
+  switch (type) {
+    case 'payment':
+      return 'success';
+    case 'promise_to_pay':
+      return 'info';
+    case 'reschedule':
+      return 'warning';
+    case 'visit':
+      return 'primary';
+    default:
+      return 'grey';
+  }
+};
+
+const resetActionForm = () => {
+  actionForm.value = {
+    actionType: 'call',
+    note: '',
+    promisedAmount: null,
+    promisedDate: null,
+    newDueDate: null,
+    amount: actionTarget.value?.remainingAmount || null,
+    paymentMethod: 'cash',
+    paymentReference: '',
+  };
+};
+
+const openActionDialog = (installment) => {
+  if (!canCollect.value) return;
+  actionTarget.value = installment;
+  resetActionForm();
+  actionDialog.value = true;
+};
+
+const canSubmitAction = computed(() => {
+  if (actionSubmitting.value) return false;
+  const f = actionForm.value;
+  if (f.actionType === 'promise_to_pay') {
+    return Number(f.promisedAmount) > 0 && !!f.promisedDate;
+  }
+  if (f.actionType === 'reschedule') {
+    return !!f.newDueDate && f.newDueDate !== actionTarget.value?.dueDate;
+  }
+  if (f.actionType === 'payment') {
+    if (!(Number(f.amount) > 0) || !f.paymentMethod) return false;
+    if (f.paymentMethod === 'card' && !f.paymentReference?.trim()) return false;
+    return true;
+  }
+  return true;
+});
+
+const buildActionPayload = () => {
+  const f = actionForm.value;
+  const payload = { actionType: f.actionType };
+  if (f.note?.trim()) payload.note = f.note.trim();
+  if (f.actionType === 'promise_to_pay') {
+    payload.promisedAmount = Number(f.promisedAmount);
+    payload.promisedDate = f.promisedDate;
+  }
+  if (f.actionType === 'reschedule') {
+    payload.newDueDate = f.newDueDate;
+  }
+  if (f.actionType === 'payment') {
+    payload.amount = Number(f.amount);
+    payload.paymentMethod = f.paymentMethod;
+    payload.currency = actionTarget.value?.currency;
+    if (f.paymentMethod === 'card' && f.paymentReference?.trim()) {
+      payload.paymentReference = f.paymentReference.trim();
+    }
+  }
+  return payload;
+};
+
+const submitAction = async () => {
+  if (!canSubmitAction.value || !actionTarget.value) return;
+  actionSubmitting.value = true;
+  try {
+    await collectionsStore.recordAction(actionTarget.value.id, buildActionPayload());
+    actionDialog.value = false;
+    // Reload profile (for updated installment / due date / payment) and history.
+    await Promise.allSettled([loadProfile(), loadCollections()]);
+  } catch {
+    // store already toasts the error
+  } finally {
+    actionSubmitting.value = false;
+  }
+};
+
+const loadCollections = async () => {
+  if (!profile.value?.customer?.id || !canCollect.value) return;
+  collectionsLoading.value = true;
+  try {
+    collectionHistory.value = await collectionsStore.customerHistory(profile.value.customer.id);
+  } catch {
+    collectionHistory.value = [];
+  } finally {
+    collectionsLoading.value = false;
+  }
+};
+
+watch(activeTab, (tab) => {
+  if (tab === 'collections') loadCollections();
+});
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
 const loadProfile = async () => {

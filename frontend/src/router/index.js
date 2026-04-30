@@ -38,6 +38,7 @@ import BranchesWarehouses from '@/views/inventory/BranchesWarehouses.vue';
 import TransferRequests from '@/views/inventory/TransferRequests.vue';
 import FeatureFlags from '@/views/settings/FeatureFlags.vue';
 import SetupWizard from '@/views/settings/SetupWizard.vue';
+import Collections from '@/views/collections/Collections.vue';
 
 const routes = [
   {
@@ -136,6 +137,14 @@ const routes = [
         path: 'sales/shifts',
         name: 'ShiftReport',
         component: ShiftReport,
+        meta: { requiresCreateSales: true },
+      },
+      {
+        path: 'collections',
+        name: 'Collections',
+        component: Collections,
+        // Same gate as adding a payment elsewhere — backend enforces the
+        // `sales:read` / `sales:update` pair authoritatively.
         meta: { requiresCreateSales: true },
       },
       {

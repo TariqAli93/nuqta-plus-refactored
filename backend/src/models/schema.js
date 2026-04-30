@@ -627,3 +627,37 @@ export const auditLog = pgTable('audit_log', {
   ipAddress: text('ip_address'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// ── Installment Collection Actions ────────────────────────────────────────
+// Lightweight activity log for the collections workflow. One row per
+// interaction with a customer about a specific installment: a phone call,
+// a visit, a promise to pay, a reschedule, a free-form note, or a payment
+// recorded against the installment. The actual payment money still flows
+// through the existing payments table — this table only links the action
+// to its resulting payment row (paymentId) when applicable.
+export const installmentActions = pgTable(
+  'installment_actions',
+  {
+    id: serial('id').primaryKey(),
+    installmentId: integer('installment_id')
+      .notNull()
+      .references(() => installments.id, { onDelete: 'cascade' }),
+    customerId: integer('customer_id').references(() => customers.id),
+    saleId: integer('sale_id').references(() => sales.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').references(() => users.id),
+    // 'call' | 'visit' | 'promise_to_pay' | 'reschedule' | 'note' | 'payment'
+    actionType: text('action_type').notNull(),
+    note: text('note'),
+    promisedAmount: numeric('promised_amount', { precision: 18, scale: 4 }),
+    promisedDate: text('promised_date'),     // YYYY-MM-DD
+    oldDueDate: text('old_due_date'),        // for reschedule
+    newDueDate: text('new_due_date'),        // for reschedule
+    paymentId: integer('payment_id').references(() => payments.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    installmentIdx: index('installment_actions_installment_idx').on(t.installmentId),
+    customerIdx: index('installment_actions_customer_idx').on(t.customerId),
+    createdAtIdx: index('installment_actions_created_at_idx').on(t.createdAt),
+  })
+);
