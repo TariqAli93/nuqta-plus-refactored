@@ -784,7 +784,14 @@ const refreshCurrentSession = async () => {
 const onOpenShiftConfirm = async ({ openingCash, currency: cur, notes }) => {
   shiftLoading.value = true;
   try {
-    await cashSessionStore.openSession({ openingCash, currency: cur, notes });
+    // Carry the cashier's active branch through so the session row stores
+    // a real branch_id (instead of NULL) for global / unassigned admins.
+    await cashSessionStore.openSession({
+      openingCash,
+      currency: cur,
+      notes,
+      branchId: inventoryStore.selectedBranchId || null,
+    });
     openShiftDialog.value = false;
   } catch {
     /* notification already raised by the store */

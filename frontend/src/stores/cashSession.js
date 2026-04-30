@@ -39,15 +39,17 @@ export const useCashSessionStore = defineStore('cashSession', {
       }
     },
 
-    async openSession({ openingCash, currency = 'USD', notes = null } = {}) {
+    async openSession({ openingCash, currency = 'USD', notes = null, branchId = null } = {}) {
       this.loading = true;
       const notify = useNotificationStore();
       try {
-        const response = await api.post('/cash-sessions/open', {
+        const payload = {
           openingCash: Number(openingCash) || 0,
           currency,
           notes,
-        });
+        };
+        if (branchId) payload.branchId = Number(branchId);
+        const response = await api.post('/cash-sessions/open', payload);
         this.current = response?.data || null;
         notify.success('تم فتح الوردية');
         return this.current;

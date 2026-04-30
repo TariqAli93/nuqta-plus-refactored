@@ -11,6 +11,26 @@ import { NotFoundError, ValidationError, AuthorizationError } from '../utils/err
 import { isGlobalAdmin, branchFilterFor } from './scopeService.js';
 import auditService from './auditService.js';
 
+/**
+ * Pick a sensible default branch for a session when the caller didn't pass
+ * one. Branch-bound users always use their assigned branch; global admins
+ * fall back to the first active branch in the system so the session row is
+ * never branchId=NULL when at least one branch exists.
+ */
+async function resolveSessionBranchId({ requestedBranchId, user }) {
+  if (requestedBranchId) return Number(requestedBranchId);
+  if (user?.assignedBranchId) return Number(user.assignedBranchId);
+  if (!isGlobalAdmin(user)) return null;
+  const db = await getDb();
+  const [first] = await db
+    .select({ id: branches.id })
+    .from(branches)
+    .where(eq(branches.isActive, true))
+    .orderBy(branches.id)
+    .limit(1);
+  return first?.id || null;
+}
+
 /** Parse PG numeric (string) → JS number. */
 const n = (v) => (v === null || v === undefined ? 0 : Number(v));
 
@@ -47,9 +67,12 @@ export class CashSessionService {
     }
 
     // Branch-bound users always operate on their assigned branch — they cannot
-    // open a session in someone else's branch.
-    const effectiveBranchId =
-      isGlobalAdmin(user) ? branchId || user.assignedBranchId || null : user.assignedBranchId || null;
+    // open a session in someone else's branch. Global admins use whatever
+    // branch the request supplied (or the first active branch) so the session
+    // row carries a real branch_id instead of NULL.
+    const effectiveBranchId = isGlobalAdmin(user)
+      ? await resolveSessionBranchId({ requestedBranchId: branchId, user })
+      : user.assignedBranchId || null;
 
     const db = await getDb();
     const existing = await this.findOpenSession(user.id, effectiveBranchId);
@@ -189,15 +212,9 @@ export class CashSessionService {
     // dynamically and may not match the session.branchId stored at open.
     const session = await this.findOpenSession(user.id, user.assignedBranchId || null);
     if (!session) return null;
-    const summary = await this.computeSessionTotals(session.id);
-    const expected = round4(n(session.openingCash) + summary.cashIn - summary.cashOut);
-    return {
-      ...this.serialize(session),
-      cashIn: summary.cashIn,
-      cashOut: summary.cashOut,
-      cashSalesCount: summary.cashSalesCount,
-      expectedCash: expected,
-    };
+    // Re-load through getById so the response includes the joined cashier
+    // and branch labels (findOpenSession returns a raw row).
+    return await this.getById(session.id, user);
   }
 
   async getById(id, user = null) {
