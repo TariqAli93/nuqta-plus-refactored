@@ -1,17 +1,24 @@
 <template>
   <v-container fluid class="expenses-page pa-3 pa-sm-4">
-    <div class="d-flex flex-wrap align-center mb-4 gap-2">
-      <h2 class="text-h6 font-weight-bold mb-0">المصاريف</h2>
-      <v-spacer />
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">
-        تسجيل مصروف
-      </v-btn>
-    </div>
+    <v-card class="mb-4">
+      <div class="flex justify-space-between items-center pa-3">
+        <div class="text-h6 font-semibold text-primary">إدارة المصاريف</div>
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-plus"
+          size="default"
+          aria-label="إضافة مصروف جديد"
+          @click="openCreate"
+        >
+          مصروف جديد
+        </v-btn>
+      </div>
+    </v-card>
 
     <!-- Summary cards -->
     <v-row v-if="summary" dense class="mb-4">
       <v-col cols="12" sm="6" md="3">
-        <v-card variant="tonal" color="warning">
+        <v-card class="mb-4">
           <v-card-text>
             <div class="text-caption">إجمالي المصاريف</div>
             <div class="text-h5 font-weight-bold">{{ moneyFmt(summary.total) }}</div>
@@ -19,8 +26,14 @@
           </v-card-text>
         </v-card>
       </v-col>
-      <v-col v-for="row in summary.byCurrency || []" :key="`cur-${row.currency}`" cols="6" sm="3" md="3">
-        <v-card variant="outlined">
+      <v-col
+        v-for="row in summary.byCurrency || []"
+        :key="`cur-${row.currency}`"
+        cols="6"
+        sm="3"
+        md="3"
+      >
+        <v-card>
           <v-card-text>
             <div class="text-caption">{{ row.currency }}</div>
             <div class="text-h6">{{ moneyFmt(row.total) }}</div>
@@ -30,7 +43,7 @@
     </v-row>
 
     <!-- Filters -->
-    <v-card variant="outlined" class="mb-4">
+    <v-card class="mb-4">
       <v-card-text class="d-flex flex-wrap align-center gap-3">
         <v-text-field
           v-model="filters.dateFrom"
@@ -262,10 +275,7 @@ async function reload() {
   Object.keys(params).forEach((k) => {
     if (params[k] === null || params[k] === '' || params[k] === undefined) delete params[k];
   });
-  await Promise.all([
-    expensesStore.fetch(params),
-    expensesStore.fetchSummary(params),
-  ]);
+  await Promise.all([expensesStore.fetch(params), expensesStore.fetchSummary(params)]);
 }
 
 function clearFilters() {
@@ -334,7 +344,11 @@ async function confirmDelete(row) {
 
 onMounted(async () => {
   if (isGlobalAdmin.value) {
-    try { await inventoryStore.fetchBranches(); } catch { /* ignore */ }
+    try {
+      await inventoryStore.fetchBranches();
+    } catch {
+      /* ignore */
+    }
   }
   await reload();
 });
@@ -346,6 +360,10 @@ onMounted(async () => {
   max-width: 1400px;
   margin: 0 auto;
 }
-.gap-2 { gap: 0.5rem; }
-.gap-3 { gap: 0.75rem; }
+.gap-2 {
+  gap: 0.5rem;
+}
+.gap-3 {
+  gap: 0.75rem;
+}
 </style>

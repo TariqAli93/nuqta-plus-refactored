@@ -30,7 +30,7 @@
     "format": "cd backend && pnpm format && cd ../frontend && pnpm format",
     "db:migrate": "cd backend && pnpm db:migrate",
     "db:generate": "cd backend && pnpm db:generate",
-    "seed": "cd backend && node src/seed.js"
+    "seed": "cd backend && node src/seed.js --demo"
   },
   "keywords": [
     "accounting",
