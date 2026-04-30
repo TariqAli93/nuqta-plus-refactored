@@ -40,6 +40,7 @@ import reportRoutes from './routes/reportRoutes.js';
 import cashSessionRoutes from './routes/cashSessionRoutes.js';
 import installmentRoutes from './routes/installmentRoutes.js';
 import collectionsRoutes from './routes/collectionsRoutes.js';
+import expensesRoutes from './routes/expensesRoutes.js';
 
 // Debug features - only in development
 const isProduction = config.server.env === 'production';
@@ -144,6 +145,7 @@ const start = async () => {
     await fastify.register(cashSessionRoutes, { prefix: '/api/cash-sessions' });
     await fastify.register(installmentRoutes, { prefix: '/api/installments' });
     await fastify.register(collectionsRoutes, { prefix: '/api/collections' });
+    await fastify.register(expensesRoutes, { prefix: '/api/expenses' });
     // Only register debug routes in development
     if (!isProduction) {
       const { default: debugRoutes } = await import('./routes/debugRoutes.js');

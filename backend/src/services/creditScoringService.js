@@ -13,6 +13,7 @@ import {
   getScoringMode,
   SCORING_MODE,
 } from './onnxCreditScoringService.js';
+import { getAgingForCustomer, hasSevereDelinquency } from './agingService.js';
 
 /**
  * Rule-based credit scoring.
@@ -512,4 +513,191 @@ export async function getCustomerCreditSnapshot(customerId) {
     model_version: getModelVersion(),
     model_loaded: isCreditScoreModelAvailable(),
   };
+}
+
+// ── Smart Credit Decision Engine ──────────────────────────────────────────
+// Tunables for the install-sale go/no-go decision. Kept alongside the
+// scoring config so policy changes happen in one place.
+export const CREDIT_DECISION_CONFIG = Object.freeze({
+  // Active-installment guardrails
+  MAX_ACTIVE_INSTALLMENTS_MEDIUM: 5, // > triggers medium risk
+  MAX_ACTIVE_INSTALLMENTS_HIGH: 8,   // > triggers high risk
+
+  // Suggestions for medium/high risk
+  SUGGESTED_DOWN_PAYMENT_MEDIUM: 0.20,
+  SUGGESTED_DOWN_PAYMENT_HIGH: 0.30,
+  SUGGESTED_MAX_MONTHS_MEDIUM: 6,
+  SUGGESTED_MAX_MONTHS_HIGH: 3,
+});
+
+/**
+ * Decide whether a customer may take a new installment sale of `amount`.
+ *
+ * Inputs come from cached customer state + live aging + current open-debt
+ * counts. POS-fast path: a single snapshot read + a single aging query.
+ *
+ * Decision rules (combined risk = max of every signal):
+ *   - score < 50                                 → high
+ *   - 50 ≤ score < 70                            → medium
+ *   - 31+ days overdue installments outstanding  → high
+ *   - >MAX_ACTIVE_INSTALLMENTS_HIGH active        → high
+ *   - >MAX_ACTIVE_INSTALLMENTS_MEDIUM active      → medium
+ *   - amount > recommendedLimit                  → high (unless override)
+ *   - amount > 50% of remaining headroom         → medium
+ *
+ * Returns:
+ *   {
+ *     allowed: boolean,
+ *     riskLevel: 'low' | 'medium' | 'high',
+ *     reason: string,
+ *     reasons: string[],     // all triggered signals
+ *     suggestedDownPayment?: number,        // absolute amount (same currency)
+ *     suggestedMaxInstallmentMonths?: number,
+ *     snapshot, aging,                      // for the UI to render details
+ *   }
+ *
+ * High risk → allowed=false unless the caller overrides at the saleService
+ * layer (sales.override_credit_limit). Medium risk is allowed but surfaces
+ * suggestions. Low risk is a clean pass.
+ */
+export async function canCreateInstallmentSale(
+  customerId,
+  amount,
+  _branchId = null,
+  cfg = CREDIT_DECISION_CONFIG
+) {
+  const numericAmount = Number(amount) || 0;
+  if (!customerId) {
+    return {
+      allowed: false,
+      riskLevel: 'high',
+      reason: 'Customer is required for installment sales',
+      reasons: ['no_customer'],
+    };
+  }
+  if (numericAmount <= 0) {
+    return {
+      allowed: false,
+      riskLevel: 'high',
+      reason: 'Sale amount must be greater than zero',
+      reasons: ['invalid_amount'],
+    };
+  }
+
+  const snapshot = await getCustomerCreditSnapshot(customerId);
+  if (!snapshot) {
+    return {
+      allowed: false,
+      riskLevel: 'high',
+      reason: 'Customer not found',
+      reasons: ['customer_not_found'],
+    };
+  }
+
+  const db = await getDb();
+  const [openCounts] = await db
+    .select({
+      activeInstallments: sql`COALESCE(COUNT(CASE WHEN ${installments.status} = 'pending' THEN 1 END), 0)`,
+      overdueInstallments: sql`COALESCE(COUNT(CASE WHEN ${installments.status} = 'pending' AND ${installments.dueDate} < CURRENT_DATE::text THEN 1 END), 0)`,
+    })
+    .from(installments)
+    .where(eq(installments.customerId, Number(customerId)));
+
+  const aging = await getAgingForCustomer(customerId);
+
+  const score = snapshot.creditScore;
+  const recommendedLimit = snapshot.recommendedLimit;
+  const totalDebt = snapshot.totalDebt || 0;
+  const activeInstallments = Number(openCounts?.activeInstallments || 0);
+  const overdueInstallments = Number(openCounts?.overdueInstallments || 0);
+
+  const reasons = [];
+  const levels = ['low'];
+
+  // Score-driven risk
+  if (score != null) {
+    if (score < 50) {
+      levels.push('high');
+      reasons.push(`Credit score is poor (${score})`);
+    } else if (score < 70) {
+      levels.push('medium');
+      reasons.push(`Credit score is fair (${score})`);
+    }
+  }
+
+  // Severe delinquency (31+ days)
+  if (hasSevereDelinquency(aging)) {
+    levels.push('high');
+    reasons.push('Customer has installments overdue 31+ days');
+  } else if (overdueInstallments > 0) {
+    levels.push('medium');
+    reasons.push(`${overdueInstallments} installment(s) currently overdue`);
+  }
+
+  // Too many active installments
+  if (activeInstallments > cfg.MAX_ACTIVE_INSTALLMENTS_HIGH) {
+    levels.push('high');
+    reasons.push(`Too many active installments (${activeInstallments})`);
+  } else if (activeInstallments > cfg.MAX_ACTIVE_INSTALLMENTS_MEDIUM) {
+    levels.push('medium');
+    reasons.push(`Many active installments (${activeInstallments})`);
+  }
+
+  // Limit comparison — only meaningful when we know the limit
+  let exceedsLimit = false;
+  let nearLimit = false;
+  if (recommendedLimit != null) {
+    const headroom = Math.max(0, Number(recommendedLimit) - Number(totalDebt));
+    if (numericAmount > Number(recommendedLimit)) {
+      exceedsLimit = true;
+      levels.push('high');
+      reasons.push(
+        `Sale amount (${numericAmount}) exceeds recommended limit (${recommendedLimit})`
+      );
+    } else if (headroom > 0 && numericAmount > headroom * 0.5) {
+      nearLimit = true;
+      levels.push('medium');
+      reasons.push('Sale amount uses more than half of available credit headroom');
+    }
+  }
+
+  // Resolve combined risk = worst of all signals
+  const order = { low: 0, medium: 1, high: 2 };
+  const riskLevel = levels.reduce(
+    (acc, l) => (order[l] > order[acc] ? l : acc),
+    'low'
+  );
+
+  const allowed = riskLevel !== 'high';
+
+  const out = {
+    allowed,
+    riskLevel,
+    reason: reasons[0] || 'Customer is in good standing',
+    reasons,
+    snapshot: {
+      creditScore: score,
+      recommendedLimit,
+      totalDebt,
+      activeInstallments,
+      overdueInstallments,
+    },
+    aging: {
+      totalOutstanding: aging.totalOutstanding,
+      buckets: aging.buckets,
+      worstBucket: aging.worstBucket,
+    },
+    exceedsLimit,
+    nearLimit,
+  };
+
+  if (riskLevel === 'high') {
+    out.suggestedDownPayment = Math.round(numericAmount * cfg.SUGGESTED_DOWN_PAYMENT_HIGH);
+    out.suggestedMaxInstallmentMonths = cfg.SUGGESTED_MAX_MONTHS_HIGH;
+  } else if (riskLevel === 'medium') {
+    out.suggestedDownPayment = Math.round(numericAmount * cfg.SUGGESTED_DOWN_PAYMENT_MEDIUM);
+    out.suggestedMaxInstallmentMonths = cfg.SUGGESTED_MAX_MONTHS_MEDIUM;
+  }
+
+  return out;
 }

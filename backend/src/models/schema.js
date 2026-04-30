@@ -658,6 +658,36 @@ export const auditLog = pgTable('audit_log', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// ── Expenses ──────────────────────────────────────────────────────────────
+// Operational expense tracking. Rows record real money going out (rent,
+// salaries, supplies, utilities). Used by the report layer to compute
+// realistic net profit (revenue - cogs - expenses). Branch-scoped so each
+// branch sees only its own expenses unless the user is a global admin.
+//
+// `category` is free-form text validated at the application layer so the
+// allowed list can be extended without a migration.
+export const expenses = pgTable(
+  'expenses',
+  {
+    id: serial('id').primaryKey(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    category: text('category').notNull(),
+    amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+    currency: text('currency').notNull().default('USD'),
+    note: text('note'),
+    expenseDate: date('expense_date').notNull(),
+    createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    branchIdx: index('expenses_branch_idx').on(t.branchId),
+    categoryIdx: index('expenses_category_idx').on(t.category),
+    expenseDateIdx: index('expenses_expense_date_idx').on(t.expenseDate),
+    createdAtIdx: index('expenses_created_at_idx').on(t.createdAt),
+  })
+);
+
 // ── Installment Collection Actions ────────────────────────────────────────
 // Lightweight activity log for the collections workflow. One row per
 // interaction with a customer about a specific installment: a phone call,

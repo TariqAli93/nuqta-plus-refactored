@@ -119,6 +119,19 @@ const PERMISSION_MATRIX = {
   'audit:read': GLOBAL,
   'audit:delete': GLOBAL,
 
+  // ── Expenses ─────────────────────────────────────────────────────────────
+  // Cashiers cannot record expenses (avoids accidental drawer accounting
+  // mismatches); branch managers and above can.
+  'expenses:create': MANAGER,
+  'expenses:read': MANAGER,
+  'expenses:update': MANAGER,
+  'expenses:delete': BRANCH_MANAGER,
+
+  // ── Reports ──────────────────────────────────────────────────────────────
+  // Profit-sensitive aggregates require manager-level role.
+  'reports:read_profit': MANAGER,
+  'view:expenses': MANAGER,
+
   // ── Inventory ────────────────────────────────────────────────────────────
   'inventory:read': ALL,
   'inventory:adjust': MANAGER,

@@ -107,6 +107,8 @@
         :can-view-profit="canViewProfit"
       />
 
+      <AgingPanel :data="aging" :loading="agingLoading" />
+
       <ReportTables
         :kpis-by-currency="report.kpisByCurrency || {}"
         :installments-summary="report.installmentsSummary || {}"
@@ -131,6 +133,7 @@ import ReportFilters from '@/components/reports/ReportFilters.vue';
 import ReportKpiCards from '@/components/reports/ReportKpiCards.vue';
 import ReportCharts from '@/components/reports/ReportCharts.vue';
 import ReportTables from '@/components/reports/ReportTables.vue';
+import AgingPanel from '@/components/reports/AgingPanel.vue';
 
 const authStore = useAuthStore();
 const reportStore = useReportStore();
@@ -139,6 +142,8 @@ const settingsStore = useSettingsStore();
 
 const loading = computed(() => reportStore.loading);
 const report = computed(() => reportStore.data);
+const aging = computed(() => reportStore.aging);
+const agingLoading = ref(false);
 const error = ref('');
 const exportingExcel = ref(false);
 const exportingPdf = ref(false);
@@ -213,8 +218,6 @@ function translateNote(note) {
   const map = {
     'Currency conversion unavailable: totals are grouped by currency only.':
       'تحويل العملات غير متاح: يتم تجميع الإجماليات حسب كل عملة على حدة.',
-    'Expenses module is not available in current schema; expenses shown as 0.':
-      'وحدة المصاريف غير متوفرة في المخطط الحالي، يتم عرض المصاريف كـ 0.',
   };
   return map[note] || note;
 }
@@ -223,13 +226,22 @@ async function load() {
   error.value = '';
   try {
     if (!showBranchFilter.value) filters.value.branchId = null;
-    await reportStore.fetchDashboard({
-      ...filters.value,
-      reportType: 'dashboard',
-    });
+    agingLoading.value = true;
+    await Promise.all([
+      reportStore.fetchDashboard({
+        ...filters.value,
+        reportType: 'dashboard',
+      }),
+      reportStore.fetchAging({
+        branchId: filters.value.branchId || undefined,
+        currency: filters.value.currency,
+      }),
+    ]);
     localStorage.setItem('reports.filters', JSON.stringify(filters.value));
   } catch (e) {
     error.value = e?.message || e?.error || 'تعذّر تحميل التقرير';
+  } finally {
+    agingLoading.value = false;
   }
 }
 

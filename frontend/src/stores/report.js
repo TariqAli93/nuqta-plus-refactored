@@ -5,6 +5,8 @@ export const useReportStore = defineStore('report', {
   state: () => ({
     loading: false,
     data: null,
+    aging: null,
+    profit: null,
   }),
   actions: {
     async fetchDashboard(params = {}) {
@@ -16,6 +18,16 @@ export const useReportStore = defineStore('report', {
       } finally {
         this.loading = false;
       }
+    },
+    async fetchAging(params = {}) {
+      const res = await api.get('/reports/aging', { params });
+      this.aging = res?.data || null;
+      return this.aging;
+    },
+    async fetchProfit(params = {}) {
+      const res = await api.get('/reports/profit', { params });
+      this.profit = res?.data || null;
+      return this.profit;
     },
     async exportExcel(params = {}) {
       const blob = await api.get('/reports/export/excel', { params, responseType: 'blob' });

@@ -71,6 +71,12 @@ export function useNavigationMenu() {
             permission: 'view:reports',
           },
           {
+            title: 'المصاريف',
+            icon: 'mdi-cash-minus',
+            to: '/expenses',
+            permission: 'expenses:read',
+          },
+          {
             title: 'الورديات',
             icon: 'mdi-cash-register',
             to: '/sales/shifts',

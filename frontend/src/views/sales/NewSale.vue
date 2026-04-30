@@ -238,6 +238,58 @@
             :currency="sale.currency"
           />
 
+          <!-- Smart credit decision banner -->
+          <v-alert
+            v-if="creditDecision && sale.paymentType === 'installment'"
+            :type="decisionAlertType"
+            variant="tonal"
+            border="start"
+            density="comfortable"
+            class="mb-4"
+            role="alert"
+            aria-live="polite"
+          >
+            <div class="d-flex align-center justify-space-between flex-wrap ga-2">
+              <div>
+                <div class="font-weight-bold">
+                  {{ decisionTitle }}
+                </div>
+                <div class="text-body-2">{{ creditDecision.reason }}</div>
+                <ul
+                  v-if="creditDecision.reasons && creditDecision.reasons.length > 1"
+                  class="ms-4 mb-0 mt-1 text-caption"
+                >
+                  <li v-for="r in creditDecision.reasons.slice(1)" :key="r">{{ r }}</li>
+                </ul>
+                <div
+                  v-if="
+                    creditDecision.suggestedDownPayment ||
+                    creditDecision.suggestedMaxInstallmentMonths
+                  "
+                  class="text-caption mt-1"
+                >
+                  <strong>اقتراحات:</strong>
+                  <span v-if="creditDecision.suggestedDownPayment">
+                    دفعة أولى مقترحة:
+                    {{ formatCurrency(creditDecision.suggestedDownPayment) }}
+                  </span>
+                  <span
+                    v-if="creditDecision.suggestedMaxInstallmentMonths"
+                    class="ms-3"
+                  >
+                    حد أقصى للأشهر: {{ creditDecision.suggestedMaxInstallmentMonths }}
+                  </span>
+                </div>
+              </div>
+              <v-progress-circular
+                v-if="creditCheckLoading"
+                indeterminate
+                size="20"
+                width="2"
+              />
+            </div>
+          </v-alert>
+
           <!-- Payment Section -->
           <v-card class="mb-4" elevation="1">
             <v-card-title class="d-flex align-center ga-2 pa-4">
@@ -523,6 +575,7 @@ import CreditScoreCard from '@/components/CreditScoreCard.vue';
 import { useKeyboardShortcuts, createPageShortcuts } from '@/composables/useKeyboardShortcuts';
 import FormFieldHelp from '@/components/FormFieldHelp.vue';
 import { SALE_SOURCE_NEW_SALE, SALE_TYPE_INSTALLMENT, SALE_TYPE_CASH } from '@/constants/sales';
+import api from '@/plugins/axios';
 
 const router = useRouter();
 const route = useRoute();
@@ -542,6 +595,55 @@ const authStore = useAuthStore();
 const installmentsEnabled = computed(() =>
   authStore.canUse('installments', 'canUseInstallments')
 );
+
+// ── Smart credit decision ────────────────────────────────────────────────
+// Pre-checks the customer + amount against the backend decision engine and
+// renders the warning banner above the sale summary. Re-runs whenever the
+// customer or the payable total changes.
+const creditDecision = ref(null);
+const creditCheckLoading = ref(false);
+let creditCheckTimer = null;
+let creditCheckSeq = 0;
+
+const decisionAlertType = computed(() => {
+  const lvl = creditDecision.value?.riskLevel;
+  if (lvl === 'high') return 'error';
+  if (lvl === 'medium') return 'warning';
+  return 'success';
+});
+const decisionTitle = computed(() => {
+  const lvl = creditDecision.value?.riskLevel;
+  if (lvl === 'high') return 'خطر مرتفع — قد يُرفض البيع بالتقسيط';
+  if (lvl === 'medium') return 'خطر متوسط — يمكن المتابعة مع توصيات';
+  return 'العميل في حالة ائتمانية جيدة';
+});
+
+async function refreshCreditDecision() {
+  if (!sale.value?.customerId || sale.value?.paymentType !== 'installment') {
+    creditDecision.value = null;
+    return;
+  }
+  const amount = totalWithInterest.value;
+  if (!amount || amount <= 0) {
+    creditDecision.value = null;
+    return;
+  }
+  const seq = ++creditCheckSeq;
+  creditCheckLoading.value = true;
+  try {
+    const res = await api.post(
+      `/customers/${sale.value.customerId}/credit/check-installment`,
+      { amount }
+    );
+    if (seq === creditCheckSeq) {
+      creditDecision.value = res?.data || null;
+    }
+  } catch {
+    if (seq === creditCheckSeq) creditDecision.value = null;
+  } finally {
+    if (seq === creditCheckSeq) creditCheckLoading.value = false;
+  }
+}
 
 const form = ref(null);
 const barcode = ref('');
@@ -655,6 +757,16 @@ const totalWithInterest = computed(() => {
   const result = total.value + interestValue.value;
   return Math.round(result * 100) / 100; // تقريب إلى رقمين عشريين
 });
+
+// Debounced re-check whenever the customer or amount changes.
+watch(
+  () => [sale.value?.customerId, sale.value?.paymentType, totalWithInterest.value],
+  () => {
+    if (creditCheckTimer) clearTimeout(creditCheckTimer);
+    creditCheckTimer = setTimeout(() => refreshCreditDecision(), 350);
+  },
+  { immediate: false }
+);
 
 // ✅ حساب قيمة القسط الواحد بشكل دقيق
 const installmentAmount = computed(() => {
@@ -947,6 +1059,18 @@ const submitSale = async () => {
     notify.error('يجب تحديد عميل للبيع بالتقسيط');
     return;
   }
+
+  // Smart credit control — confirm before submitting a high-risk installment.
+  if (
+    sale.value.paymentType === 'installment' &&
+    creditDecision.value?.riskLevel === 'high'
+  ) {
+    const proceed = window.confirm(
+      `تنبيه ائتماني: ${creditDecision.value.reason}.\n\nهل ترغب بالمتابعة؟ (سيتم رفض البيع إذا لم تكن لديك صلاحية تجاوز).`
+    );
+    if (!proceed) return;
+  }
+
   const { valid } = await form.value.validate();
   if (!valid) return notify.error('يرجى تعبئة جميع الحقول');
 

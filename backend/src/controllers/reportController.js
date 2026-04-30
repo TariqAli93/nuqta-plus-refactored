@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import reportService from '../services/reportService.js';
 import { isGlobalAdmin } from '../services/scopeService.js';
+import { getAging } from '../services/agingService.js';
 
 const querySchema = z.object({
   branchId: z.coerce.number().int().positive().optional(),
@@ -142,6 +143,32 @@ export class ReportController {
     reply.header('Content-Type', 'application/pdf');
     reply.header('Content-Disposition', buildContentDisposition(filename));
     return reply.send(pdf);
+  }
+
+  /**
+   * Receivables aging buckets across all customers (or one branch when the
+   * caller is a global admin and passes branchId).
+   */
+  async aging(request, reply) {
+    const parsed = querySchema.parse(request.query || {});
+    if (!isGlobalAdmin(request.user)) {
+      delete parsed.branchId;
+    }
+    const data = await getAging(parsed, request.user);
+    return reply.send({ success: true, data });
+  }
+
+  /**
+   * Profit report — revenue, COGS, expenses, gross/net profit, by branch
+   * and by date period. Manager-level required.
+   */
+  async profit(request, reply) {
+    const parsed = querySchema.parse(request.query || {});
+    if (!isGlobalAdmin(request.user)) {
+      delete parsed.branchId;
+    }
+    const data = await reportService.getProfitReport(parsed, request.user);
+    return reply.send({ success: true, data });
   }
 }
 

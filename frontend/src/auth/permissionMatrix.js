@@ -94,6 +94,16 @@ const PERMISSION_MATRIX = {
   'audit:read': GLOBAL,
   'audit:delete': GLOBAL,
 
+  // Expenses
+  'expenses:create': MANAGER,
+  'expenses:read': MANAGER,
+  'expenses:update': MANAGER,
+  'expenses:delete': BRANCH_MANAGER,
+  'view:expenses': MANAGER,
+
+  // Reports — profit-sensitive aggregates
+  'reports:read_profit': MANAGER,
+
   // Inventory
   'inventory:read': ALL,
   'inventory:adjust': MANAGER,

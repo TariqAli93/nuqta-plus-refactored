@@ -170,6 +170,9 @@
         </v-table>
       </v-card>
 
+      <!-- Aging buckets for this customer's overdue installments -->
+      <AgingPanel :data="customerAging" :loading="agingLoading" class="mb-4" />
+
       <!-- 3. Tabs --------------------------------------------------------- -->
       <v-card>
         <v-tabs v-model="activeTab" color="primary" align-tabs="start" show-arrows>
@@ -867,6 +870,8 @@ import { useNotificationStore } from '@/stores/notification';
 import { useCollectionsStore } from '@/stores/collections';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
+import AgingPanel from '@/components/reports/AgingPanel.vue';
+import api from '@/plugins/axios';
 import {
   formatCurrency,
   toYmdWithTime,
@@ -887,6 +892,24 @@ const error = ref(null);
 const profile = ref(null);
 const activeTab = ref('overview');
 const showCustomerPhoneNumber = ref(false);
+const customerAging = ref(null);
+const agingLoading = ref(false);
+
+async function loadCustomerAging(customerId) {
+  if (!customerId) {
+    customerAging.value = null;
+    return;
+  }
+  agingLoading.value = true;
+  try {
+    const res = await api.get(`/customers/${customerId}/aging`);
+    customerAging.value = res?.data || null;
+  } catch {
+    customerAging.value = null;
+  } finally {
+    agingLoading.value = false;
+  }
+}
 
 const userRole = computed(() => authStore.user?.role);
 const canEdit = computed(() => uiAccess.canManageCustomers(userRole.value));
@@ -1321,6 +1344,10 @@ const loadProfile = async () => {
   error.value = null;
   try {
     profile.value = await customerStore.fetchCustomerProfile(route.params.id);
+    if (profile.value?.customer?.id) {
+      // Aging is optional — failures should not break the profile page.
+      loadCustomerAging(profile.value.customer.id);
+    }
   } catch (err) {
     error.value = err || { message: 'تعذر تحميل ملف العميل' };
     profile.value = null;

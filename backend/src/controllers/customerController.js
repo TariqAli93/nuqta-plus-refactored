@@ -5,7 +5,9 @@ import {
   calculateAndPersistCreditScore,
   getRiskLevel,
   assessAndLogCreditRisk,
+  canCreateInstallmentSale,
 } from '../services/creditScoringService.js';
+import { getAgingForCustomer } from '../services/agingService.js';
 import {
   getScoringMode,
   getModelVersion,
@@ -116,5 +118,40 @@ export class CustomerController {
     }
     const result = await assessAndLogCreditRisk(id);
     return reply.send({ success: true, data: result });
+  }
+
+  /**
+   * Pre-check whether a proposed installment sale should be allowed for this
+   * customer. Read-only decision endpoint — used by the NewSale UI to render
+   * a warning before the user confirms.
+   *
+   * Body / query: { amount: number, branchId?: number }
+   */
+  async checkInstallmentDecision(request, reply) {
+    const id = Number(request.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ success: false, message: 'Invalid customer id' });
+    }
+    const amount = Number(request.body?.amount ?? request.query?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return reply
+        .code(400)
+        .send({ success: false, message: 'Amount must be a positive number' });
+    }
+    const branchId = request.body?.branchId || request.query?.branchId || null;
+    const decision = await canCreateInstallmentSale(id, amount, branchId);
+    return reply.send({ success: true, data: decision });
+  }
+
+  /**
+   * Aging breakdown for a single customer's overdue installments.
+   */
+  async getAging(request, reply) {
+    const id = Number(request.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ success: false, message: 'Invalid customer id' });
+    }
+    const data = await getAgingForCustomer(id, request.user);
+    return reply.send({ success: true, data });
   }
 }

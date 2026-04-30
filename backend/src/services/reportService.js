@@ -9,6 +9,8 @@ import {
   productStock,
   warehouses,
   stockMovements,
+  expenses,
+  branches,
 } from '../models/index.js';
 import { and, eq, gte, lte, sql, inArray, desc } from 'drizzle-orm';
 import { branchFilterFor } from './scopeService.js';
@@ -220,6 +222,54 @@ export class ReportService {
       .where(and(...saleConds))
       .groupBy(sales.currency);
 
+    // ── Expenses summary (used by netProfit + dedicated expense panels) ─────
+    const expenseConds = [];
+    if (from) expenseConds.push(gte(expenses.expenseDate, from));
+    if (to) expenseConds.push(lte(expenses.expenseDate, to));
+    if (currency && currency !== 'ALL') expenseConds.push(eq(expenses.currency, currency));
+    if (branchId !== null && branchId !== undefined) {
+      if (branchId === -1) expenseConds.push(sql`1=0`);
+      else expenseConds.push(eq(expenses.branchId, branchId));
+    }
+    const expenseWhere = expenseConds.length ? and(...expenseConds) : undefined;
+
+    const expenseByCurrency = await db
+      .select({
+        currency: expenses.currency,
+        total: sql`COALESCE(SUM(${expenses.amount}::numeric),0)`,
+      })
+      .from(expenses)
+      .where(expenseWhere)
+      .groupBy(expenses.currency);
+
+    const expenseByCategoryRows = await db
+      .select({
+        category: expenses.category,
+        currency: expenses.currency,
+        total: sql`COALESCE(SUM(${expenses.amount}::numeric),0)`,
+      })
+      .from(expenses)
+      .where(expenseWhere)
+      .groupBy(expenses.category, expenses.currency)
+      .orderBy(desc(sql`COALESCE(SUM(${expenses.amount}::numeric),0)`));
+
+    const expenseByBranchRows = await db
+      .select({
+        branchId: expenses.branchId,
+        branchName: branches.name,
+        currency: expenses.currency,
+        total: sql`COALESCE(SUM(${expenses.amount}::numeric),0)`,
+      })
+      .from(expenses)
+      .leftJoin(branches, eq(expenses.branchId, branches.id))
+      .where(expenseWhere)
+      .groupBy(expenses.branchId, branches.name, expenses.currency);
+
+    const expensesByCurrencyMap = Object.fromEntries(
+      expenseByCurrency.map((r) => [r.currency, toNum(r.total)])
+    );
+    const totalExpenses = expenseByCurrency.reduce((acc, r) => acc + toNum(r.total), 0);
+
     const summaryByCurrency = Object.fromEntries(salesSummaryRows.map((r) => [r.currency, {
       sales: toNum(r.totalSales), cashSales: toNum(r.cashSales), installmentSales: toNum(r.installmentSales),
       returnedCancelled: toNum(r.returnedCancelled), discounts: toNum(r.discounts), taxes: toNum(r.taxes),
@@ -254,10 +304,17 @@ export class ReportService {
       const s = summaryByCurrency[cur];
       const revenue = toNum(s.revenue);
       const cogs = s.cogs ?? null;
-      const expenses = 0;
+      const expenseTotal = expensesByCurrencyMap[cur] || 0;
       s.grossProfit = cogs === null ? null : revenue - cogs;
-      s.expenses = expenses;
-      s.netProfit = cogs === null ? null : revenue - cogs - expenses;
+      s.expenses = expenseTotal;
+      s.netProfit = cogs === null ? null : revenue - cogs - expenseTotal;
+    }
+    // Cover currencies that have expenses but no sales in the same period.
+    for (const [cur, total] of Object.entries(expensesByCurrencyMap)) {
+      summaryByCurrency[cur] ??= { revenue: 0 };
+      if (summaryByCurrency[cur].expenses === undefined) {
+        summaryByCurrency[cur].expenses = total;
+      }
     }
 
     const lowStock = stockRows.filter((r) => Number(r.quantity) > 0 && Number(r.quantity) <= Number(r.minStock || 0));
@@ -276,7 +333,6 @@ export class ReportService {
         conversionAvailable: false,
         notes: [
           'Currency conversion unavailable: totals are grouped by currency only.',
-          'Expenses module is not available in current schema; expenses shown as 0.',
         ],
       },
       kpisByCurrency: summaryByCurrency,
@@ -287,15 +343,27 @@ export class ReportService {
         customerDelayStats: delayRows.map((r) => ({ customerId: r.customerId, customerName: r.customerName, avgDelayDays: toNum(r.avgDelayDays), lateCount: Number(r.lateCount || 0) })),
       },
       expensesSummary: {
-        supported: false,
-        totalExpenses: 0,
-        byCategory: [],
-        byBranch: [],
-        byCurrency: [],
+        supported: true,
+        totalExpenses,
+        byCategory: expenseByCategoryRows.map((r) => ({
+          category: r.category,
+          currency: r.currency,
+          total: toNum(r.total),
+        })),
+        byBranch: expenseByBranchRows.map((r) => ({
+          branchId: r.branchId,
+          branchName: r.branchName,
+          currency: r.currency,
+          total: toNum(r.total),
+        })),
+        byCurrency: expenseByCurrency.map((r) => ({
+          currency: r.currency,
+          total: toNum(r.total),
+        })),
       },
       profitLoss: {
         byCurrency: Object.fromEntries(Object.entries(summaryByCurrency).map(([cur, s]) => [cur, {
-          revenue: toNum(s.revenue), cogs: s.cogs ?? null, grossProfit: s.grossProfit ?? null, expenses: 0, netProfit: s.netProfit ?? null,
+          revenue: toNum(s.revenue), cogs: s.cogs ?? null, grossProfit: s.grossProfit ?? null, expenses: toNum(s.expenses || 0), netProfit: s.netProfit ?? null,
           cogsAccurate: s.cogs !== null,
           warning: s.cogs === null ? 'COGS cannot be calculated accurately from current data.' : null,
         }]))
@@ -319,6 +387,250 @@ export class ReportService {
         topPayingCustomers: topPaying,
       },
       trends: await this.getTrends({ from, to, branchId, currency }),
+    };
+  }
+
+  /**
+   * Profit report — combines revenue, COGS, expenses for the requested
+   * window. Output shape:
+   *   {
+   *     totals:       { byCurrency: { CUR: { revenue, cogs, grossProfit, expenses, netProfit } } },
+   *     byBranch:     [{ branchId, branchName, currency, revenue, cogs, expenses, netProfit }],
+   *     byPeriod:     [{ day, currency, revenue, cogs, expenses, netProfit }],
+   *     meta:         { filters, generatedAt }
+   *   }
+   *
+   * Period granularity is daily — the existing dashboard already groups by
+   * day; consumers can re-bucket on the client.
+   */
+  async getProfitReport(filters = {}, actingUser = null) {
+    const db = await getDb();
+    const { from, to } = makeRange(filters);
+    const branchId = applyBranchScope(filters, actingUser);
+    const currency = filters.currency || 'ALL';
+
+    const salesDate = sql`${sales.createdAt}::date::text`;
+    const saleConds = withConditions(
+      [sql`${sales.status} <> 'cancelled'`, sql`${sales.status} <> 'draft'`],
+      { branchId, currency, from, to },
+      salesDate
+    );
+    const saleWhere = saleConds.length ? and(...saleConds) : undefined;
+
+    // Revenue aggregations from `sales`
+    const revenueByCurrency = await db
+      .select({
+        currency: sales.currency,
+        revenue: sql`COALESCE(SUM(${sales.total}::numeric),0)`,
+      })
+      .from(sales)
+      .where(saleWhere)
+      .groupBy(sales.currency);
+
+    const revenueByBranch = await db
+      .select({
+        branchId: sales.branchId,
+        branchName: branches.name,
+        currency: sales.currency,
+        revenue: sql`COALESCE(SUM(${sales.total}::numeric),0)`,
+      })
+      .from(sales)
+      .leftJoin(branches, eq(sales.branchId, branches.id))
+      .where(saleWhere)
+      .groupBy(sales.branchId, branches.name, sales.currency);
+
+    const revenueByDay = await db
+      .select({
+        day: salesDate,
+        currency: sales.currency,
+        revenue: sql`COALESCE(SUM(${sales.total}::numeric),0)`,
+      })
+      .from(sales)
+      .where(saleWhere)
+      .groupBy(salesDate, sales.currency)
+      .orderBy(salesDate);
+
+    // COGS aggregations from `sale_items` joined back to `sales`
+    const cogsByCurrencyRows = await db
+      .select({
+        currency: sales.currency,
+        cogs: sql`COALESCE(SUM(${saleItems.quantity} * ${products.costPrice}::numeric),0)`,
+      })
+      .from(saleItems)
+      .leftJoin(sales, eq(saleItems.saleId, sales.id))
+      .leftJoin(products, eq(saleItems.productId, products.id))
+      .where(saleWhere)
+      .groupBy(sales.currency);
+
+    const cogsByBranchRows = await db
+      .select({
+        branchId: sales.branchId,
+        currency: sales.currency,
+        cogs: sql`COALESCE(SUM(${saleItems.quantity} * ${products.costPrice}::numeric),0)`,
+      })
+      .from(saleItems)
+      .leftJoin(sales, eq(saleItems.saleId, sales.id))
+      .leftJoin(products, eq(saleItems.productId, products.id))
+      .where(saleWhere)
+      .groupBy(sales.branchId, sales.currency);
+
+    const cogsByDayRows = await db
+      .select({
+        day: salesDate,
+        currency: sales.currency,
+        cogs: sql`COALESCE(SUM(${saleItems.quantity} * ${products.costPrice}::numeric),0)`,
+      })
+      .from(saleItems)
+      .leftJoin(sales, eq(saleItems.saleId, sales.id))
+      .leftJoin(products, eq(saleItems.productId, products.id))
+      .where(saleWhere)
+      .groupBy(salesDate, sales.currency)
+      .orderBy(salesDate);
+
+    const cogsByCurrencyMap = Object.fromEntries(
+      cogsByCurrencyRows.map((r) => [r.currency || 'USD', toNum(r.cogs)])
+    );
+    const cogsByBranchMap = new Map(
+      cogsByBranchRows.map((r) => [`${r.branchId || 'null'}|${r.currency}`, toNum(r.cogs)])
+    );
+    const cogsByDayMap = new Map(
+      cogsByDayRows.map((r) => [`${r.day}|${r.currency}`, toNum(r.cogs)])
+    );
+
+    const totalsRows = revenueByCurrency.map((r) => ({
+      currency: r.currency,
+      revenue: toNum(r.revenue),
+      cogs: cogsByCurrencyMap[r.currency] || 0,
+    }));
+    const branchRows = revenueByBranch.map((r) => ({
+      branchId: r.branchId,
+      branchName: r.branchName,
+      currency: r.currency,
+      revenue: toNum(r.revenue),
+      cogs: cogsByBranchMap.get(`${r.branchId || 'null'}|${r.currency}`) || 0,
+    }));
+    const periodRows = revenueByDay.map((r) => ({
+      day: r.day,
+      currency: r.currency,
+      revenue: toNum(r.revenue),
+      cogs: cogsByDayMap.get(`${r.day}|${r.currency}`) || 0,
+    }));
+
+    // ── Expenses for the same window ────────────────────────────────────────
+    const expenseConds = [];
+    if (from) expenseConds.push(gte(expenses.expenseDate, from));
+    if (to) expenseConds.push(lte(expenses.expenseDate, to));
+    if (currency && currency !== 'ALL') expenseConds.push(eq(expenses.currency, currency));
+    if (branchId !== null && branchId !== undefined) {
+      if (branchId === -1) expenseConds.push(sql`1=0`);
+      else expenseConds.push(eq(expenses.branchId, branchId));
+    }
+    const expenseWhere = expenseConds.length ? and(...expenseConds) : undefined;
+
+    const expByCurrency = await db
+      .select({
+        currency: expenses.currency,
+        total: sql`COALESCE(SUM(${expenses.amount}::numeric),0)`,
+      })
+      .from(expenses)
+      .where(expenseWhere)
+      .groupBy(expenses.currency);
+
+    const expByBranch = await db
+      .select({
+        branchId: expenses.branchId,
+        currency: expenses.currency,
+        total: sql`COALESCE(SUM(${expenses.amount}::numeric),0)`,
+      })
+      .from(expenses)
+      .where(expenseWhere)
+      .groupBy(expenses.branchId, expenses.currency);
+
+    const expByDay = await db
+      .select({
+        day: expenses.expenseDate,
+        currency: expenses.currency,
+        total: sql`COALESCE(SUM(${expenses.amount}::numeric),0)`,
+      })
+      .from(expenses)
+      .where(expenseWhere)
+      .groupBy(expenses.expenseDate, expenses.currency)
+      .orderBy(expenses.expenseDate);
+
+    const expByCurrencyMap = Object.fromEntries(
+      expByCurrency.map((r) => [r.currency, toNum(r.total)])
+    );
+    const expByBranchMap = new Map(
+      expByBranch.map((r) => [`${r.branchId || 'null'}|${r.currency}`, toNum(r.total)])
+    );
+    const expByDayMap = new Map(
+      expByDay.map((r) => [`${r.day}|${r.currency}`, toNum(r.total)])
+    );
+
+    const totalsByCurrency = {};
+    for (const r of totalsRows) {
+      const cur = r.currency || 'USD';
+      const exp = expByCurrencyMap[cur] || 0;
+      totalsByCurrency[cur] = {
+        revenue: r.revenue,
+        cogs: r.cogs,
+        grossProfit: r.revenue - r.cogs,
+        expenses: exp,
+        netProfit: r.revenue - r.cogs - exp,
+      };
+    }
+    // Cover expense-only currencies
+    for (const [cur, total] of Object.entries(expByCurrencyMap)) {
+      totalsByCurrency[cur] ??= {
+        revenue: 0,
+        cogs: 0,
+        grossProfit: 0,
+        expenses: total,
+        netProfit: -total,
+      };
+    }
+
+    const byBranch = branchRows.map((r) => {
+      const exp = expByBranchMap.get(`${r.branchId || 'null'}|${r.currency}`) || 0;
+      return {
+        branchId: r.branchId,
+        branchName: r.branchName,
+        currency: r.currency,
+        revenue: r.revenue,
+        cogs: r.cogs,
+        grossProfit: r.revenue - r.cogs,
+        expenses: exp,
+        netProfit: r.revenue - r.cogs - exp,
+      };
+    });
+
+    const byPeriod = periodRows.map((r) => {
+      const exp = expByDayMap.get(`${r.day}|${r.currency}`) || 0;
+      return {
+        day: r.day,
+        currency: r.currency,
+        revenue: r.revenue,
+        cogs: r.cogs,
+        grossProfit: r.revenue - r.cogs,
+        expenses: exp,
+        netProfit: r.revenue - r.cogs - exp,
+      };
+    });
+
+    return {
+      totals: { byCurrency: totalsByCurrency },
+      byBranch,
+      byPeriod,
+      meta: {
+        filters: {
+          dateFrom: from,
+          dateTo: to,
+          currency,
+          requestedBranchId: filters.branchId || null,
+          effectiveBranchId: branchId,
+        },
+        generatedAt: new Date().toISOString(),
+      },
     };
   }
 

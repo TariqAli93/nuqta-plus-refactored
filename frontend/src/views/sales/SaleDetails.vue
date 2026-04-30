@@ -155,6 +155,20 @@
                   formatCurrency(sale.total, sale.currency)
                 }}</span>
               </p>
+
+              <!-- Profit (manager+ only — column hidden for cashiers) -->
+              <p v-if="canViewProfit && sale.totalProfit != null" class="mb-0 mt-2">
+                <strong>الربح المحقق: </strong>
+                <span class="text-success font-weight-bold">{{
+                  formatCurrency(sale.totalProfit, sale.currency)
+                }}</span>
+              </p>
+              <p
+                v-else-if="canViewProfit && sale.profitAccurate === false"
+                class="mb-0 mt-2 text-caption text-medium-emphasis"
+              >
+                الربح غير متاح (تكلفة بعض المنتجات غير معروفة)
+              </p>
             </div>
           </v-col>
         </v-row>
@@ -235,6 +249,7 @@
               <th class="text-center">خصم على الوحدة</th>
               <th class="text-center">الملاحظات</th>
               <th class="text-center">المجموع</th>
+              <th v-if="canViewProfit" class="text-center">الربح</th>
             </tr>
           </thead>
           <tbody>
@@ -283,6 +298,16 @@
               <td class="text-center font-weight-bold">
                 {{ formatCurrency(item.subtotal, sale.currency) }}
               </td>
+              <td v-if="canViewProfit" class="text-center">
+                <span
+                  v-if="item.profit != null"
+                  :class="item.profit >= 0 ? 'text-success' : 'text-error'"
+                  class="font-weight-bold"
+                >
+                  {{ formatCurrency(item.profit, sale.currency) }}
+                </span>
+                <span v-else class="text-medium-emphasis">—</span>
+              </td>
             </tr>
           </tbody>
 
@@ -295,6 +320,7 @@
               <td class="text-center font-weight-bold text-error">
                 {{ formatCurrency(sale.discount, sale.currency) }}
               </td>
+              <td v-if="canViewProfit"></td>
             </tr>
 
             <tr>
@@ -305,6 +331,7 @@
               <td class="text-center font-weight-bold">
                 {{ formatCurrency(sale.total - (sale.interestAmount || 0), sale.currency) }}
               </td>
+              <td v-if="canViewProfit"></td>
             </tr>
 
             <tr v-if="sale.paymentType === 'installment' && sale.interestAmount > 0">
@@ -312,6 +339,7 @@
               <td class="text-center font-weight-bold text-warning">
                 + {{ formatCurrency(sale.interestAmount, sale.currency) }}
               </td>
+              <td v-if="canViewProfit"></td>
             </tr>
 
             <tr v-if="sale.discount > 0 || sale.interestAmount > 0">
@@ -320,6 +348,12 @@
               </td>
               <td class="text-center font-weight-bold text-primary text-h6">
                 {{ formatCurrency(sale.total, sale.currency) }}
+              </td>
+              <td v-if="canViewProfit" class="text-center font-weight-bold text-success">
+                <span v-if="sale.totalProfit != null">
+                  {{ formatCurrency(sale.totalProfit, sale.currency) }}
+                </span>
+                <span v-else class="text-medium-emphasis">—</span>
               </td>
             </tr>
 
@@ -330,6 +364,7 @@
               <td class="text-center font-weight-bold text-warning">
                 - {{ formatCurrency(totalReturnedValue, sale.currency) }}
               </td>
+              <td v-if="canViewProfit"></td>
             </tr>
 
             <tr v-if="hasReturns">
@@ -339,6 +374,7 @@
               <td class="text-center font-weight-bold text-success text-h6">
                 {{ formatCurrency(Math.max(0, sale.total - totalReturnedValue), sale.currency) }}
               </td>
+              <td v-if="canViewProfit"></td>
             </tr>
           </tfoot>
         </v-table>
@@ -718,6 +754,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useSaleStore } from '@/stores/sale';
 import { useSettingsStore } from '@/stores/settings';
 import { useNotificationStore } from '@/stores/notification';
+import { useAuthStore } from '@/stores/auth';
 import SelectPrinter from '@/components/SelectPrinter.vue';
 import { formatReceiptData } from '@/utils/receiptFormatter';
 import {
@@ -735,9 +772,13 @@ const router = useRouter();
 const saleStore = useSaleStore();
 const settingsStore = useSettingsStore();
 const notificationStore = useNotificationStore();
+const authStore = useAuthStore();
 
 const printing = ref(false);
 const settings = ref(null);
+
+// Profit visibility — manager and above only.
+const canViewProfit = computed(() => authStore.hasPermission?.(['manage:sales']));
 
 // ── Return / Refund dialog state ────────────────────────────────────────────
 const returnDialog = ref(false);
@@ -1091,7 +1132,12 @@ const hasReturns = computed(
 // The original invoice table is 7 columns (#, product, qty, unit, item-discount,
 // notes, total) — its label cells span 6. When the return columns are added
 // (returned + net) we span 8 instead so the totals stay right-aligned.
-const footerLabelColspan = computed(() => (hasReturns.value ? 8 : 6));
+const footerLabelColspan = computed(() => {
+  // Base label column count: 6 (or 8 with the two return columns).
+  // The profit column lives to the RIGHT of the value column, so it
+  // doesn't shift the label colspan — the value <td> below already spans 1.
+  return hasReturns.value ? 8 : 6;
+});
 
 // helpers for installments (to avoid duplicated code)
 const isInstallmentOverdue = (installment) => {

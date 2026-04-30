@@ -39,6 +39,7 @@ import TransferRequests from '@/views/inventory/TransferRequests.vue';
 import FeatureFlags from '@/views/settings/FeatureFlags.vue';
 import SetupWizard from '@/views/settings/SetupWizard.vue';
 import Collections from '@/views/collections/Collections.vue';
+import Expenses from '@/views/expenses/Expenses.vue';
 
 const routes = [
   {
@@ -156,6 +157,12 @@ const routes = [
         path: 'reports',
         name: 'Reports',
         component: Reports,
+      },
+      {
+        path: 'expenses',
+        name: 'Expenses',
+        component: Expenses,
+        meta: { requiresWrite: true },
       },
       {
         path: 'notifications',

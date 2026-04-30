@@ -26,7 +26,7 @@ import { eq, desc, and, or, gte, lte, sql, inArray, lt, count as countFn } from 
 import settingsService from './settingsService.js';
 import alertBus from '../events/alertBus.js';
 import { hasPermission } from '../auth/permissionMatrix.js';
-import { getCustomerCreditSnapshot } from './creditScoringService.js';
+import { getCustomerCreditSnapshot, canCreateInstallmentSale } from './creditScoringService.js';
 import auditService from './auditService.js';
 import { InventoryService } from './inventoryService.js';
 import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './scopeService.js';
@@ -49,29 +49,63 @@ const HIGH_RISK_SCORE_THRESHOLD = 50;
  *
  * @returns {{snapshot, exceeded, highRisk}}
  */
-async function enforceCreditLimit({ customerId, total, user, paymentType }) {
-  if (!customerId) return { snapshot: null, exceeded: false, highRisk: false };
+async function enforceCreditLimit({ customerId, total, user, paymentType, branchId }) {
+  if (!customerId) return { snapshot: null, exceeded: false, highRisk: false, decision: null };
   if (paymentType !== 'installment' && paymentType !== 'mixed') {
-    return { snapshot: null, exceeded: false, highRisk: false };
+    return { snapshot: null, exceeded: false, highRisk: false, decision: null };
   }
 
+  // Smart decision engine — combines score + aging + active counts + limit.
+  const decision = await canCreateInstallmentSale(customerId, Number(total), branchId);
   const snapshot = await getCustomerCreditSnapshot(customerId);
-  if (!snapshot) return { snapshot: null, exceeded: false, highRisk: false };
+  if (!snapshot) {
+    return { snapshot: null, exceeded: false, highRisk: false, decision };
+  }
 
   const limit = snapshot.recommendedLimit;
   const score = snapshot.creditScore;
   const exceeded = limit != null && Number(total) > Number(limit);
   const highRisk =
-    score != null && score <= HIGH_RISK_SCORE_THRESHOLD;
+    decision.riskLevel === 'high' ||
+    (score != null && score <= HIGH_RISK_SCORE_THRESHOLD);
 
-  if (exceeded) {
+  // High-risk decision blocks the sale unless the caller has override permission.
+  if (decision.riskLevel === 'high') {
+    const canOverride = user && hasPermission('sales.override_credit_limit', user.role);
+    if (!canOverride) {
+      const err = new ValidationError(
+        `Installment sale rejected: ${decision.reason}. Override permission required.`
+      );
+      err.code = 'CREDIT_DECISION_BLOCKED';
+      err.decision = decision;
+      throw err;
+    }
+    // Override taken — log every reason that contributed.
+    await auditService.log({
+      userId: user.id,
+      username: user.username,
+      action: 'sales:credit_decision_override',
+      resource: 'customers',
+      resourceId: customerId,
+      details: {
+        saleTotal: Number(total),
+        recommendedLimit: limit != null ? Number(limit) : null,
+        creditScore: score,
+        riskLevel: decision.riskLevel,
+        reasons: decision.reasons,
+      },
+    });
+  }
+
+  if (exceeded && decision.riskLevel !== 'high') {
+    // Non-blocking exceed (e.g. limit slightly off but other signals are clean)
+    // — still gated by override permission to avoid silent breaches.
     const canOverride = user && hasPermission('sales.override_credit_limit', user.role);
     if (!canOverride) {
       throw new ValidationError(
         `Sale total (${total}) exceeds customer's recommended credit limit (${limit}). An override permission is required.`
       );
     }
-    // Override allowed — log to audit trail
     await auditService.log({
       userId: user.id,
       username: user.username,
@@ -98,12 +132,13 @@ async function enforceCreditLimit({ customerId, total, user, paymentType }) {
         recommendedLimit: limit != null ? Number(limit) : null,
         creditScore: score,
         threshold: HIGH_RISK_SCORE_THRESHOLD,
+        decisionReasons: decision.reasons,
       },
     });
     alertBus.emit('alerts.changed', 'customer.high_risk_sale');
   }
 
-  return { snapshot, exceeded, highRisk };
+  return { snapshot, exceeded, highRisk, decision };
 }
 
 /**
@@ -340,12 +375,14 @@ export class SaleService {
     }
 
     // Enforce credit-limit policy before any DB writes.
-    // Throws ValidationError when the limit is exceeded and caller cannot override.
+    // Throws ValidationError when the smart decision rejects the sale and the
+    // caller lacks the override permission.
     await enforceCreditLimit({
       customerId,
       total: finalTotal,
       user: actingUser,
       paymentType,
+      branchId: actingUser?.assignedBranchId || saleData.branchId || null,
     });
 
     // Resolve branch + warehouse. Keeps existing callers working without changes.
@@ -694,6 +731,9 @@ export class SaleService {
         unitPrice: saleItems.unitPrice,
         discount: saleItems.discount,
         subtotal: saleItems.subtotal,
+        // Profit visibility — uses the product's current cost_price. Returns
+        // null when the product was deleted so the UI can render "n/a".
+        costPrice: products.costPrice,
         createdAt: saleItems.createdAt,
       })
       .from(saleItems)
@@ -712,6 +752,28 @@ export class SaleService {
 
     const returns = await this.getReturnsForSale(id);
 
+    // Compute per-item + sale-level profit. profit=null on any item with a
+    // missing cost (deleted product) so the UI can show "n/a" instead of
+    // a misleading number. The sale-level total is null in that case too.
+    const enrichedItems = items.map((item) => {
+      const cost = item.costPrice == null ? null : Number(item.costPrice);
+      const qty = Number(item.quantity) || 0;
+      const profit =
+        cost == null ? null : Number(item.unitPrice) * qty - n(item.discount) - cost * qty;
+      return {
+        ...item,
+        unitPrice: n(item.unitPrice),
+        discount: n(item.discount),
+        subtotal: n(item.subtotal),
+        costPrice: cost,
+        profit,
+      };
+    });
+    const profitAccurate = enrichedItems.every((it) => it.profit !== null);
+    const totalProfit = profitAccurate
+      ? enrichedItems.reduce((acc, it) => acc + (it.profit || 0), 0)
+      : null;
+
     // Convert numeric strings to numbers for the response
     return {
       ...sale,
@@ -724,13 +786,10 @@ export class SaleService {
       interestAmount: n(sale.interestAmount),
       paidAmount: n(sale.paidAmount),
       remainingAmount: n(sale.remainingAmount),
+      totalProfit,
+      profitAccurate,
       customer,
-      items: items.map((item) => ({
-        ...item,
-        unitPrice: n(item.unitPrice),
-        discount: n(item.discount),
-        subtotal: n(item.subtotal),
-      })),
+      items: enrichedItems,
       payments: salePayments.map((p) => ({
         ...p,
         amount: n(p.amount),

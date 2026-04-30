@@ -130,4 +130,38 @@ export default async function customerRoutes(fastify) {
       },
     },
   });
+
+  // Smart credit decision — pre-check whether a proposed installment sale
+  // should be allowed for this customer. Read-only.
+  fastify.post('/:id/credit/check-installment', {
+    onRequest: [fastify.authenticate, fastify.authorize('customers:read')],
+    handler: customerController.checkInstallmentDecision.bind(customerController),
+    schema: {
+      description:
+        'Smart credit decision for a proposed installment sale (allowed/risk/reason/suggestions).',
+      tags: ['customers'],
+      security: [{ bearerAuth: [] }],
+      params: { type: 'object', properties: { id: { type: 'number' } } },
+      body: {
+        type: 'object',
+        properties: {
+          amount: { type: 'number' },
+          branchId: { type: 'number' },
+        },
+        required: ['amount'],
+      },
+    },
+  });
+
+  // Aging buckets for one customer's overdue installments.
+  fastify.get('/:id/aging', {
+    onRequest: [fastify.authenticate, fastify.authorize('customers:read')],
+    handler: customerController.getAging.bind(customerController),
+    schema: {
+      description: 'Receivables aging buckets for the customer (0-7, 8-30, 31-60, 61+).',
+      tags: ['customers'],
+      security: [{ bearerAuth: [] }],
+      params: { type: 'object', properties: { id: { type: 'number' } } },
+    },
+  });
 }
