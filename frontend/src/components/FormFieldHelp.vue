@@ -13,10 +13,6 @@
         </v-icon>
       </template>
     </v-tooltip>
-    <div v-if="helpText" :id="helpId" class="help-text">
-      <v-icon size="16" color="info" class="help-icon">mdi-information</v-icon>
-      <span>{{ helpText }}</span>
-    </div>
   </div>
 </template>
 
