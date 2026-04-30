@@ -81,4 +81,14 @@ export default async function inventoryRoutes(fastify) {
       security: [{ bearerAuth: [] }],
     },
   });
+
+  fastify.get('/expiry-alerts', {
+    onRequest: [fastify.authenticate, fastify.authorize('inventory:read')],
+    handler: inventoryController.getExpiryAlerts,
+    schema: {
+      description: 'Inventory expiry alerts report',
+      tags: ['inventory'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
 }

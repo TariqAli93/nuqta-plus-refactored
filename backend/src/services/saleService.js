@@ -18,6 +18,7 @@ import {
   productStock,
   saleReturns,
   saleReturnItems,
+  saleItemStockEntries,
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -471,7 +472,7 @@ export class SaleService {
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
-        await tx.insert(saleItems).values({
+        const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: newSale.id,
           productId: item.productId,
           productName: product.name,
@@ -479,9 +480,9 @@ export class SaleService {
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
-        });
+        }).returning({ id: saleItems.id });
 
-        stockItems.push({ productId: item.productId, quantity: item.quantity });
+        stockItems.push({ productId: item.productId, quantity: item.quantity, saleItemId: insertedSaleItem.id });
       }
 
       // Per-warehouse stock deduction via inventoryService.
@@ -1544,14 +1545,50 @@ export class SaleService {
       // 3. Restore stock for items that have a productId. Legacy sales with
       //    no warehouseId are skipped (movements need a warehouse).
       if (sale.warehouseId) {
-        const stockItems = resolvedItems
-          .filter((it) => it.saleItem.productId)
-          .map((it) => ({ productId: it.saleItem.productId, quantity: it.quantity }));
-        if (stockItems.length > 0) {
+        // Prefer restoring to the original consumed stock entries when trace
+        // rows exist. Fallback to legacy aggregate restore when no trace is
+        // present (older sales).
+        const fallbackStockItems = [];
+        for (const it of resolvedItems) {
+          if (!it.saleItem?.id || !it.saleItem?.productId) continue;
+          let remaining = Number(it.quantity) || 0;
+          const traces = await tx
+            .select({
+              id: saleItemStockEntries.id,
+              stockEntryId: saleItemStockEntries.productStockEntryId,
+              quantity: saleItemStockEntries.quantity,
+            })
+            .from(saleItemStockEntries)
+            .where(eq(saleItemStockEntries.saleItemId, it.saleItem.id))
+            .orderBy(desc(saleItemStockEntries.id))
+            .for('update');
+          for (const tr of traces) {
+            if (remaining <= 0) break;
+            const giveBack = Math.min(remaining, Number(tr.quantity) || 0);
+            if (giveBack <= 0) continue;
+            await tx.execute(sql`
+              UPDATE product_stock_entries
+              SET remaining_quantity = remaining_quantity + ${giveBack},
+                  status = CASE WHEN status = 'blocked' THEN 'blocked' ELSE 'active' END,
+                  updated_at = now()
+              WHERE id = ${tr.stockEntryId}
+                AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE)
+            `);
+            await tx
+              .update(saleItemStockEntries)
+              .set({ quantity: Number(tr.quantity) - giveBack })
+              .where(eq(saleItemStockEntries.id, tr.id));
+            remaining -= giveBack;
+          }
+          if (remaining > 0) {
+            fallbackStockItems.push({ productId: it.saleItem.productId, quantity: remaining });
+          }
+        }
+        if (fallbackStockItems.length > 0) {
           await InventoryService.restoreSaleStockMovement(tx, {
             saleId: sale.id,
             warehouseId: sale.warehouseId,
-            items: stockItems,
+            items: fallbackStockItems,
             userId,
             movementType: 'sale_return',
           });

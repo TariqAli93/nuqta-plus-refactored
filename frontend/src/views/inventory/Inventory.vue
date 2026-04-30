@@ -169,6 +169,24 @@
             variant="outlined"
             density="comfortable"
           />
+          <v-text-field
+            v-if="selectedProductTracksExpiry"
+            v-model="adjustForm.expiryDate"
+            label="تاريخ الانتهاء"
+            type="date"
+            variant="outlined"
+            density="comfortable"
+            class="mt-2"
+          />
+          <v-text-field
+            v-model.number="adjustForm.costPrice"
+            label="سعر الكلفة (اختياري)"
+            type="number"
+            min="0"
+            variant="outlined"
+            density="comfortable"
+            class="mt-2"
+          />
         </v-card-text>
         <v-divider />
         <v-card-actions class="pa-3">
@@ -257,7 +275,12 @@ const maybeOpenAdjustFromRoute = async () => {
 const adjustDialog = ref(false);
 const adjusting = ref(false);
 const preselectedProduct = ref(null);
-const adjustForm = ref({ productId: null, quantity: 1, direction: 'in', reason: '' });
+const adjustForm = ref({ productId: null, quantity: 1, direction: 'in', reason: '', expiryDate: '', costPrice: null });
+const selectedProductTracksExpiry = computed(() => {
+  const pid = Number(adjustForm.value.productId);
+  const row = (inventoryStore.stock || []).find((r) => Number(r.productId) === pid);
+  return !!row?.tracksExpiry;
+});
 
 const openAdjustDialog = (row) => {
   preselectedProduct.value = row;
@@ -266,12 +289,14 @@ const openAdjustDialog = (row) => {
     quantity: 1,
     direction: 'in',
     reason: '',
+    expiryDate: '',
+    costPrice: null,
   };
   adjustDialog.value = true;
 };
 
 const submitAdjust = async () => {
-  const { productId, quantity, direction, reason } = adjustForm.value;
+  const { productId, quantity, direction, reason, expiryDate, costPrice } = adjustForm.value;
   if (!productId || !quantity || !reason.trim()) {
     notificationStore.error('أكمل بيانات التعديل قبل الحفظ');
     return;
@@ -283,6 +308,8 @@ const submitAdjust = async () => {
       warehouseId: inventoryStore.selectedWarehouseId,
       quantityChange: direction === 'in' ? quantity : -quantity,
       reason: reason.trim(),
+      expiryDate: selectedProductTracksExpiry.value && expiryDate ? expiryDate : null,
+      costPrice: costPrice || undefined,
     });
     adjustDialog.value = false;
     await reload();

@@ -36,6 +36,7 @@ import StockTransfer from '@/views/inventory/StockTransfer.vue';
 import LowStock from '@/views/inventory/LowStock.vue';
 import BranchesWarehouses from '@/views/inventory/BranchesWarehouses.vue';
 import TransferRequests from '@/views/inventory/TransferRequests.vue';
+import ExpiryAlerts from '@/views/inventory/ExpiryAlerts.vue';
 import FeatureFlags from '@/views/settings/FeatureFlags.vue';
 import SetupWizard from '@/views/settings/SetupWizard.vue';
 import Collections from '@/views/collections/Collections.vue';
@@ -174,6 +175,7 @@ const routes = [
       { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer, meta: { feature: 'inventoryTransfers', capability: 'canTransferStock' } },
       { path: 'inventory/low-stock', name: 'LowStock', component: LowStock, meta: { feature: 'inventory' } },
       { path: 'inventory/transfers', name: 'TransferRequests', component: TransferRequests, meta: { feature: 'inventoryTransfers' } },
+      { path: 'inventory/expiry-alerts', name: 'ExpiryAlerts', component: ExpiryAlerts, meta: { feature: 'inventory' } },
       { path: 'inventory/settings', name: 'BranchesWarehouses', component: BranchesWarehouses, meta: { requiresManageProducts: true, anyFeature: ['multiBranch', 'multiWarehouse'] } },
       { path: 'settings/feature-flags', name: 'FeatureFlags', component: FeatureFlags, meta: { requiresGlobalAdmin: true } },
       { path: 'setup', name: 'SetupWizard', component: SetupWizard, meta: { requiresGlobalAdmin: true } },

@@ -180,6 +180,16 @@
                 :label="formData.isActive ? 'نشط' : 'غير نشط'"
               ></v-switch>
             </v-col>
+            <v-col cols="12" md="6">
+              <v-switch
+                v-model="formData.tracksExpiry"
+                color="primary"
+                density="comfortable"
+                hide-details
+                inset
+                label="هذا المنتج له تاريخ انتهاء"
+              ></v-switch>
+            </v-col>
             <v-col cols="12">
               <v-textarea v-model="formData.description" label="الوصف" rows="3"></v-textarea>
             </v-col>
@@ -335,6 +345,7 @@ const formData = ref({
   unit: 'piece',
   isActive: true,
   status: settingsStore.settings?.defaultStatus || 'available',
+  tracksExpiry: false,
 });
 
 // Admin verification state
