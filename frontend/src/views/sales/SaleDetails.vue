@@ -8,12 +8,38 @@
 
         <v-spacer />
 
-        <v-btn color="primary" prepend-icon="mdi-printer" :loading="printing" @click="handlePrint">
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-printer"
+          :loading="printing"
+          :disabled="isFullyReturned || isCancelled"
+          :title="isFullyReturned ? 'الطباعة معطلة — تم إرجاع جميع المنتجات' : ''"
+          @click="handlePrint"
+        >
           طباعة
         </v-btn>
 
-        <v-btn class="mr-3" color="secondary" prepend-icon="mdi-eye" @click="previewPrint">
+        <v-btn
+          class="mr-3"
+          color="secondary"
+          prepend-icon="mdi-eye"
+          :disabled="isFullyReturned"
+          :title="isFullyReturned ? 'المعاينة معطلة — تم إرجاع جميع المنتجات' : ''"
+          @click="previewPrint"
+        >
           معاينة الطباعة
+        </v-btn>
+
+        <v-btn
+          v-if="canReturn"
+          class="mr-3"
+          color="warning"
+          prepend-icon="mdi-keyboard-return"
+          :disabled="isFullyReturned"
+          :title="isFullyReturned ? 'تم إرجاع جميع المنتجات' : ''"
+          @click="openReturnDialog"
+        >
+          {{ isFullyReturned ? 'مُرجع كلياً' : 'إرجاع / استرداد' }}
         </v-btn>
 
         <select-printer class="mr-3" />
@@ -73,10 +99,16 @@
                   formatCurrency(sale.paidAmount, sale.currency)
                 }}</span>
               </p>
-              <p class="mb-0">
+              <p class="mb-1">
                 <strong>المتبقي: </strong>
                 <span :class="sale.remainingAmount > 0 ? 'text-error' : 'text-success'">
                   {{ formatCurrency(sale.remainingAmount, sale.currency) }}
+                </span>
+              </p>
+              <p v-if="totalReturnedValue > 0" class="mb-0">
+                <strong>قيمة الإرجاع: </strong>
+                <span class="text-warning font-weight-bold">
+                  {{ formatCurrency(totalReturnedValue, sale.currency) }}
                 </span>
               </p>
             </div>
@@ -197,6 +229,8 @@
               <th class="text-center">#</th>
               <th class="text-center">المنتج</th>
               <th class="text-center">الكمية</th>
+              <th v-if="hasReturns" class="text-center">المُعاد</th>
+              <th v-if="hasReturns" class="text-center">الصافي</th>
               <th class="text-center">سعر الوحدة</th>
               <th class="text-center">خصم على الوحدة</th>
               <th class="text-center">الملاحظات</th>
@@ -204,7 +238,17 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(item, index) in sale.items" :key="item.id">
+            <tr
+              v-for="(item, index) in sale.items"
+              :key="item.id"
+              :class="
+                returnedQtyByItem[item.id] >= item.quantity
+                  ? 'bg-warning-lighten-5'
+                  : returnedQtyByItem[item.id] > 0
+                    ? 'bg-warning-lighten-5'
+                    : ''
+              "
+            >
               <td class="text-center font-weight-bold">{{ index + 1 }}</td>
               <td class="text-center">
                 <div class="font-weight-bold">{{ item.productName }}</div>
@@ -212,7 +256,23 @@
                   {{ item.productDescription }}
                 </div>
               </td>
-              <td class="text-center">{{ item.quantity }}</td>
+              <td class="text-center">
+                <span
+                  :class="
+                    returnedQtyByItem[item.id] >= item.quantity
+                      ? 'text-decoration-line-through text-grey'
+                      : ''
+                  "
+                >
+                  {{ item.quantity }}
+                </span>
+              </td>
+              <td v-if="hasReturns" class="text-center text-warning font-weight-bold">
+                {{ returnedQtyByItem[item.id] || 0 }}
+              </td>
+              <td v-if="hasReturns" class="text-center font-weight-bold">
+                {{ Math.max(0, item.quantity - (returnedQtyByItem[item.id] || 0)) }}
+              </td>
               <td class="text-center">
                 {{ formatCurrency(item.unitPrice, sale.currency) }}
               </td>
@@ -229,14 +289,16 @@
           <!-- المجموع مع الخصم و الفائدة -->
           <tfoot>
             <tr v-if="sale.discount && sale.discount > 0">
-              <td colspan="6" class="text-right font-weight-bold">الخصم على الفاتورة:</td>
+              <td :colspan="footerLabelColspan" class="text-right font-weight-bold">
+                الخصم على الفاتورة:
+              </td>
               <td class="text-center font-weight-bold text-error">
                 {{ formatCurrency(sale.discount, sale.currency) }}
               </td>
             </tr>
 
             <tr>
-              <td colspan="6" class="text-right font-weight-bold">
+              <td :colspan="footerLabelColspan" class="text-right font-weight-bold">
                 <span v-if="sale.paymentType === 'installment'"> المجموع الفرعي: </span>
                 <span v-else>الإجمالي:</span>
               </td>
@@ -246,18 +308,36 @@
             </tr>
 
             <tr v-if="sale.paymentType === 'installment' && sale.interestAmount > 0">
-              <td colspan="6" class="text-right font-weight-bold">الفائدة:</td>
+              <td :colspan="footerLabelColspan" class="text-right font-weight-bold">الفائدة:</td>
               <td class="text-center font-weight-bold text-warning">
                 + {{ formatCurrency(sale.interestAmount, sale.currency) }}
               </td>
             </tr>
 
             <tr v-if="sale.discount > 0 || sale.interestAmount > 0">
-              <td colspan="6" class="text-right font-weight-bold text-primary">
+              <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-primary">
                 الإجمالي النهائي:
               </td>
               <td class="text-center font-weight-bold text-primary text-h6">
                 {{ formatCurrency(sale.total, sale.currency) }}
+              </td>
+            </tr>
+
+            <tr v-if="hasReturns">
+              <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-warning">
+                إجمالي الإرجاع:
+              </td>
+              <td class="text-center font-weight-bold text-warning">
+                - {{ formatCurrency(totalReturnedValue, sale.currency) }}
+              </td>
+            </tr>
+
+            <tr v-if="hasReturns">
+              <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-success">
+                الصافي بعد الإرجاع:
+              </td>
+              <td class="text-center font-weight-bold text-success text-h6">
+                {{ formatCurrency(Math.max(0, sale.total - totalReturnedValue), sale.currency) }}
               </td>
             </tr>
           </tfoot>
@@ -371,6 +451,204 @@
       </v-card-text>
     </v-card>
 
+    <!-- Returns History -->
+    <v-card v-if="sale && sale.returns && sale.returns.length > 0" class="mb-4">
+      <v-card-title>
+        <v-icon class="ml-2">mdi-keyboard-return</v-icon>
+        سجل الإرجاع
+      </v-card-title>
+      <v-divider></v-divider>
+      <v-card-text>
+        <v-table>
+          <thead>
+            <tr>
+              <th class="text-center">#</th>
+              <th class="text-center">التاريخ</th>
+              <th class="text-center">المنتجات المُعادة</th>
+              <th class="text-center">قيمة الإرجاع</th>
+              <th class="text-center">المسترد نقداً</th>
+              <th class="text-center">خصم من الذمة</th>
+              <th class="text-center">السبب</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(ret, idx) in sale.returns" :key="ret.id">
+              <td class="text-center">{{ idx + 1 }}</td>
+              <td class="text-center">{{ toYmdWithTime(ret.createdAt) }}</td>
+              <td class="text-center">
+                <div v-for="it in ret.items" :key="it.id" class="text-caption">
+                  {{ it.productName }} × {{ it.quantity }}
+                </div>
+              </td>
+              <td class="text-center">{{ formatCurrency(ret.returnedValue, ret.currency) }}</td>
+              <td class="text-center text-success">
+                {{ formatCurrency(ret.refundAmount, ret.currency) }}
+              </td>
+              <td class="text-center">
+                {{ formatCurrency(ret.debtReduction, ret.currency) }}
+              </td>
+              <td class="text-center">{{ ret.reason || '-' }}</td>
+            </tr>
+          </tbody>
+        </v-table>
+      </v-card-text>
+    </v-card>
+
+    <!-- Return / Refund Dialog -->
+    <v-dialog v-model="returnDialog" max-width="900" persistent>
+      <v-card>
+        <v-card-title class="bg-warning text-white d-flex align-center">
+          <v-icon class="ml-2">mdi-keyboard-return</v-icon>
+          إرجاع / استرداد
+          <v-spacer />
+          <v-btn icon variant="text" @click="closeReturnDialog">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+
+        <v-card-text class="pt-4">
+          <v-alert v-if="returnError" type="error" variant="tonal" class="mb-4" density="compact">
+            {{ returnError }}
+          </v-alert>
+
+          <div class="text-body-2 text-grey mb-3">
+            حدد الكمية المراد إرجاعها لكل منتج. يقتصر الإرجاع على ما لم يتم إرجاعه سابقاً.
+          </div>
+
+          <v-table density="compact">
+            <thead>
+              <tr>
+                <th class="text-center">المنتج</th>
+                <th class="text-center">المبيع</th>
+                <th class="text-center">سبق إرجاعه</th>
+                <th class="text-center">المتاح للإرجاع</th>
+                <th class="text-center">سعر الوحدة</th>
+                <th class="text-center">كمية الإرجاع</th>
+                <th class="text-center">القيمة</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in returnableRows" :key="row.saleItemId" class="py-3">
+                <td>{{ row.productName }}</td>
+                <td class="text-center">{{ row.sold }}</td>
+                <td class="text-center">{{ row.alreadyReturned }}</td>
+                <td class="text-center font-weight-bold">{{ row.maxReturnable }}</td>
+                <td class="text-center">{{ formatCurrency(row.netUnitPrice, sale.currency) }}</td>
+                <td class="text-center">
+                  <v-number-input
+                    v-model="row.quantity"
+                    :min="0"
+                    :max="row.maxReturnable"
+                    :disabled="row.maxReturnable <= 0"
+                    variant="outlined"
+                    density="compact"
+                    control-variant="split"
+                    inset
+                    hide-details
+                  />
+                </td>
+                <td class="text-center">
+                  {{ formatCurrency(lineValueFor(row), sale.currency) }}
+                </td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="6" class="text-right font-weight-bold">إجمالي الإرجاع:</td>
+                <td class="text-center font-weight-bold text-warning">
+                  {{ formatCurrency(returnedValue, sale.currency) }}
+                </td>
+              </tr>
+            </tfoot>
+          </v-table>
+
+          <v-row class="mt-4">
+            <v-col cols="12" md="4">
+              <v-text-field
+                v-model.number="returnForm.refundAmount"
+                type="number"
+                :label="`المبلغ المسترد نقداً (${sale.currency})`"
+                :suffix="sale.currency"
+                :min="0"
+                :max="maxRefundable"
+                :hint="`الحد الأقصى: ${formatCurrency(maxRefundable, sale.currency)}`"
+                persistent-hint
+                density="comfortable"
+              />
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-select
+                v-model="returnForm.refundMethod"
+                :items="refundMethodOptions"
+                label="طريقة الاسترداد"
+                density="comfortable"
+              />
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field
+                v-if="returnForm.refundMethod === 'card'"
+                v-model="returnForm.refundReference"
+                label="رقم مرجع البطاقة"
+                density="comfortable"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field v-model="returnForm.reason" label="سبب الإرجاع" density="comfortable" />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="returnForm.notes"
+                label="ملاحظات (اختياري)"
+                density="comfortable"
+              />
+            </v-col>
+          </v-row>
+
+          <v-alert type="info" variant="tonal" density="compact" class="mt-2">
+            <div class="d-flex flex-wrap" style="gap: 1.5rem">
+              <div>
+                <strong>قيمة البضاعة: </strong>
+                {{ formatCurrency(returnedGoodsValue, sale.currency) }}
+              </div>
+              <div v-if="returnedInterest > 0">
+                <strong>إلغاء الفائدة: </strong>
+                <span class="text-warning">
+                  {{ formatCurrency(returnedInterest, sale.currency) }}
+                </span>
+              </div>
+              <div>
+                <strong>إجمالي الإرجاع: </strong>
+                {{ formatCurrency(returnedValue, sale.currency) }}
+              </div>
+              <div>
+                <strong>المبلغ المسترد: </strong>
+                {{ formatCurrency(refundAmountClamped, sale.currency) }}
+              </div>
+              <div>
+                <strong>خصم من الذمة: </strong>
+                {{ formatCurrency(debtReductionPreview, sale.currency) }}
+              </div>
+            </div>
+          </v-alert>
+        </v-card-text>
+
+        <v-card-actions class="pa-4">
+          <v-spacer />
+          <v-btn variant="text" :disabled="submittingReturn" @click="closeReturnDialog">
+            إلغاء
+          </v-btn>
+          <v-btn
+            color="warning"
+            :disabled="!canSubmitReturn"
+            :loading="submittingReturn"
+            @click="submitReturn"
+          >
+            تأكيد الإرجاع
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Add Payment Form -->
     <v-card v-if="sale && sale.status === 'pending' && sale.remainingAmount > 0" class="mb-4">
       <v-card-title class="bg-warning-lighten-4">
@@ -461,6 +739,277 @@ const notificationStore = useNotificationStore();
 const printing = ref(false);
 const settings = ref(null);
 
+// ── Return / Refund dialog state ────────────────────────────────────────────
+const returnDialog = ref(false);
+const submittingReturn = ref(false);
+const returnError = ref('');
+const returnableRows = ref([]);
+const returnForm = ref({
+  refundAmount: 0,
+  refundMethod: 'cash',
+  refundReference: '',
+  reason: '',
+  notes: '',
+});
+const refundMethodOptions = [
+  { title: 'نقدي', value: 'cash' },
+  { title: 'بطاقة', value: 'card' },
+  { title: 'خصم من الذمة فقط', value: 'credit' },
+];
+
+const canReturn = computed(() => {
+  if (!sale.value) return false;
+  if (sale.value.status === 'cancelled' || sale.value.status === 'draft') return false;
+  // Installment invoices are excluded — refunds against an open installment
+  // schedule are handled outside this flow (by adjusting/cancelling the
+  // installment plan directly), so the return button is hidden for them.
+  if (sale.value.paymentType === 'installment' || sale.value.paymentType === 'mixed') {
+    return false;
+  }
+  if (sale.value.saleType === 'INSTALLMENT') return false;
+  return Array.isArray(sale.value.items) && sale.value.items.length > 0;
+});
+
+// Fully returned = every line item has been entirely sent back. Once true,
+// nothing more can be returned, so the action button is shown but disabled
+// (clearer UX than hiding it — the user sees the operation exists but the
+// state explains why it's unavailable).
+const isFullyReturned = computed(() => {
+  if (!sale.value || !Array.isArray(sale.value.items) || sale.value.items.length === 0) {
+    return false;
+  }
+  const priorByItemId = {};
+  for (const ret of sale.value.returns || []) {
+    for (const it of ret.items || []) {
+      if (!it.saleItemId) continue;
+      priorByItemId[it.saleItemId] = (priorByItemId[it.saleItemId] || 0) + Number(it.quantity || 0);
+    }
+  }
+  return sale.value.items.every(
+    (item) => (priorByItemId[item.id] || 0) >= Number(item.quantity || 0)
+  );
+});
+
+const isCancelled = computed(() => {
+  if (!sale.value) return false;
+  return sale.value.status === 'cancelled';
+});
+
+const buildReturnableRows = () => {
+  if (!sale.value) return [];
+  // Sum prior-returned quantity per saleItemId from the existing returns
+  // history that the backend ships on the sale payload.
+  const priorByItemId = {};
+  for (const ret of sale.value.returns || []) {
+    for (const it of ret.items || []) {
+      if (!it.saleItemId) continue;
+      priorByItemId[it.saleItemId] = (priorByItemId[it.saleItemId] || 0) + Number(it.quantity || 0);
+    }
+  }
+  return sale.value.items.map((item) => {
+    const sold = Number(item.quantity || 0);
+    const alreadyReturned = priorByItemId[item.id] || 0;
+    const maxReturnable = Math.max(0, sold - alreadyReturned);
+    // Net unit price after distributing the per-item discount, mirroring
+    // the backend calculation so the preview matches the persisted value.
+    const netUnitPrice = sold > 0 ? Number(item.subtotal || 0) / sold : Number(item.unitPrice || 0);
+    return {
+      saleItemId: item.id,
+      productId: item.productId,
+      productName: item.productName,
+      sold,
+      alreadyReturned,
+      maxReturnable,
+      netUnitPrice,
+      quantity: 0,
+    };
+  });
+};
+
+// Mirror the backend's nearest-bucket rounding so the dialog preview and
+// the persisted figure agree (250-bucket for IQD, 2-decimal otherwise).
+const roundReturnNearest = (amount, currency) => {
+  if (currency === 'IQD') return Math.round((Number(amount) || 0) / 250) * 250;
+  return Math.round((Number(amount) || 0) * 100) / 100;
+};
+
+const lineValueFor = (row) => (Number(row.quantity) || 0) * row.netUnitPrice;
+
+const priorReturnedTotal = computed(() => {
+  if (!sale.value || !Array.isArray(sale.value.returns)) return 0;
+  return sale.value.returns.reduce((acc, r) => acc + Number(r.returnedValue || 0), 0);
+});
+
+const maxReturnableTotal = computed(() => {
+  if (!sale.value) return 0;
+  return Math.max(0, Number(sale.value.total || 0) - priorReturnedTotal.value);
+});
+
+const saleGoodsTotal = computed(() => {
+  if (!sale.value) return 0;
+  return (sale.value.items || []).reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
+});
+
+// Goods value of the items currently selected for return (no interest).
+const returnedGoodsValue = computed(() =>
+  returnableRows.value.reduce((acc, r) => acc + (Number(r.quantity) || 0) * r.netUnitPrice, 0)
+);
+
+// Pro-rated interest slice that gets cancelled with the returned goods on
+// installment sales. Mirrors the backend formula so the dialog preview
+// matches what gets persisted.
+const returnedInterest = computed(() => {
+  const interestAmount = Number(sale.value?.interestAmount || 0);
+  const goods = saleGoodsTotal.value;
+  if (interestAmount <= 0 || goods <= 0) return 0;
+  return (returnedGoodsValue.value / goods) * interestAmount;
+});
+
+// Cap the raw line sum at what the sale has left to give back so the
+// preview never overshoots paidAmount + remainingAmount.
+const returnedValue = computed(() => {
+  const currency = sale.value?.currency || 'USD';
+  const raw = returnedGoodsValue.value + returnedInterest.value;
+  return roundReturnNearest(Math.min(raw, maxReturnableTotal.value), currency);
+});
+
+const maxRefundable = computed(() => {
+  if (!sale.value) return 0;
+  return Math.min(returnedValue.value, Number(sale.value.paidAmount) || 0);
+});
+
+const refundAmountClamped = computed(() => {
+  const currency = sale.value?.currency || 'USD';
+  const raw = Number(returnForm.value.refundAmount) || 0;
+  return roundReturnNearest(
+    Math.max(0, Math.min(raw, returnedValue.value, maxRefundable.value)),
+    currency
+  );
+});
+
+const debtReductionPreview = computed(() => {
+  const currency = sale.value?.currency || 'USD';
+  return roundReturnNearest(Math.max(0, returnedValue.value - refundAmountClamped.value), currency);
+});
+
+const canSubmitReturn = computed(() => {
+  if (submittingReturn.value) return false;
+  if (returnedValue.value <= 0) return false;
+  const tolerance = sale.value?.currency === 'IQD' ? 250 : 0.01;
+  if (debtReductionPreview.value > (sale.value?.remainingAmount || 0) + tolerance) return false;
+  return true;
+});
+
+const openReturnDialog = () => {
+  returnError.value = '';
+  returnableRows.value = buildReturnableRows();
+  returnForm.value = {
+    refundAmount: 0,
+    refundMethod: 'cash',
+    refundReference: '',
+    reason: '',
+    notes: '',
+  };
+  returnDialog.value = true;
+};
+
+const closeReturnDialog = () => {
+  if (submittingReturn.value) return;
+  returnDialog.value = false;
+};
+
+const submitReturn = async () => {
+  returnError.value = '';
+  if (!canSubmitReturn.value) return;
+  const items = returnableRows.value
+    .filter((r) => Number(r.quantity) > 0)
+    .map((r) => ({ saleItemId: r.saleItemId, quantity: Number(r.quantity) }));
+  if (items.length === 0) {
+    returnError.value = 'حدد كمية لمنتج واحد على الأقل';
+    return;
+  }
+  try {
+    submittingReturn.value = true;
+    await saleStore.createReturn(sale.value.id, {
+      items,
+      refundAmount: refundAmountClamped.value,
+      refundMethod: returnForm.value.refundMethod,
+      refundReference: returnForm.value.refundReference || null,
+      reason: returnForm.value.reason || null,
+      notes: returnForm.value.notes || null,
+    });
+    const response = await saleStore.fetchSale(params.id);
+    sale.value = response.data;
+    returnDialog.value = false;
+  } catch (err) {
+    returnError.value = err?.response?.data?.message || 'فشل تسجيل الإرجاع';
+  } finally {
+    submittingReturn.value = false;
+  }
+};
+
+// Build a sale snapshot that excludes returned quantities so the printed
+// receipt reflects what the customer is actually keeping. Items fully
+// returned drop out, partials shrink to (sold − returned), and totals are
+// recomputed from the net subtotals so discount/tax/interest stay consistent.
+const buildSaleForPrint = () => {
+  if (!sale.value) return null;
+  const src = sale.value;
+  if (!Array.isArray(src.returns) || src.returns.length === 0) return src;
+
+  const returnedByItem = {};
+  for (const ret of src.returns) {
+    for (const it of ret.items || []) {
+      if (!it.saleItemId) continue;
+      returnedByItem[it.saleItemId] =
+        (returnedByItem[it.saleItemId] || 0) + Number(it.quantity || 0);
+    }
+  }
+
+  const netItems = (src.items || [])
+    .map((item) => {
+      const sold = Number(item.quantity || 0);
+      const returnedQty = returnedByItem[item.id] || 0;
+      const netQty = Math.max(0, sold - returnedQty);
+      if (netQty <= 0) return null;
+      // Preserve per-unit pricing — subtotal scales with the net qty so the
+      // formatter's per-line math stays correct.
+      const netUnitPrice =
+        sold > 0 ? Number(item.subtotal || 0) / sold : Number(item.unitPrice || 0);
+      const perUnitDiscount = sold > 0 ? Number(item.discount || 0) / sold : 0;
+      return {
+        ...item,
+        quantity: netQty,
+        subtotal: netUnitPrice * netQty,
+        discount: perUnitDiscount * netQty,
+      };
+    })
+    .filter(Boolean);
+
+  // Pro-rate interest the same way the return service does, so the printed
+  // total = original total − all returned values.
+  const saleGoodsTotal = (src.items || []).reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
+  const netGoodsTotal = netItems.reduce((acc, it) => acc + it.subtotal, 0);
+  const interestAmount = Number(src.interestAmount || 0);
+  const netInterest =
+    interestAmount > 0 && saleGoodsTotal > 0
+      ? (netGoodsTotal / saleGoodsTotal) * interestAmount
+      : 0;
+
+  const netSubtotal = netItems.reduce((acc, it) => acc + it.subtotal + Number(it.discount || 0), 0);
+  const netDiscount = netItems.reduce((acc, it) => acc + Number(it.discount || 0), 0);
+  const netTotal = Math.max(0, Number(src.total || 0) - totalReturnedValue.value);
+
+  return {
+    ...src,
+    items: netItems,
+    subtotal: netSubtotal,
+    discount: netDiscount,
+    interestAmount: netInterest,
+    total: netTotal,
+  };
+};
+
 const previewPrint = async () => {
   if (!sale.value) {
     notificationStore.error('لا توجد بيانات فاتورة للمعاينة');
@@ -476,7 +1025,7 @@ const previewPrint = async () => {
 
   try {
     // Format receipt data
-    const receiptData = formatReceiptData(sale.value, companyInfo);
+    const receiptData = formatReceiptData(buildSaleForPrint(), companyInfo);
 
     // Ensure all data is serializable by creating clean copies
     const cleanReceiptData = JSON.parse(JSON.stringify(receiptData));
@@ -517,6 +1066,32 @@ const paymentMethods = [
 const hasInstallments = computed(
   () => sale.value?.installments && sale.value.installments.length > 0
 );
+
+// Aggregate every prior return so the items table can show what's been
+// sent back per line and the footer can display the net-after-returns total.
+const returnedQtyByItem = computed(() => {
+  const map = {};
+  for (const ret of sale.value?.returns || []) {
+    for (const it of ret.items || []) {
+      if (!it.saleItemId) continue;
+      map[it.saleItemId] = (map[it.saleItemId] || 0) + Number(it.quantity || 0);
+    }
+  }
+  return map;
+});
+
+const totalReturnedValue = computed(() => {
+  return (sale.value?.returns || []).reduce((acc, r) => acc + Number(r.returnedValue || 0), 0);
+});
+
+const hasReturns = computed(
+  () => Array.isArray(sale.value?.returns) && sale.value.returns.length > 0
+);
+
+// The original invoice table is 7 columns (#, product, qty, unit, item-discount,
+// notes, total) — its label cells span 6. When the return columns are added
+// (returned + net) we span 8 instead so the totals stay right-aligned.
+const footerLabelColspan = computed(() => (hasReturns.value ? 8 : 6));
 
 // helpers for installments (to avoid duplicated code)
 const isInstallmentOverdue = (installment) => {
@@ -627,7 +1202,7 @@ const handlePrint = async () => {
     printing.value = true;
 
     // Format receipt data
-    const receiptData = formatReceiptData(sale.value, companyInfo);
+    const receiptData = formatReceiptData(buildSaleForPrint(), companyInfo);
 
     // Ensure all data is serializable by creating clean copies
     // This prevents "object could not be cloned" errors in Electron IPC

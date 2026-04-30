@@ -312,6 +312,67 @@ export const installments = pgTable('installments', {
   createdBy: integer('created_by').references(() => users.id),
 });
 
+// ── Sale Returns ──────────────────────────────────────────────────────────
+// Operational return/refund records linked to an original sale. A return
+// records: which items came back (sale_return_items), how much cash was
+// refunded to the customer (refundAmount), and how much of the sale's
+// outstanding debt was written off (debtReduction). Stock for the returned
+// items is restored via stock_movements (movementType='sale_return') as part
+// of the same transaction that creates the return.
+export const saleReturns = pgTable(
+  'sale_returns',
+  {
+    id: serial('id').primaryKey(),
+    saleId: integer('sale_id')
+      .notNull()
+      .references(() => sales.id, { onDelete: 'cascade' }),
+    customerId: integer('customer_id').references(() => customers.id),
+    branchId: integer('branch_id').references(() => branches.id),
+    warehouseId: integer('warehouse_id').references(() => warehouses.id),
+    // Total monetary value of the returned items (net of per-item discount)
+    returnedValue: numeric('returned_value', { precision: 18, scale: 4 }).notNull(),
+    // Cash actually refunded to the customer (<= sale.paidAmount).
+    refundAmount: numeric('refund_amount', { precision: 18, scale: 4 }).notNull().default('0'),
+    // Outstanding sale debt cancelled by this return (<= sale.remainingAmount).
+    // Always equals returnedValue - refundAmount.
+    debtReduction: numeric('debt_reduction', { precision: 18, scale: 4 }).notNull().default('0'),
+    // 'cash' | 'card' | 'credit' (credit = applied against sale debt only).
+    refundMethod: text('refund_method'),
+    refundReference: text('refund_reference'),
+    currency: text('currency').notNull().default('USD'),
+    reason: text('reason'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow(),
+    createdBy: integer('created_by').references(() => users.id),
+  },
+  (t) => ({
+    saleIdx: index('sale_returns_sale_idx').on(t.saleId),
+    customerIdx: index('sale_returns_customer_idx').on(t.customerId),
+    createdAtIdx: index('sale_returns_created_at_idx').on(t.createdAt),
+  })
+);
+
+export const saleReturnItems = pgTable(
+  'sale_return_items',
+  {
+    id: serial('id').primaryKey(),
+    returnId: integer('return_id')
+      .notNull()
+      .references(() => saleReturns.id, { onDelete: 'cascade' }),
+    saleItemId: integer('sale_item_id').references(() => saleItems.id),
+    productId: integer('product_id').references(() => products.id),
+    productName: text('product_name').notNull(),
+    quantity: integer('quantity').notNull(),
+    unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
+    subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    returnIdx: index('sale_return_items_return_idx').on(t.returnId),
+    saleItemIdx: index('sale_return_items_sale_item_idx').on(t.saleItemId),
+  })
+);
+
 // ── Currency Settings ─────────────────────────────────────────────────────
 export const currencySettings = pgTable('currency_settings', {
   id: serial('id').primaryKey(),

@@ -186,6 +186,19 @@ export default async function saleRoutes(fastify) {
     },
   });
 
+  fastify.post('/:id/return', {
+    onRequest: [fastify.authenticate, fastify.authorize('sales:update')],
+    handler: (req, reply) =>
+      withIdempotency(req, reply, 'sales:create-return', () =>
+        saleController.createReturn(req, reply)
+      ),
+    schema: {
+      description: 'Record a return / refund for a sale',
+      tags: ['sales'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
   fastify.post('/:saleId/payment', {
     onRequest: [fastify.authenticate, fastify.authorize('sales:update')],
     handler: (req, reply) =>

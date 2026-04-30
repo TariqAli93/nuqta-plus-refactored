@@ -118,10 +118,50 @@
           />
         </template>
         <template #[`item.total`]="{ item }">
-          {{ formatCurrency(item.total, item.currency) }}
+          <div>
+            <div
+              :class="
+                Number(item.returnedTotal) > 0
+                  ? 'text-decoration-line-through text-grey text-caption'
+                  : ''
+              "
+            >
+              {{ formatCurrency(item.total, item.currency) }}
+            </div>
+            <div
+              v-if="Number(item.returnedTotal) > 0"
+              class="text-success font-weight-bold"
+            >
+              {{
+                formatCurrency(
+                  Math.max(0, Number(item.total) - Number(item.returnedTotal)),
+                  item.currency
+                )
+              }}
+            </div>
+          </div>
         </template>
         <template #[`item.status`]="{ item }">
-          <v-chip :color="getStatusColor(item.status)" size="small">
+          <v-chip
+            v-if="getReturnState(item) === 'full'"
+            color="warning"
+            size="small"
+            prepend-icon="mdi-keyboard-return"
+            :title="`قيمة الإرجاع: ${formatCurrency(item.returnedTotal, item.currency)}`"
+          >
+            مُرجع كلياً
+          </v-chip>
+          <v-chip
+            v-else-if="getReturnState(item) === 'partial'"
+            color="warning"
+            size="small"
+            variant="tonal"
+            prepend-icon="mdi-keyboard-return"
+            :title="`قيمة الإرجاع: ${formatCurrency(item.returnedTotal, item.currency)}`"
+          >
+            مُرجع جزئياً
+          </v-chip>
+          <v-chip v-else :color="getStatusColor(item.status)" size="small">
             {{ getStatusText(item.status) }}
           </v-chip>
         </template>
@@ -335,6 +375,18 @@ const getStatusColor = (status) => {
     draft: 'info',
   };
   return colors[status] || 'grey';
+};
+
+// Returns 'full' | 'partial' | 'none'. The list endpoint exposes
+// `returnedTotal` (sum of all sale_returns.returnedValue), so a sale is fully
+// returned when that aggregate covers the original total within the
+// currency's rounding bucket.
+const getReturnState = (item) => {
+  const returned = Number(item.returnedTotal) || 0;
+  if (returned <= 0) return 'none';
+  const total = Number(item.total) || 0;
+  const tolerance = item.currency === 'IQD' ? 250 : 0.01;
+  return returned + tolerance >= total ? 'full' : 'partial';
 };
 
 const getStatusText = (status) => {

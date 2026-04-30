@@ -266,6 +266,31 @@ export const saleSchema = z
       }
     }
   });
+// Sale return / refund schemas
+export const saleReturnItemSchema = z
+  .object({
+    saleItemId: z.number().int().positive().optional(),
+    productId: z.number().int().positive().optional(),
+    quantity: z.number().int().positive('Returned quantity must be at least 1'),
+  })
+  .refine((d) => d.saleItemId || d.productId, {
+    message: 'Each return item needs either saleItemId or productId',
+    path: ['saleItemId'],
+  });
+
+export const saleReturnSchema = z.object({
+  items: z.array(saleReturnItemSchema).min(1, 'Return must include at least one item'),
+  refundAmount: z
+    .number()
+    .nonnegative('Refund amount cannot be negative')
+    .optional()
+    .default(0),
+  refundMethod: z.enum(['cash', 'card', 'credit']).optional(),
+  refundReference: z.string().trim().min(1).max(120).optional().nullable(),
+  reason: z.string().trim().max(500).optional().nullable(),
+  notes: z.string().trim().max(1000).optional().nullable(),
+});
+
 // Payment schemas
 export const paymentSchema = z.object({
   saleId: z.number().int().positive().optional(),

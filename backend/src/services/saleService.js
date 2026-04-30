@@ -16,6 +16,8 @@ import {
   warehouses,
   branches,
   productStock,
+  saleReturns,
+  saleReturnItems,
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -548,6 +550,7 @@ export class SaleService {
         customerId: sales.customerId,
         createdBy: users.username,
         itemCount: sql`(SELECT COUNT(*) FROM ${saleItems} WHERE ${saleItems.saleId} = ${sales.id})`,
+        returnedTotal: sql`COALESCE((SELECT SUM(${saleReturns.returnedValue}::numeric) FROM ${saleReturns} WHERE ${saleReturns.saleId} = ${sales.id}), 0)`,
       })
       .from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
@@ -569,6 +572,7 @@ export class SaleService {
         paidAmount: n(row.paidAmount),
         remainingAmount: n(row.remainingAmount),
         itemCount: Number(row.itemCount) || 0,
+        returnedTotal: n(row.returnedTotal),
       })),
       meta: {
         total,
@@ -657,6 +661,8 @@ export class SaleService {
       .from(installments)
       .where(eq(installments.saleId, id));
 
+    const returns = await this.getReturnsForSale(id);
+
     // Convert numeric strings to numbers for the response
     return {
       ...sale,
@@ -687,6 +693,7 @@ export class SaleService {
         paidAmount: n(inst.paidAmount),
         remainingAmount: n(inst.remainingAmount),
       })),
+      returns,
     };
   }
 
@@ -1137,6 +1144,410 @@ export class SaleService {
 
     alertBus.emit('alerts.changed', 'sale.restored');
     return result;
+  }
+
+  /**
+   * Fetch all returns recorded against a sale, with their items. Used by
+   * getById() to surface return history alongside payments and installments.
+   */
+  async getReturnsForSale(saleId) {
+    const db = await getDb();
+    const returns = await db
+      .select()
+      .from(saleReturns)
+      .where(eq(saleReturns.saleId, saleId))
+      .orderBy(desc(saleReturns.createdAt));
+
+    if (returns.length === 0) return [];
+
+    const ids = returns.map((r) => r.id);
+    const items = await db
+      .select()
+      .from(saleReturnItems)
+      .where(inArray(saleReturnItems.returnId, ids));
+
+    const itemsByReturn = new Map();
+    for (const it of items) {
+      if (!itemsByReturn.has(it.returnId)) itemsByReturn.set(it.returnId, []);
+      itemsByReturn.get(it.returnId).push({
+        ...it,
+        unitPrice: n(it.unitPrice),
+        subtotal: n(it.subtotal),
+      });
+    }
+
+    return returns.map((r) => ({
+      ...r,
+      returnedValue: n(r.returnedValue),
+      refundAmount: n(r.refundAmount),
+      debtReduction: n(r.debtReduction),
+      items: itemsByReturn.get(r.id) || [],
+    }));
+  }
+
+  /**
+   * Record a return / refund against an existing sale.
+   *
+   * Effects (single transaction):
+   *   - Validates returnable quantity per item (sold qty - prior returns).
+   *   - Inserts sale_returns + sale_return_items rows.
+   *   - Restores stock via stock_movements (movement_type='sale_return').
+   *   - Reduces sales.paidAmount by refundAmount and sales.remainingAmount by
+   *     debtReduction. Status becomes 'completed' if no debt remains.
+   *   - Reduces customer.totalPurchases by returnedValue and totalDebt by debtReduction.
+   *   - For installment sales, walks pending installments from latest to
+   *     earliest, reducing dueAmount/remainingAmount and cancelling rows
+   *     that drop to zero, until debtReduction is fully absorbed.
+   *   - Logs an audit entry for the operation.
+   *
+   * @param {number} saleId
+   * @param {{items, refundAmount, refundMethod, refundReference, reason, notes}} returnData
+   * @param {{id, username, assignedBranchId, assignedWarehouseId, role}} actingUser
+   */
+  async createReturn(saleId, returnData, actingUser) {
+    const userId = actingUser?.id || null;
+    const sale = await this.getById(saleId);
+
+    if (sale.status === 'cancelled') {
+      throw new ValidationError('Cannot return items from a cancelled sale');
+    }
+    if (sale.status === 'draft') {
+      throw new ValidationError('Cannot return items from a draft sale');
+    }
+    // Installment invoices are excluded — refunds against an open installment
+    // schedule are handled by adjusting/cancelling the installment plan,
+    // not through this return flow.
+    if (
+      sale.paymentType === 'installment' ||
+      sale.paymentType === 'mixed' ||
+      sale.saleType === 'INSTALLMENT'
+    ) {
+      throw new ValidationError(
+        'Returns are not supported on installment invoices. Cancel or adjust the installment plan instead.'
+      );
+    }
+    if (!Array.isArray(returnData.items) || returnData.items.length === 0) {
+      throw new ValidationError('Return must include at least one item');
+    }
+
+    // Branch/warehouse scope — same defensive check used elsewhere.
+    enforceBranchScope(actingUser, sale.branchId);
+    if (sale.warehouseId) {
+      await enforceWarehouseScope(actingUser, sale.warehouseId);
+    }
+
+    const currency = sale.currency || 'USD';
+
+    // Sum prior-returned quantity per saleItemId so we can enforce
+    // (returnedQty + priorReturns) <= soldQty.
+    const priorReturns = await this.getReturnsForSale(saleId);
+    const priorByItemId = new Map();
+    for (const r of priorReturns) {
+      for (const it of r.items) {
+        if (!it.saleItemId) continue;
+        priorByItemId.set(it.saleItemId, (priorByItemId.get(it.saleItemId) || 0) + it.quantity);
+      }
+    }
+
+    // Resolve every requested return item against the original sale's items.
+    // We accept either saleItemId (preferred) or productId for callers that
+    // only know the product. When productId is given, pick the first matching
+    // sale item with capacity left.
+    const saleItemsById = new Map(sale.items.map((it) => [it.id, it]));
+    const saleItemsByProduct = new Map();
+    for (const it of sale.items) {
+      if (!it.productId) continue;
+      if (!saleItemsByProduct.has(it.productId)) saleItemsByProduct.set(it.productId, []);
+      saleItemsByProduct.get(it.productId).push(it);
+    }
+
+    const resolvedItems = [];
+    for (const req of returnData.items) {
+      const qty = Number(req.quantity);
+      if (!Number.isInteger(qty) || qty <= 0) {
+        throw new ValidationError('Returned quantity must be a positive integer');
+      }
+
+      let target = null;
+      if (req.saleItemId) {
+        target = saleItemsById.get(req.saleItemId);
+        if (!target) {
+          throw new ValidationError(
+            `Sale item ${req.saleItemId} does not belong to sale ${saleId}`
+          );
+        }
+      } else if (req.productId) {
+        const candidates = saleItemsByProduct.get(req.productId) || [];
+        target = candidates.find((c) => {
+          const prior = priorByItemId.get(c.id) || 0;
+          return c.quantity - prior > 0;
+        });
+        if (!target) {
+          throw new ValidationError(
+            `Product ${req.productId} was not sold on this sale or is fully returned`
+          );
+        }
+      } else {
+        throw new ValidationError('Each return item needs saleItemId or productId');
+      }
+
+      const prior = priorByItemId.get(target.id) || 0;
+      const remainingQty = target.quantity - prior;
+      if (qty > remainingQty) {
+        throw new ValidationError(
+          `Cannot return ${qty} of "${target.productName}" — only ${remainingQty} remain returnable`
+        );
+      }
+
+      // Net unit price after distributing the per-item discount on the
+      // original sale_items row. saleItem.subtotal already nets the
+      // discount, so subtotal/quantity is the post-discount unit price.
+      // Keep raw (unrounded) — per-line ceil rounding amplifies float noise
+      // past the actual paid amount on IQD (250-bucket) sales.
+      const netUnit = target.quantity > 0 ? target.subtotal / target.quantity : Number(target.unitPrice);
+      const lineSubtotal = netUnit * qty;
+
+      // Reserve capacity so two requests in the same payload that target the
+      // same sale_item don't both pass validation.
+      priorByItemId.set(target.id, prior + qty);
+
+      resolvedItems.push({
+        saleItem: target,
+        quantity: qty,
+        unitPrice: netUnit,
+        subtotal: lineSubtotal,
+      });
+    }
+
+    // Cap returnedValue at what the sale actually has left to give back
+    // (sale.total minus everything previously returned). This absorbs the
+    // float / rounding gap that would otherwise push the value past the
+    // paidAmount + remainingAmount budget on currencies like IQD.
+    const priorReturnedTotal = priorReturns.reduce((acc, r) => acc + r.returnedValue, 0);
+    const maxReturnable = Math.max(0, sale.total - priorReturnedTotal);
+
+    // Round to the nearest currency bucket (not ceil) so the figure stays
+    // within the cap; ceil would re-introduce the same overshoot we just
+    // fixed by capping above.
+    const roundReturnNearest = (amount) => {
+      if (currency === 'IQD') return Math.round(amount / 250) * 250;
+      return Math.round(amount * 100) / 100;
+    };
+
+    // Goods value of the returned items (no interest).
+    const returnedGoodsValue = resolvedItems.reduce((acc, it) => acc + it.subtotal, 0);
+
+    // Interest pro-ration: installment sales pre-bake interest into the sale
+    // total. When the customer returns goods we cancel the proportional
+    // slice of interest with them — otherwise returning everything would
+    // still leave the interest portion as a phantom debt across future
+    // installments. Cash sales have interestAmount = 0 so this is a no-op.
+    const saleGoodsTotal = sale.items.reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
+    const interestAmount = Number(sale.interestAmount || 0);
+    const returnedInterest =
+      interestAmount > 0 && saleGoodsTotal > 0
+        ? (returnedGoodsValue / saleGoodsTotal) * interestAmount
+        : 0;
+
+    const rawReturnedValue = returnedGoodsValue + returnedInterest;
+    const returnedValue = roundReturnNearest(Math.min(rawReturnedValue, maxReturnable));
+    if (returnedValue <= 0) {
+      throw new ValidationError('Returned value must be greater than zero');
+    }
+
+    // Refund + debt allocation. The customer must always be made whole:
+    // refundAmount is cash handed back, debtReduction is debt forgiven.
+    // Together they equal returnedValue. Each side is bounded by what the
+    // sale actually has available.
+    const tolerance = currency === 'IQD' ? 250 : 0.01;
+    const requestedRefund = roundReturnNearest(
+      Math.max(0, Number(returnData.refundAmount) || 0)
+    );
+    if (requestedRefund > returnedValue + tolerance) {
+      throw new ValidationError('Refund amount cannot exceed the returned value');
+    }
+    if (requestedRefund > sale.paidAmount + tolerance) {
+      throw new ValidationError(
+        `Refund amount (${requestedRefund}) cannot exceed amount already paid (${sale.paidAmount})`
+      );
+    }
+
+    // Refund is capped at both the returned value and what was actually paid;
+    // whatever is left becomes a debt write-off, capped at the outstanding
+    // remaining amount. Any tiny float / bucket residual collapses into the
+    // refund side (so we never throw on rounding noise — the cap above
+    // already kept us within the sale's budget).
+    let refundAmount = Math.min(requestedRefund, returnedValue, sale.paidAmount);
+    let debtReduction = roundReturnNearest(returnedValue - refundAmount);
+    if (debtReduction > sale.remainingAmount) {
+      const overflow = debtReduction - sale.remainingAmount;
+      if (overflow > tolerance) {
+        throw new ValidationError(
+          `Returned value (${returnedValue}) exceeds remaining debt (${sale.remainingAmount}) plus refund (${refundAmount}) by ${overflow}. Increase the refund amount.`
+        );
+      }
+      // Within tolerance — push the residual onto the refund side so the
+      // numbers add up without surfacing a bucket-rounding error to the user.
+      debtReduction = sale.remainingAmount;
+      refundAmount = roundReturnNearest(returnedValue - debtReduction);
+    }
+
+    const refundMethod =
+      returnData.refundMethod ||
+      (refundAmount > 0 ? 'cash' : 'credit');
+    if (refundMethod === 'card' && !returnData.refundReference) {
+      throw new ValidationError('Card refund requires a reference number');
+    }
+
+    const result = await withTransaction(async (tx) => {
+      // 1. Insert the return header.
+      const [newReturn] = await tx
+        .insert(saleReturns)
+        .values({
+          saleId: sale.id,
+          customerId: sale.customerId || null,
+          branchId: sale.branchId || null,
+          warehouseId: sale.warehouseId || null,
+          returnedValue: String(returnedValue),
+          refundAmount: String(refundAmount),
+          debtReduction: String(debtReduction),
+          refundMethod,
+          refundReference: returnData.refundReference || null,
+          currency,
+          reason: returnData.reason || null,
+          notes: returnData.notes || null,
+          createdBy: userId,
+        })
+        .returning();
+
+      // 2. Insert the line items.
+      for (const it of resolvedItems) {
+        await tx.insert(saleReturnItems).values({
+          returnId: newReturn.id,
+          saleItemId: it.saleItem.id,
+          productId: it.saleItem.productId || null,
+          productName: it.saleItem.productName,
+          quantity: it.quantity,
+          unitPrice: String(it.unitPrice),
+          subtotal: String(it.subtotal),
+        });
+      }
+
+      // 3. Restore stock for items that have a productId. Legacy sales with
+      //    no warehouseId are skipped (movements need a warehouse).
+      if (sale.warehouseId) {
+        const stockItems = resolvedItems
+          .filter((it) => it.saleItem.productId)
+          .map((it) => ({ productId: it.saleItem.productId, quantity: it.quantity }));
+        if (stockItems.length > 0) {
+          await InventoryService.restoreSaleStockMovement(tx, {
+            saleId: sale.id,
+            warehouseId: sale.warehouseId,
+            items: stockItems,
+            userId,
+            movementType: 'sale_return',
+          });
+        }
+      }
+
+      // 4. Update the sale: paidAmount drops by refundAmount, remainingAmount
+      //    drops by debtReduction. Status becomes 'completed' when no debt
+      //    remains (mirrors addPayment's behaviour).
+      const newPaidAmount = roundByCurrency(
+        Math.max(0, sale.paidAmount - refundAmount),
+        currency
+      );
+      const newRemainingAmount = roundByCurrency(
+        Math.max(0, sale.remainingAmount - debtReduction),
+        currency
+      );
+      const newStatus = newRemainingAmount <= 0 ? 'completed' : sale.status;
+      await tx
+        .update(sales)
+        .set({
+          paidAmount: String(newPaidAmount),
+          remainingAmount: String(newRemainingAmount),
+          status: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(sales.id, sale.id));
+
+      // 5. Customer balance: lifetime purchases drops by the returned value;
+      //    outstanding debt drops by the forgiven portion.
+      if (sale.customerId) {
+        const setExpr = {
+          totalPurchases: sql`GREATEST(${customers.totalPurchases}::numeric - ${returnedValue}, 0)`,
+          updatedAt: new Date(),
+        };
+        if (debtReduction > 0) {
+          setExpr.totalDebt = sql`GREATEST(${customers.totalDebt}::numeric - ${debtReduction}, 0)`;
+        }
+        await tx.update(customers).set(setExpr).where(eq(customers.id, sale.customerId));
+      }
+
+      // 6. Installment adjustment: walk pending installments from highest
+      //    number down, shrinking dueAmount/remainingAmount until the debt
+      //    reduction is consumed. An installment whose remainingAmount drops
+      //    to zero is marked 'cancelled' to stay consistent with cancel().
+      if (debtReduction > 0 && sale.installments && sale.installments.length > 0) {
+        let toAbsorb = debtReduction;
+        const sortedPending = [...sale.installments]
+          .filter((i) => i.status === 'pending' && i.remainingAmount > 0)
+          .sort((a, b) => b.installmentNumber - a.installmentNumber);
+
+        for (const inst of sortedPending) {
+          if (toAbsorb <= 0) break;
+          const reduceBy = Math.min(toAbsorb, inst.remainingAmount);
+          const newRemaining = roundByCurrency(
+            Math.max(0, inst.remainingAmount - reduceBy),
+            currency
+          );
+          const newDue = roundByCurrency(
+            Math.max(inst.paidAmount || 0, inst.dueAmount - reduceBy),
+            currency
+          );
+          const newInstStatus = newRemaining <= 0 ? 'cancelled' : 'pending';
+          await tx
+            .update(installments)
+            .set({
+              dueAmount: String(newDue),
+              remainingAmount: String(newRemaining),
+              status: newInstStatus,
+              updatedAt: new Date(),
+            })
+            .where(eq(installments.id, inst.id));
+          toAbsorb -= reduceBy;
+        }
+      }
+
+      return newReturn;
+    });
+
+    // 7. Audit trail — non-fatal if the audit service throws.
+    try {
+      await auditService.log({
+        userId: actingUser?.id || null,
+        username: actingUser?.username || null,
+        action: 'sale:return_created',
+        resource: 'sales',
+        resourceId: sale.id,
+        details: {
+          returnId: result.id,
+          returnedValue,
+          refundAmount,
+          debtReduction,
+          refundMethod,
+          itemCount: resolvedItems.length,
+          reason: returnData.reason || null,
+        },
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[audit] sale:return_created skipped:', err.message);
+    }
+
+    alertBus.emit('alerts.changed', 'sale.returned');
+    return await this.getById(saleId);
   }
 
   async createDraft(saleData, userId) {

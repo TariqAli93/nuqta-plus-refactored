@@ -1,5 +1,5 @@
 import { SaleService } from '../services/saleService.js';
-import { saleSchema } from '../utils/validation.js';
+import { saleSchema, saleReturnSchema } from '../utils/validation.js';
 import { CurrencyConversionService } from '../services/currencyConversionService.js';
 import { enforceBranchScope } from '../services/scopeService.js';
 
@@ -153,6 +153,20 @@ export class SaleController {
       success: true,
       data: { deletedCount },
       message: `Deleted ${deletedCount} old draft(s)`,
+    });
+  }
+
+  async createReturn(request, reply) {
+    const validatedData = saleReturnSchema.parse(request.body);
+    const sale = await saleService.createReturn(
+      Number(request.params.id),
+      validatedData,
+      request.user
+    );
+    return reply.code(201).send({
+      success: true,
+      data: sale,
+      message: 'Return recorded successfully',
     });
   }
 

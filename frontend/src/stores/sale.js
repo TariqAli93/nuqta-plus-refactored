@@ -262,6 +262,30 @@ export const useSaleStore = defineStore('sale', {
       }
     },
 
+    /**
+     * Record a return / refund against a sale. The backend restores stock,
+     * adjusts customer debt, and updates the sale totals in a single
+     * transaction; this just calls the endpoint and refreshes local state.
+     */
+    async createReturn(saleId, returnData) {
+      this.loading = true;
+      const notificationStore = useNotificationStore();
+      try {
+        if (!saleId) throw new Error('Sale ID is required');
+        const response = await api.post(`/sales/${saleId}/return`, returnData);
+        if (this.currentSale?.id === saleId && response?.data) {
+          this.currentSale = response.data;
+        }
+        notificationStore.success('تم تسجيل الإرجاع بنجاح');
+        return response;
+      } catch (error) {
+        notificationStore.error(error.response?.data?.message || 'فشل تسجيل الإرجاع');
+        throw error;
+      } finally {
+        this.loading = false;
+      }
+    },
+
     async restoreSale(id) {
       this.loading = true;
       const notificationStore = useNotificationStore();
