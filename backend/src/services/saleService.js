@@ -29,6 +29,8 @@ import auditService from './auditService.js';
 import { InventoryService } from './inventoryService.js';
 import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
+import cashSessionService from './cashSessionService.js';
+import { PAYMENT_METHOD_CASH } from '../constants/sales.js';
 
 // Threshold below which a customer is considered "high risk" for an alert
 const HIGH_RISK_SCORE_THRESHOLD = 50;
@@ -315,6 +317,30 @@ export class SaleService {
     // acting user's branch/warehouse scope (defensive).
     await enforceWarehouseScope(actingUser, warehouseId);
 
+    // ── Cash session enforcement ────────────────────────────────────────────
+    // POS cash sales must run inside an open cash session for the acting user
+    // and branch. Installment sales (and POS card sales) do not need one — a
+    // POS card sale takes no physical cash so the drawer is unaffected, and
+    // installment sales come from the NewSale flow which has no shift drawer.
+    let cashSessionId = null;
+    const incomingPaymentMethod = saleData.paymentMethod || PAYMENT_METHOD_CASH;
+    const isPosCashSale =
+      saleSource === SALE_SOURCE_POS &&
+      !isInstallmentSale &&
+      incomingPaymentMethod === PAYMENT_METHOD_CASH &&
+      Number(paidAmount) > 0;
+
+    if (isPosCashSale) {
+      const session = await cashSessionService.findOpenSession(userId, branchId);
+      if (!session) {
+        throw new ValidationError(
+          'No open cash session — open a shift before recording cash sales',
+          'CASH_SESSION_REQUIRED'
+        );
+      }
+      cashSessionId = session.id;
+    }
+
     const newSaleId = await withTransaction(async (tx) => {
       const [newSale] = await tx
         .insert(sales)
@@ -323,6 +349,7 @@ export class SaleService {
           customerId,
           branchId,
           warehouseId,
+          cashSessionId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
           tax: String(totals.tax),
@@ -380,14 +407,18 @@ export class SaleService {
       });
 
       if (paidAmount > 0) {
+        const method = saleData.paymentMethod || 'cash';
         await tx.insert(payments).values({
           saleId: newSale.id,
           customerId,
           amount: String(parseFloat(paidAmount.toFixed(2))),
           currency,
           exchangeRate: String(exchangeRate),
-          paymentMethod: saleData.paymentMethod || 'cash',
+          paymentMethod: method,
           paymentReference: saleData.paymentReference || null,
+          // Tie cash payments to the open shift so close-of-shift can compute
+          // expected cash. Card payments stay unlinked — they don't touch the drawer.
+          cashSessionId: method === PAYMENT_METHOD_CASH ? cashSessionId : null,
           createdBy: userId,
           notes: saleData.paymentNotes || null,
         });
@@ -1253,6 +1284,28 @@ export class SaleService {
       actingUser,
     });
 
+    // Mirror the cash-session enforcement from create() so completing a POS
+    // cash draft requires an open shift.
+    let cashSessionId = null;
+    const draftPaymentMethod = saleData.paymentMethod || 'cash';
+    const draftSaleSource = saleData.saleSource || draft.saleSource || null;
+    const draftPaymentType = saleData.paymentType || draft.paymentType;
+    const draftIsCashSale =
+      draftSaleSource === SALE_SOURCE_POS &&
+      draftPaymentType === 'cash' &&
+      draftPaymentMethod === PAYMENT_METHOD_CASH &&
+      Number(paidAmount) > 0;
+    if (draftIsCashSale) {
+      const session = await cashSessionService.findOpenSession(userId, branchId);
+      if (!session) {
+        throw new ValidationError(
+          'No open cash session — open a shift before completing a cash sale',
+          'CASH_SESSION_REQUIRED'
+        );
+      }
+      cashSessionId = session.id;
+    }
+
     const updatedSaleId = await withTransaction(async (tx) => {
       await tx.delete(saleItems).where(eq(saleItems.saleId, draftId));
 
@@ -1262,6 +1315,7 @@ export class SaleService {
           customerId: saleData.customerId || draft.customerId,
           branchId,
           warehouseId,
+          cashSessionId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
           tax: String(totals.tax),
@@ -1317,14 +1371,16 @@ export class SaleService {
 
       if (paidAmount > 0) {
         const customerId = saleData.customerId || draft.customerId || null;
+        const method = saleData.paymentMethod || 'cash';
         await tx.insert(payments).values({
           saleId: updatedSale.id,
           customerId,
           amount: String(paidAmount),
           currency,
           exchangeRate: String(exchangeRate),
-          paymentMethod: saleData.paymentMethod || 'cash',
+          paymentMethod: method,
           paymentReference: saleData.paymentReference || null,
+          cashSessionId: method === PAYMENT_METHOD_CASH ? cashSessionId : null,
           createdBy: userId,
         });
       }

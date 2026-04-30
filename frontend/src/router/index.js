@@ -22,6 +22,7 @@ import Sales from '@/views/sales/Sales.vue';
 import NewSale from '@/views/sales/NewSale.vue';
 import SaleDetails from '@/views/sales/SaleDetails.vue';
 import PosScreen from '@/views/sales/PosScreen.vue';
+import ShiftReport from '@/views/sales/ShiftReport.vue';
 import Reports from '@/views/Reports.vue';
 import Settings from '@/views/Settings.vue';
 import Notifications from '@/views/Notifications.vue';
@@ -130,6 +131,12 @@ const routes = [
           feature: 'installments',
           capability: 'canUseInstallments',
         },
+      },
+      {
+        path: 'sales/shifts',
+        name: 'ShiftReport',
+        component: ShiftReport,
+        meta: { requiresCreateSales: true },
       },
       {
         path: 'sales/:id',
