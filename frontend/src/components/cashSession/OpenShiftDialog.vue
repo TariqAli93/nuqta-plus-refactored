@@ -44,9 +44,7 @@
       </v-card-text>
       <v-divider />
       <v-card-actions class="justify-end gap-2 pa-3">
-        <v-btn variant="outlined" :disabled="loading || !cancelable" @click="onCancel">
-          إلغاء
-        </v-btn>
+        <v-btn variant="outlined" :disabled="loading" @click="onCancel"> إلغاء </v-btn>
         <v-btn
           color="primary"
           variant="elevated"
@@ -116,7 +114,6 @@ const onConfirm = () => {
 };
 
 const onCancel = () => {
-  if (!props.cancelable) return;
   emit('cancel');
   dialog.value = false;
 };

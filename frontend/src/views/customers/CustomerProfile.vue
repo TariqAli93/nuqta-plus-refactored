@@ -26,17 +26,7 @@
         :subtitle="profile.customer.phone || profile.customer.address || 'ملف العميل'"
         icon="mdi-account-circle"
       >
-        <v-btn
-          v-if="profile.customer.phone"
-          prepend-icon="mdi-phone"
-          variant="tonal"
-          color="success"
-          @click="showCustomerPhoneNumber = true"
-        >
-          إظهار رقم الهاتف
-        </v-btn>
-
-        <v-tooltip
+        <!-- <v-tooltip
           v-if="canSendCustomerMessages"
           location="bottom"
           :text="whatsAppDisabledReason"
@@ -57,7 +47,7 @@
             </span>
           </template>
           <span>{{ whatsAppDisabledReason }}</span>
-        </v-tooltip>
+        </v-tooltip> -->
 
         <v-btn
           v-if="canEdit"
@@ -77,31 +67,20 @@
           :color="profile.customer.isActive ? 'success' : 'grey'"
           variant="tonal"
         >
-          <v-icon start size="16">{{ profile.customer.isActive ? 'mdi-check-circle' : 'mdi-cancel' }}</v-icon>
+          <v-icon start size="16">{{
+            profile.customer.isActive ? 'mdi-check-circle' : 'mdi-cancel'
+          }}</v-icon>
           {{ profile.customer.isActive ? 'نشط' : 'غير نشط' }}
         </v-chip>
-        <v-chip
-          v-if="profile.customer.branch?.name"
-          size="small"
-          variant="tonal"
-          color="info"
-        >
+        <v-chip v-if="profile.customer.branch?.name" size="small" variant="tonal" color="info">
           <v-icon start size="16">mdi-store</v-icon>
           {{ profile.customer.branch.name }}
         </v-chip>
-        <v-chip
-          v-if="profile.customer.address"
-          size="small"
-          variant="tonal"
-        >
+        <v-chip v-if="profile.customer.address" size="small" variant="tonal">
           <v-icon start size="16">mdi-map-marker</v-icon>
           {{ profile.customer.address }}
         </v-chip>
-        <v-chip
-          v-if="profile.customer.createdAt"
-          size="small"
-          variant="tonal"
-        >
+        <v-chip v-if="profile.customer.createdAt" size="small" variant="tonal">
           <v-icon start size="16">mdi-calendar</v-icon>
           عميل منذ {{ formatDate(profile.customer.createdAt) }}
         </v-chip>
@@ -121,7 +100,7 @@
       </v-alert>
 
       <!-- 2. KPI cards ---------------------------------------------------- -->
-      <div class="summary-grid page-section">
+      <div class="summary-grid page-section mb-4">
         <StatCard
           v-for="kpi in kpiCards"
           :key="kpi.key"

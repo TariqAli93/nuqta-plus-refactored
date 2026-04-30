@@ -1,10 +1,6 @@
 <template>
   <div class="page-shell">
-    <PageHeader
-      title="إدارة العملاء"
-      subtitle="عرض وإدارة بيانات عملائك"
-      icon="mdi-account-group"
-    >
+    <PageHeader title="إدارة العملاء" subtitle="عرض وإدارة بيانات عملائك" icon="mdi-account-group">
       <v-btn
         color="primary"
         prepend-icon="mdi-plus"
@@ -16,7 +12,7 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar">
+    <v-card class="page-section filter-toolbar pa-3">
       <v-text-field
         v-model="search"
         prepend-inner-icon="mdi-magnify"

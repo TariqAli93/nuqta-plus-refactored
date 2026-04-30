@@ -116,7 +116,7 @@
           <v-card-text class="pt-4">
             <v-row>
               <v-col cols="12" sm="6" md="4">
-                <v-card variant="tonal" class="text-center pa-4">
+                <v-card class="text-center pa-4">
                   <v-icon size="40" color="primary" class="mb-2">mdi-phone</v-icon>
                   <div class="mb-2 text-subtitle-2 text-medium-emphasis">رقم الهاتف</div>
                   <div class="text-center text-body-1 font-weight-bold" dir="ltr">
@@ -131,7 +131,7 @@
               </v-col>
 
               <v-col cols="12" sm="6" md="4">
-                <v-card variant="tonal" class="text-center pa-4">
+                <v-card class="text-center pa-4">
                   <v-icon size="40" color="success" class="mb-2">mdi-whatsapp</v-icon>
                   <div class="mb-2 text-subtitle-2 text-medium-emphasis">واتساب</div>
                   <div class="text-center text-body-1 font-weight-bold" dir="ltr">
@@ -147,7 +147,7 @@
               </v-col>
 
               <v-col cols="12" sm="6" md="4">
-                <v-card variant="tonal" class="text-center pa-4">
+                <v-card class="text-center pa-4">
                   <v-icon size="40" color="info" class="mb-2">mdi-email</v-icon>
                   <div class="mb-2 text-subtitle-2 text-medium-emphasis">البريد الإلكتروني</div>
                   <div class="text-center text-body-1 font-weight-bold" dir="rtl">
@@ -164,7 +164,7 @@
               </v-col>
 
               <v-col cols="12" sm="6" md="6" class="mx-auto">
-                <v-card variant="tonal" class="text-center pa-4">
+                <v-card class="text-center pa-4">
                   <v-icon size="40" color="primary" class="mb-2">mdi-facebook</v-icon>
                   <div class="mb-2 text-subtitle-2 text-medium-emphasis">فيسبوك</div>
                   <div class="text-body-1 font-weight-bold">
@@ -181,7 +181,7 @@
               </v-col>
 
               <v-col cols="12" sm="6" md="6" class="mx-auto">
-                <v-card variant="tonal" class="text-center pa-4">
+                <v-card class="text-center pa-4">
                   <v-icon size="40" color="primary" class="mb-2">mdi-web</v-icon>
                   <div class="mb-2 text-subtitle-2 text-medium-emphasis">الموقع الإلكتروني</div>
                   <div class="text-body-1 font-weight-bold">
