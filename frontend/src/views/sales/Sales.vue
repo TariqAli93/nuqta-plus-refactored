@@ -1,108 +1,126 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex justify-space-between items-center pa-3">
-        <div class="text-h6 font-semibold text-primary">إدارة المبيعات</div>
-        <!-- Installment shortcut: hidden when the user lacks the capability
-             entirely; rendered disabled with a tooltip when the feature flag
-             is off so admins still see the entry point. -->
-        <v-tooltip
-          v-if="installmentsVisible"
-          location="bottom"
-          :text="installmentsReason"
-          :disabled="!installmentsDisabled"
-        >
-          <template #activator="{ props: tipProps }">
-            <span v-bind="tipProps">
-              <v-btn
-                color="primary"
-                prepend-icon="mdi-plus"
-                size="default"
-                :to="installmentsDisabled ? undefined : '/sales/new'"
-                :disabled="installmentsDisabled"
-                aria-label="إنشاء بيع جديد"
-              >
-                قسط جديد
-              </v-btn>
-            </span>
-          </template>
-        </v-tooltip>
-      </div>
+  <div class="page-shell">
+    <PageHeader
+      title="إدارة المبيعات"
+      subtitle="عرض الفواتير والمسودات وأقساط البيع"
+      icon="mdi-receipt-text"
+    >
+      <!-- Installment shortcut: hidden when the user lacks the capability
+           entirely; rendered disabled with a tooltip when the feature flag
+           is off so admins still see the entry point. -->
+      <v-tooltip
+        v-if="installmentsVisible"
+        location="bottom"
+        :text="installmentsReason"
+        :disabled="!installmentsDisabled"
+      >
+        <template #activator="{ props: tipProps }">
+          <span v-bind="tipProps">
+            <v-btn
+              color="primary"
+              prepend-icon="mdi-plus"
+              size="default"
+              :to="installmentsDisabled ? undefined : '/sales/new'"
+              :disabled="installmentsDisabled"
+              aria-label="إنشاء بيع جديد"
+            >
+              قسط جديد
+            </v-btn>
+          </span>
+        </template>
+      </v-tooltip>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar">
+      <v-row dense>
+        <v-col cols="12" sm="6" md="3">
+          <v-select
+            v-model="filters.status"
+            :items="statusOptions"
+            label="الحالة"
+            prepend-inner-icon="mdi-filter-variant"
+            clearable
+            hide-details
+            density="comfortable"
+            variant="outlined"
+            @update:model-value="handleFilter"
+          ></v-select>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-autocomplete
+            v-model="filters.customer"
+            :items="customers"
+            item-title="name"
+            item-value="id"
+            label="العميل"
+            prepend-inner-icon="mdi-account"
+            hide-details
+            density="comfortable"
+            clearable
+            variant="outlined"
+            :custom-filter="customFilter"
+            @update:model-value="handleFilter"
+          >
+            <template #item="{ props, item }">
+              <v-list-item v-bind="props">
+                <template #title>
+                  {{ item.raw.name }}
+                </template>
+                <template #subtitle>
+                  {{ item.raw.phone }}
+                </template>
+              </v-list-item>
+            </template>
+            <template #selection="{ item }"> {{ item.raw.name }} - {{ item.raw.phone }} </template>
+          </v-autocomplete>
+        </v-col>
+
+        <v-col cols="6" md="3">
+          <v-text-field
+            v-model="filters.startDate"
+            label="من تاريخ"
+            type="date"
+            prepend-inner-icon="mdi-calendar-start"
+            hide-details
+            density="comfortable"
+            variant="outlined"
+            @change="handleFilter"
+          ></v-text-field>
+        </v-col>
+
+        <v-col cols="6" md="3">
+          <v-text-field
+            v-model="filters.endDate"
+            label="إلى تاريخ"
+            type="date"
+            prepend-inner-icon="mdi-calendar-end"
+            hide-details
+            density="comfortable"
+            variant="outlined"
+            @change="handleFilter"
+          ></v-text-field>
+        </v-col>
+      </v-row>
     </v-card>
 
-    <v-card class="mb-4">
-      <div class="flex justify-lg-space-between items-center pa-3 gap-4">
-        <v-select
-          v-model="filters.status"
-          :items="statusOptions"
-          label="الحالة"
-          clearable
-          hide-details
-          density="comfortable"
-          @update:model-value="handleFilter"
-        ></v-select>
-
-        <!-- العميل -->
-        <v-autocomplete
-          v-model="filters.customer"
-          :items="customers"
-          item-title="name"
-          item-value="id"
-          label="العميل"
-          hide-details
-          density="comfortable"
-          clearable
-          variant="outlined"
-          :custom-filter="customFilter"
-          @update:model-value="handleFilter"
-        >
-          <template #item="{ props, item }">
-            <v-list-item v-bind="props">
-              <template #title>
-                {{ item.raw.name }}
-              </template>
-              <template #subtitle>
-                {{ item.raw.phone }}
-              </template>
-            </v-list-item>
-          </template>
-          <template #selection="{ item }"> {{ item.raw.name }} - {{ item.raw.phone }} </template>
-        </v-autocomplete>
-
-        <v-text-field
-          v-model="filters.startDate"
-          label="من تاريخ"
-          type="date"
-          hide-details
-          density="comfortable"
-          @change="handleFilter"
-        ></v-text-field>
-
-        <v-text-field
-          v-model="filters.endDate"
-          label="إلى تاريخ"
-          type="date"
-          hide-details
-          density="comfortable"
-          @change="handleFilter"
-        ></v-text-field>
-      </div>
-    </v-card>
-
-    <v-card class="mb-4">
-      <v-card-title class="d-flex justify-space-between align-center">
-        <span>قائمة المبيعات</span>
+    <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          قائمة المبيعات
+        </span>
         <v-btn
-          icon="mdi-download"
           variant="text"
           size="small"
+          prepend-icon="mdi-download"
           :disabled="saleStore.sales.length === 0"
           aria-label="تصدير البيانات"
           @click="handleExport"
         >
-          <v-icon>mdi-download</v-icon>
+          تصدير
         </v-btn>
-      </v-card-title>
+      </div>
       <v-data-table
         :headers="headers"
         :items="saleStore.sales"
@@ -301,6 +319,7 @@ import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
+import PageHeader from '@/components/PageHeader.vue';
 import { useExport } from '@/composables/useExport';
 import { useFeatureGate } from '@/composables/useFeatureGate';
 import { useNotificationStore } from '@/stores/notification';

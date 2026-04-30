@@ -1,82 +1,70 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3 flex-wrap gap-2">
-        <div>
-          <div class="font-semibold text-h6 text-primary">إدارة المخزون</div>
-          <div class="text-caption text-medium-emphasis">
-            {{ inventoryStore.selectedWarehouse?.name || 'لم يتم اختيار مخزن' }}
-          </div>
-        </div>
-        <div class="flex gap-2 flex-wrap">
-          <v-btn
-            v-if="canRequestTransfer"
-            color="primary"
-            prepend-icon="mdi-transfer"
-            size="default"
-            :to="{ name: 'StockTransfer' }"
-          >
-            نقل مخزون
-          </v-btn>
-          <v-btn
-            v-if="canAdjust"
-            color="warning"
-            prepend-icon="mdi-tune"
-            size="default"
-            :disabled="!inventoryStore.selectedWarehouseId"
-            @click="openAdjustDialog(null)"
-          >
-            إضافة / تعديل مخزون
-          </v-btn>
-          <v-btn
+  <div class="page-shell">
+    <PageHeader
+      title="إدارة المخزون"
+      :subtitle="inventoryStore.selectedWarehouse?.name || 'لم يتم اختيار مخزن'"
+      icon="mdi-warehouse"
+    >
+      <v-btn
+        v-if="canRequestTransfer"
+        color="primary"
+        prepend-icon="mdi-transfer"
+        size="default"
+        :to="{ name: 'StockTransfer' }"
+      >
+        نقل مخزون
+      </v-btn>
+      <v-btn
+        v-if="canAdjust"
+        color="warning"
+        variant="tonal"
+        prepend-icon="mdi-tune"
+        size="default"
+        :disabled="!inventoryStore.selectedWarehouseId"
+        @click="openAdjustDialog(null)"
+      >
+        إضافة / تعديل مخزون
+      </v-btn>
+      <v-btn
+        color="primary"
+        variant="text"
+        prepend-icon="mdi-history"
+        size="default"
+        :to="{ name: 'StockMovements' }"
+      >
+        حركات المخزون
+      </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar">
+      <v-row dense>
+        <v-col cols="12" md="8">
+          <v-text-field
+            v-model="search"
+            prepend-inner-icon="mdi-magnify"
+            label="البحث عن منتج بالاسم أو الرمز"
+            hide-details
+            density="comfortable"
+            variant="outlined"
+            clearable
+            @input="reload"
+            @click:clear="reload"
+          />
+        </v-col>
+        <v-col cols="12" md="4" class="d-flex align-center">
+          <v-switch
+            v-model="lowStockOnly"
             color="error"
-            prepend-icon="mdi-history"
-            size="default"
-            :to="{ name: 'StockMovements' }"
-          >
-            حركات المخزون
-          </v-btn>
-          <!-- <v-btn
-            color="error"
-            variant="tonal"
-            prepend-icon="mdi-alert"
-            size="default"
-            :to="{ name: 'LowStock' }"
-          >
-            منخفض المخزون
-          </v-btn> -->
-        </div>
-      </div>
+            density="comfortable"
+            hide-details
+            label="عرض المنخفض فقط"
+            @update:model-value="reload"
+          />
+        </v-col>
+      </v-row>
     </v-card>
 
-    <v-card>
-      <v-card-text>
-        <v-row>
-          <v-col cols="12" md="8">
-            <v-text-field
-              v-model="search"
-              prepend-inner-icon="mdi-magnify"
-              label="البحث عن منتج"
-              hide-details
-              density="comfortable"
-              clearable
-              @input="reload"
-              @click:clear="reload"
-            />
-          </v-col>
-          <v-col cols="12" md="4" class="flex items-center">
-            <v-switch
-              v-model="lowStockOnly"
-              color="error"
-              density="comfortable"
-              hide-details
-              label="عرض المنخفض فقط"
-              @update:model-value="reload"
-            />
-          </v-col>
-        </v-row>
-      </v-card-text>
-
+    <v-card class="page-section">
       <v-data-table
         :headers="headers"
         :items="filteredStock"
@@ -115,9 +103,16 @@
           </v-btn>
         </template>
         <template #no-data>
-          <div class="pa-8 text-center text-medium-emphasis">
-            لا توجد بيانات لعرضها
-          </div>
+          <EmptyState
+            title="لا توجد بيانات لعرضها"
+            :description="
+              inventoryStore.selectedWarehouseId
+                ? 'لا توجد منتجات تطابق هذا الفلتر — جرّب تعديل البحث.'
+                : 'اختر مخزنًا من شريط الأدوات لعرض المخزون.'
+            "
+            icon="mdi-warehouse"
+            compact
+          />
         </template>
       </v-data-table>
     </v-card>
@@ -125,8 +120,12 @@
     <!-- Adjust dialog -->
     <v-dialog v-model="adjustDialog" max-width="520">
       <v-card>
-        <v-card-title>تعديل يدوي للمخزون</v-card-title>
-        <v-card-text>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="warning">mdi-tune</v-icon>
+          <span>تعديل يدوي للمخزون</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
           <v-autocomplete
             v-model="adjustForm.productId"
             :items="inventoryStore.stock"
@@ -136,9 +135,10 @@
             density="comfortable"
             variant="outlined"
             :disabled="!!preselectedProduct"
+            class="mb-3"
           />
-          <v-row>
-            <v-col cols="6">
+          <v-row dense>
+            <v-col cols="12" sm="6">
               <v-select
                 v-model="adjustForm.direction"
                 :items="[
@@ -146,18 +146,18 @@
                   { title: 'خصم', value: 'out' },
                 ]"
                 label="الحركة"
+                variant="outlined"
                 density="comfortable"
-                class="mb-2"
               />
             </v-col>
-            <v-col cols="6">
+            <v-col cols="12" sm="6">
               <v-text-field
                 v-model.number="adjustForm.quantity"
                 label="الكمية"
                 type="number"
                 min="1"
+                variant="outlined"
                 density="comfortable"
-                class="mb-2"
               />
             </v-col>
           </v-row>
@@ -166,10 +166,12 @@
             label="سبب التعديل (إلزامي)"
             rows="2"
             auto-grow
+            variant="outlined"
             density="comfortable"
           />
         </v-card-text>
-        <v-card-actions>
+        <v-divider />
+        <v-card-actions class="pa-3">
           <v-spacer />
           <v-btn variant="text" @click="adjustDialog = false">إلغاء</v-btn>
           <v-btn color="primary" :loading="adjusting" @click="submitAdjust">حفظ</v-btn>
@@ -185,6 +187,8 @@ import { useRoute, useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
+import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
 
 const inventoryStore = useInventoryStore();
 const notificationStore = useNotificationStore();

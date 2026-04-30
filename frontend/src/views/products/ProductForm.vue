@@ -1,17 +1,16 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex justify-space-between items-center pa-3">
-        <div class="text-h6 font-semibold text-primary">
-          {{ isEdit ? 'تعديل منتج' : 'منتج جديد' }}
-        </div>
-        <v-btn color="primary" @click="router.back()">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      :title="isEdit ? 'تعديل منتج' : 'منتج جديد'"
+      :subtitle="isEdit ? 'تحديث معلومات المنتج' : 'إضافة منتج جديد إلى الكتالوج'"
+      :icon="isEdit ? 'mdi-package-variant' : 'mdi-package-variant-plus'"
+    >
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()">
+        رجوع
+      </v-btn>
+    </PageHeader>
 
-    <v-card>
+    <v-card class="page-section">
       <v-card-text>
         <v-form ref="form" @submit.prevent="handleSubmit">
           <v-row>
@@ -198,9 +197,11 @@
 
           <v-divider class="my-4"></v-divider>
 
-          <div class="d-flex gap-2">
-            <v-btn type="submit" color="primary" :loading="loading">حفظ</v-btn>
-            <v-btn @click="$router.back()">إلغاء</v-btn>
+          <div class="d-flex justify-end gap-2 flex-wrap">
+            <v-btn variant="text" @click="$router.back()">إلغاء</v-btn>
+            <v-btn type="submit" color="primary" prepend-icon="mdi-content-save" :loading="loading">
+              حفظ
+            </v-btn>
           </div>
         </v-form>
       </v-card-text>
@@ -209,10 +210,11 @@
     <!-- Add Opening Stock CTA (only after a successful create) -->
     <v-dialog v-model="openingStockDialog" max-width="480" persistent>
       <v-card>
-        <v-card-title class="bg-primary text-white">
-          <v-icon start>mdi-package-variant-plus</v-icon>
-          إضافة مخزون افتتاحي
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="primary">mdi-package-variant-plus</v-icon>
+          <span>إضافة مخزون افتتاحي</span>
         </v-card-title>
+        <v-divider />
         <v-card-text class="pt-4">
           <p class="mb-2">
             تم إنشاء المنتج بنجاح. هل تود إضافة كمية افتتاحية الآن من خلال حركة مخزون؟
@@ -221,10 +223,11 @@
             تسجيل الكمية كحركة مخزون يضمن وجود سجل تدقيق ويسمح بتحديد المخزن المستهدف.
           </p>
         </v-card-text>
-        <v-card-actions>
+        <v-divider />
+        <v-card-actions class="pa-3">
           <v-spacer />
           <v-btn variant="text" @click="skipOpeningStock">لاحقاً</v-btn>
-          <v-btn color="primary" prepend-icon="mdi-arrow-right" @click="goToAddOpeningStock">
+          <v-btn color="primary" prepend-icon="mdi-arrow-left" @click="goToAddOpeningStock">
             إضافة مخزون
           </v-btn>
         </v-card-actions>
@@ -234,11 +237,11 @@
     <!-- Admin Verification Dialog -->
     <v-dialog v-model="showAdminVerifyDialog" max-width="500" persistent>
       <v-card>
-        <v-card-title class="bg-primary text-white">
-          <v-icon start>mdi-shield-lock</v-icon>
-          تحقق من صلاحيات الأدمن
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="primary">mdi-shield-lock</v-icon>
+          <span>تحقق من صلاحيات الأدمن</span>
         </v-card-title>
-
+        <v-divider />
         <v-card-text class="pt-4">
           <v-alert type="info" variant="tonal" class="mb-4">
             لعرض سعر التكلفة، يجب إدخال بيانات مستخدم أدمن
@@ -248,15 +251,20 @@
             <v-text-field
               v-model="adminCredentials.username"
               label="اسم المستخدم"
+              variant="outlined"
+              density="comfortable"
               prepend-inner-icon="mdi-account"
               :rules="[rules.required]"
               :error="adminVerifyError"
+              class="mb-2"
             ></v-text-field>
 
             <v-text-field
               v-model="adminCredentials.password"
               label="كلمة المرور"
               type="password"
+              variant="outlined"
+              density="comfortable"
               prepend-inner-icon="mdi-lock"
               :rules="[rules.required]"
               :error="adminVerifyError"
@@ -264,8 +272,8 @@
             ></v-text-field>
           </v-form>
         </v-card-text>
-
-        <v-card-actions>
+        <v-divider />
+        <v-card-actions class="pa-3">
           <v-spacer />
           <v-btn variant="text" :disabled="adminVerifyLoading" @click="closeAdminDialog">
             إلغاء
@@ -293,6 +301,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
 import { useSettingsStore } from '@/stores/settings';
 import api from '@/plugins/axios';
+import PageHeader from '@/components/PageHeader.vue';
 
 const router = useRouter();
 const route = useRoute();

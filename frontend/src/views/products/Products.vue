@@ -1,67 +1,74 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3">
-        <div class="font-semibold text-h6 text-primary">إدارة المنتجات</div>
-        <v-btn
-          v-if="canManageProducts"
-          color="primary"
-          prepend-icon="mdi-plus"
-          size="default"
-          to="/products/new"
-          aria-label="إضافة منتج جديد"
-        >
-          منتج جديد
-        </v-btn>
-      </div>
+  <div class="page-shell">
+    <PageHeader
+      title="إدارة المنتجات"
+      subtitle="إدارة كتالوج المنتجات والمخزون والأسعار"
+      icon="mdi-package-variant"
+    >
+      <v-btn
+        v-if="canManageProducts"
+        color="primary"
+        prepend-icon="mdi-plus"
+        size="default"
+        to="/products/new"
+        aria-label="إضافة منتج جديد"
+      >
+        منتج جديد
+      </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar">
+      <v-row dense>
+        <v-col cols="12" md="8">
+          <v-text-field
+            v-model="search"
+            prepend-inner-icon="mdi-magnify"
+            label="البحث بالاسم أو رمز المنتج أو الباركود"
+            single-line
+            hide-details
+            density="comfortable"
+            variant="outlined"
+            clearable
+            aria-label="البحث عن منتج"
+            @input="handleSearch"
+            @click:clear="handleSearch"
+          ></v-text-field>
+        </v-col>
+        <v-col cols="12" md="4">
+          <v-select
+            v-model="selectedCategory"
+            :items="categories"
+            item-title="name"
+            item-value="id"
+            label="التصنيف"
+            clearable
+            density="comfortable"
+            variant="outlined"
+            hide-details
+            prepend-inner-icon="mdi-shape-outline"
+            @update:model-value="handleSearch"
+          ></v-select>
+        </v-col>
+      </v-row>
     </v-card>
 
-    <v-card>
-      <v-card-text>
-        <v-row>
-          <v-col cols="12" md="8">
-            <v-text-field
-              v-model="search"
-              prepend-inner-icon="mdi-magnify"
-              label="البحث عن منتج"
-              single-line
-              hide-details
-              density="comfortable"
-              aria-label="البحث عن منتج"
-              @input="handleSearch"
-            ></v-text-field>
-          </v-col>
-          <v-col cols="12" md="4">
-            <v-select
-              v-model="selectedCategory"
-              :items="categories"
-              item-title="name"
-              item-value="id"
-              label="التصنيف"
-              clearable
-              density="comfortable"
-              hide-details
-              @update:model-value="handleSearch"
-            ></v-select>
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
-
-    <v-card class="mt-4">
-      <v-card-title class="d-flex justify-space-between align-center">
-        <span>قائمة المنتجات</span>
+    <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          قائمة المنتجات
+        </span>
         <v-btn
-          icon="mdi-download"
           variant="text"
           size="small"
+          prepend-icon="mdi-download"
           :disabled="productStore.products.length === 0"
           aria-label="تصدير البيانات"
           @click="handleExport"
         >
-          <v-icon>mdi-download</v-icon>
+          تصدير
         </v-btn>
-      </v-card-title>
+      </div>
       <v-data-table
         :headers="headers"
         :items="productStore.products"
@@ -173,6 +180,7 @@ import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
+import PageHeader from '@/components/PageHeader.vue';
 import { useExport } from '@/composables/useExport';
 import { useUndo } from '@/composables/useUndo';
 import { useNotificationStore } from '@/stores/notification';

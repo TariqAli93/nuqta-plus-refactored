@@ -1,78 +1,87 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <v-card-title class="d-flex align-center gap-2">
-        <v-icon color="error">mdi-alert-circle-outline</v-icon>
-        <span>التحصيل — الأقساط المتأخرة</span>
-        <v-spacer />
-        <v-btn
-          variant="tonal"
-          size="small"
-          prepend-icon="mdi-refresh"
-          :loading="loading"
-          @click="reload"
-        >
-          تحديث
-        </v-btn>
-      </v-card-title>
-      <v-divider />
-      <div class="pa-4">
-        <v-row dense>
-          <v-col cols="12" sm="6" md="3">
-            <v-select
-              v-model="filters.agingBucket"
-              :items="agingBuckets"
-              label="فترة التأخر"
-              variant="outlined"
-              density="comfortable"
-              clearable
-              @update:model-value="reload"
-            />
-          </v-col>
-          <v-col cols="12" sm="6" md="3">
-            <v-text-field
-              v-model="filters.startDate"
-              type="date"
-              label="من تاريخ"
-              variant="outlined"
-              density="comfortable"
-              clearable
-              @update:model-value="reload"
-            />
-          </v-col>
-          <v-col cols="12" sm="6" md="3">
-            <v-text-field
-              v-model="filters.endDate"
-              type="date"
-              label="إلى تاريخ"
-              variant="outlined"
-              density="comfortable"
-              clearable
-              @update:model-value="reload"
-            />
-          </v-col>
-          <v-col cols="12" sm="6" md="3">
-            <v-text-field
-              v-if="canPickBranch"
-              v-model.number="filters.branchId"
-              type="number"
-              label="رقم الفرع (اختياري)"
-              variant="outlined"
-              density="comfortable"
-              clearable
-              @update:model-value="reload"
-            />
-          </v-col>
-        </v-row>
-      </div>
+  <div class="page-shell">
+    <PageHeader
+      title="التحصيل — الأقساط المتأخرة"
+      subtitle="متابعة الأقساط المتأخرة عن موعد الاستحقاق"
+      icon="mdi-alert-circle-outline"
+      icon-color="error"
+    >
+      <v-btn
+        variant="tonal"
+        color="primary"
+        size="default"
+        prepend-icon="mdi-refresh"
+        :loading="loading"
+        @click="reload"
+      >
+        تحديث
+      </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar">
+      <v-row dense>
+        <v-col cols="12" sm="6" md="3">
+          <v-select
+            v-model="filters.agingBucket"
+            :items="agingBuckets"
+            label="فترة التأخر"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-clock-alert-outline"
+            hide-details
+            clearable
+            @update:model-value="reload"
+          />
+        </v-col>
+        <v-col cols="6" sm="6" md="3">
+          <v-text-field
+            v-model="filters.startDate"
+            type="date"
+            label="من تاريخ"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-calendar-start"
+            hide-details
+            clearable
+            @update:model-value="reload"
+          />
+        </v-col>
+        <v-col cols="6" sm="6" md="3">
+          <v-text-field
+            v-model="filters.endDate"
+            type="date"
+            label="إلى تاريخ"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-calendar-end"
+            hide-details
+            clearable
+            @update:model-value="reload"
+          />
+        </v-col>
+        <v-col v-if="canPickBranch" cols="12" sm="6" md="3">
+          <v-text-field
+            v-model.number="filters.branchId"
+            type="number"
+            label="رقم الفرع (اختياري)"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-source-branch"
+            hide-details
+            clearable
+            @update:model-value="reload"
+          />
+        </v-col>
+      </v-row>
     </v-card>
 
-    <v-card>
-      <v-card-text>
-        <div v-if="loading" class="d-flex justify-center pa-8">
-          <v-progress-circular indeterminate />
+    <v-card class="page-section">
+      <v-card-text class="pa-0">
+        <div v-if="loading" class="loading-state">
+          <v-progress-circular indeterminate color="primary" size="48" />
+          <div class="text-body-2 text-medium-emphasis">جاري تحميل البيانات…</div>
         </div>
-        <div v-else-if="!items.length" class="pa-6">
+        <div v-else-if="!items.length" class="pa-4">
           <EmptyState
             title="لا توجد أقساط متأخرة"
             description="جميع الأقساط ضمن نطاقك مدفوعة أو مستحقة بعد اليوم."
@@ -146,6 +155,7 @@ import { useCollectionsStore } from '@/stores/collections';
 import { useAuthStore } from '@/stores/auth';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
+import PageHeader from '@/components/PageHeader.vue';
 import { formatCurrency } from '@/utils/helpers';
 
 const collectionsStore = useCollectionsStore();

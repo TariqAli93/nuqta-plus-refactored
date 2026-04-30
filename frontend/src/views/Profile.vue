@@ -1,15 +1,10 @@
 <template>
-  <v-container fluid>
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-4">
-          <v-card-title class="d-flex align-center">
-            <v-icon class="me-2" color="primary">mdi-account-circle</v-icon>
-            <span>الملف الشخصي</span>
-          </v-card-title>
-        </v-card>
-      </v-col>
-    </v-row>
+  <div class="page-shell">
+    <PageHeader
+      title="الملف الشخصي"
+      subtitle="معلومات المستخدم وصلاحياته"
+      icon="mdi-account-circle"
+    />
 
     <v-row>
       <!-- User Information Card -->
@@ -154,7 +149,7 @@
         </v-card>
       </v-col>
     </v-row>
-  </v-container>
+  </div>
 </template>
 
 <script setup>
@@ -162,6 +157,7 @@ import { ref, computed } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
 import api from '@/plugins/axios';
+import PageHeader from '@/components/PageHeader.vue';
 
 const authStore = useAuthStore();
 const notificationStore = useNotificationStore();

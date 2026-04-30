@@ -75,16 +75,20 @@
           <v-text-field
             v-model="credentials.username"
             label="اسم المستخدم"
+            placeholder="أدخل اسم المستخدم"
             prepend-inner-icon="mdi-account-outline"
             :rules="[rules.required]"
             variant="outlined"
             color="primary"
             density="comfortable"
-            class="mb-5"
+            autocomplete="username"
+            autofocus
+            class="mb-4"
           />
           <v-text-field
             v-model="credentials.password"
             label="كلمة المرور"
+            placeholder="أدخل كلمة المرور"
             prepend-inner-icon="mdi-lock-outline"
             :type="showPassword ? 'text' : 'password'"
             :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
@@ -92,11 +96,19 @@
             variant="outlined"
             color="primary"
             density="comfortable"
+            autocomplete="current-password"
             class="mb-4"
             @click:append-inner="showPassword = !showPassword"
           />
 
-          <v-alert v-if="error" type="error" border="start" density="compact" class="mb-4">
+          <v-alert
+            v-if="error"
+            type="error"
+            variant="tonal"
+            border="start"
+            density="compact"
+            class="mb-4"
+          >
             {{ error }}
           </v-alert>
 
@@ -106,10 +118,10 @@
             size="large"
             block
             rounded="lg"
+            prepend-icon="mdi-login"
             class="py-3 font-semibold tracking-wide shadow-lg hover:shadow-xl transition-all duration-300"
             :loading="loading"
           >
-            <v-icon class="ml-2">mdi-login</v-icon>
             دخول
           </v-btn>
         </v-form>

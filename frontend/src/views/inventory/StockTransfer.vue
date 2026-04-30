@@ -1,15 +1,16 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3">
-        <div class="font-semibold text-h6 text-primary">نقل مخزون بين المخازن</div>
-        <v-btn color="primary" @click="router.back()">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      title="نقل مخزون بين المخازن"
+      subtitle="إنشاء طلب نقل بضاعة من مخزن إلى آخر"
+      icon="mdi-transfer"
+    >
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()">
+        رجوع
+      </v-btn>
+    </PageHeader>
 
-    <v-card  class="mx-auto">
+    <v-card class="page-section mx-auto">
       <v-card-text>
         <v-row>
           <v-col cols="12" md="6">
@@ -96,6 +97,7 @@ import { useInventoryStore } from '@/stores/inventory';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
 import api from '@/plugins/axios';
+import PageHeader from '@/components/PageHeader.vue';
 
 const inventoryStore = useInventoryStore();
 const notificationStore = useNotificationStore();

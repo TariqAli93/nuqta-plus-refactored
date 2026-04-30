@@ -1,54 +1,50 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-center">
-        <div class="flex items-center pa-3">
-          <div class="font-semibold text-h6 text-primary">تفاصيل الفاتورة</div>
-        </div>
+  <div class="page-shell">
+    <PageHeader
+      title="تفاصيل الفاتورة"
+      subtitle="عرض الفاتورة والمدفوعات والإرجاع"
+      icon="mdi-receipt-text"
+    >
+      <v-btn
+        color="primary"
+        prepend-icon="mdi-printer"
+        :loading="printing"
+        :disabled="isFullyReturned || isCancelled"
+        :title="isFullyReturned ? 'الطباعة معطلة — تم إرجاع جميع المنتجات' : ''"
+        @click="handlePrint"
+      >
+        طباعة
+      </v-btn>
 
-        <v-spacer />
+      <v-btn
+        color="primary"
+        variant="tonal"
+        prepend-icon="mdi-eye"
+        :disabled="isFullyReturned"
+        :title="isFullyReturned ? 'المعاينة معطلة — تم إرجاع جميع المنتجات' : ''"
+        @click="previewPrint"
+      >
+        معاينة الطباعة
+      </v-btn>
 
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-printer"
-          :loading="printing"
-          :disabled="isFullyReturned || isCancelled"
-          :title="isFullyReturned ? 'الطباعة معطلة — تم إرجاع جميع المنتجات' : ''"
-          @click="handlePrint"
-        >
-          طباعة
-        </v-btn>
+      <v-btn
+        v-if="canReturn"
+        color="warning"
+        variant="tonal"
+        prepend-icon="mdi-keyboard-return"
+        :disabled="isFullyReturned"
+        :title="isFullyReturned ? 'تم إرجاع جميع المنتجات' : ''"
+        @click="openReturnDialog"
+      >
+        {{ isFullyReturned ? 'مُرجع كلياً' : 'إرجاع / استرداد' }}
+      </v-btn>
 
-        <v-btn
-          class="mr-3"
-          color="secondary"
-          prepend-icon="mdi-eye"
-          :disabled="isFullyReturned"
-          :title="isFullyReturned ? 'المعاينة معطلة — تم إرجاع جميع المنتجات' : ''"
-          @click="previewPrint"
-        >
-          معاينة الطباعة
-        </v-btn>
+      <select-printer />
 
-        <v-btn
-          v-if="canReturn"
-          class="mr-3"
-          color="warning"
-          prepend-icon="mdi-keyboard-return"
-          :disabled="isFullyReturned"
-          :title="isFullyReturned ? 'تم إرجاع جميع المنتجات' : ''"
-          @click="openReturnDialog"
-        >
-          {{ isFullyReturned ? 'مُرجع كلياً' : 'إرجاع / استرداد' }}
-        </v-btn>
-
-        <select-printer class="mr-3" />
-
-        <v-btn color="primary" class="mx-3" @click="router.go(-1)">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </div>
-    </v-card>
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.go(-1)">
+        رجوع
+      </v-btn>
+    </PageHeader>
 
     <v-card v-if="sale" class="mb-4">
       <v-card-title class="d-flex justify-space-between align-center">
@@ -756,6 +752,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
 import SelectPrinter from '@/components/SelectPrinter.vue';
+import PageHeader from '@/components/PageHeader.vue';
 import { formatReceiptData } from '@/utils/receiptFormatter';
 import {
   toYmd,

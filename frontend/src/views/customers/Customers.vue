@@ -1,49 +1,54 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex justify-space-between items-center pa-3">
-        <div class="text-h6 font-semibold text-primary">إدارة العملاء</div>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-plus"
-          size="default"
-          to="/customers/new"
-          aria-label="إضافة عميل جديد"
-        >
-          عميل جديد
-        </v-btn>
-      </div>
+  <div class="page-shell">
+    <PageHeader
+      title="إدارة العملاء"
+      subtitle="عرض وإدارة بيانات عملائك"
+      icon="mdi-account-group"
+    >
+      <v-btn
+        color="primary"
+        prepend-icon="mdi-plus"
+        size="default"
+        to="/customers/new"
+        aria-label="إضافة عميل جديد"
+      >
+        عميل جديد
+      </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar">
+      <v-text-field
+        v-model="search"
+        prepend-inner-icon="mdi-magnify"
+        label="البحث عن عميل بالاسم أو الهاتف"
+        single-line
+        hide-details
+        density="comfortable"
+        variant="outlined"
+        clearable
+        aria-label="البحث عن عميل"
+        @input="handleSearch"
+        @click:clear="handleSearch"
+      ></v-text-field>
     </v-card>
 
-    <v-card>
-      <div class="pa-4 flex justify-lg-space-between items-center gap-4">
-        <v-text-field
-          v-model="search"
-          prepend-inner-icon="mdi-magnify"
-          label="البحث عن عميل"
-          single-line
-          hide-details
-          density="comfortable"
-          aria-label="البحث عن عميل"
-          @input="handleSearch"
-        ></v-text-field>
-      </div>
-    </v-card>
-
-    <v-card class="mt-4">
-      <v-card-title class="d-flex justify-space-between align-center">
-        <span>قائمة العملاء</span>
+    <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          قائمة العملاء
+        </span>
         <v-btn
-          icon="mdi-download"
           variant="text"
           size="small"
+          prepend-icon="mdi-download"
           :disabled="!customerStore.customers || customerStore.customers.length === 0"
           aria-label="تصدير البيانات"
           @click="handleExport"
         >
-          <v-icon>mdi-download</v-icon>
+          تصدير
         </v-btn>
-      </v-card-title>
+      </div>
       <v-data-table
         :headers="headers"
         :items="customerStore.customers"
@@ -148,6 +153,7 @@ import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
+import PageHeader from '@/components/PageHeader.vue';
 import { useExport } from '@/composables/useExport';
 import { useUndo } from '@/composables/useUndo';
 import { useNotificationStore } from '@/stores/notification';

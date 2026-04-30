@@ -1,15 +1,16 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3">
-        <div class="font-semibold text-h6 text-primary">إدارة التصنيفات</div>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openDialog()"
-          >تصنيف جديد
-        </v-btn>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      title="إدارة التصنيفات"
+      subtitle="تنظيم منتجاتك ضمن فئات"
+      icon="mdi-shape"
+    >
+      <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openDialog()"
+        >تصنيف جديد
+      </v-btn>
+    </PageHeader>
 
-    <v-card>
+    <v-card class="page-section">
       <v-data-table
         :headers="headers"
         :items="categoryStore.categories"
@@ -43,28 +44,38 @@
 
     <v-dialog v-model="dialog" max-width="500">
       <v-card>
-        <v-card-title class="text-white bg-secondary">{{
-          isEdit ? 'تعديل تصنيف' : 'تصنيف جديد'
-        }}</v-card-title>
-        <v-card-text>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="primary">{{ isEdit ? 'mdi-pencil' : 'mdi-shape-plus' }}</v-icon>
+          <span>{{ isEdit ? 'تعديل تصنيف' : 'تصنيف جديد' }}</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
           <v-form ref="form">
             <v-text-field
               v-model="formData.name"
               label="اسم التصنيف"
               variant="outlined"
+              density="comfortable"
             ></v-text-field>
-            <v-textarea v-model="formData.description" variant="outlined" class="mt-4" label="الوصف" rows="2"></v-textarea>
+            <v-textarea
+              v-model="formData.description"
+              variant="outlined"
+              density="comfortable"
+              label="الوصف"
+              rows="2"
+              auto-grow
+            ></v-textarea>
           </v-form>
         </v-card-text>
 
         <v-divider></v-divider>
 
-        <v-card-actions>
-          <v-btn color="primary" variant="elevated" :loading="saving" @click="handleSubmit"
-            >حفظ</v-btn
-          >
+        <v-card-actions class="pa-3">
           <v-spacer />
-          <v-btn @click="dialog = false">إلغاء</v-btn>
+          <v-btn variant="text" @click="dialog = false">إلغاء</v-btn>
+          <v-btn color="primary" variant="elevated" :loading="saving" @click="handleSubmit">
+            حفظ
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -88,6 +99,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useCategoryStore } from '@/stores/category';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
+import PageHeader from '@/components/PageHeader.vue';
 
 const categoryStore = useCategoryStore();
 

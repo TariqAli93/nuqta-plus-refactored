@@ -1,52 +1,97 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex justify-space-between items-center pa-3">
-        <div class="text-h6 font-semibold text-primary">
-          {{ isEdit ? 'تعديل عميل' : 'عميل جديد' }}
-        </div>
-        <v-btn color="primary" @click="router.back()">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      :title="isEdit ? 'تعديل عميل' : 'عميل جديد'"
+      :subtitle="isEdit ? 'تحديث معلومات العميل' : 'إضافة عميل جديد إلى النظام'"
+      :icon="isEdit ? 'mdi-account-edit' : 'mdi-account-plus'"
+    >
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()">
+        رجوع
+      </v-btn>
+    </PageHeader>
 
-    <v-card>
+    <v-card class="page-section">
       <v-card-text>
         <v-form ref="form" @submit.prevent="handleSubmit">
-          <v-row>
-            <v-col cols="12" md="6">
-              <v-text-field
-                v-model="formData.name"
-                label="اسم العميل"
-                :rules="[rules.required]"
-              ></v-text-field>
-            </v-col>
-            <v-col cols="12" md="6">
-              <v-text-field
-                v-model="formData.phone"
-                label="رقم الهاتف"
-                :hint="phoneHint"
-                :error-messages="phoneError ? [phoneError] : []"
-                persistent-hint
-              ></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model="formData.city" label="المدينة"></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model="formData.address" label="العنوان" rows="2"></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model="formData.notes" label="ملاحظات" rows="2"></v-text-field>
-            </v-col>
-          </v-row>
+          <div class="form-section">
+            <div class="form-section__title">
+              <v-icon size="20" color="primary">mdi-account-circle-outline</v-icon>
+              <span>المعلومات الأساسية</span>
+            </div>
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="formData.name"
+                  label="اسم العميل *"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-account"
+                  :rules="[rules.required]"
+                  required
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="formData.phone"
+                  label="رقم الهاتف"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-phone"
+                  :hint="phoneHint"
+                  :error-messages="phoneError ? [phoneError] : []"
+                  persistent-hint
+                ></v-text-field>
+              </v-col>
+            </v-row>
+          </div>
+
+          <v-divider class="my-4" />
+
+          <div class="form-section">
+            <div class="form-section__title">
+              <v-icon size="20" color="primary">mdi-map-marker-outline</v-icon>
+              <span>العنوان والملاحظات</span>
+            </div>
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="formData.city"
+                  label="المدينة"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-city"
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="formData.address"
+                  label="العنوان"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-map-marker"
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12">
+                <v-textarea
+                  v-model="formData.notes"
+                  label="ملاحظات"
+                  variant="outlined"
+                  density="comfortable"
+                  rows="2"
+                  auto-grow
+                  prepend-inner-icon="mdi-note-text-outline"
+                ></v-textarea>
+              </v-col>
+            </v-row>
+          </div>
 
           <v-divider class="my-4"></v-divider>
 
-          <div class="d-flex gap-2">
-            <v-btn type="submit" color="primary" :loading="loading">حفظ</v-btn>
-            <v-btn @click="$router.back()">إلغاء</v-btn>
+          <div class="d-flex justify-end gap-2 flex-wrap">
+            <v-btn variant="text" @click="$router.back()">إلغاء</v-btn>
+            <v-btn type="submit" color="primary" prepend-icon="mdi-content-save" :loading="loading">
+              حفظ
+            </v-btn>
           </div>
         </v-form>
       </v-card-text>
@@ -57,11 +102,12 @@
          number (e.g. a family that uses one phone for multiple accounts). -->
     <v-dialog v-model="duplicateDialog" max-width="480" persistent>
       <v-card>
-        <v-card-title class="text-warning">
-          <v-icon start color="warning">mdi-alert-circle</v-icon>
-          رقم الهاتف مستخدم بالفعل
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="warning">mdi-alert-circle</v-icon>
+          <span class="text-warning">رقم الهاتف مستخدم بالفعل</span>
         </v-card-title>
-        <v-card-text>
+        <v-divider />
+        <v-card-text class="pt-4">
           <p class="mb-2">
             هذا الرقم مسجّل لدى عميل آخر:
             <strong v-if="duplicateExisting">
@@ -69,12 +115,13 @@
               <span v-if="duplicateExisting.phone" class="text-grey">({{ duplicateExisting.phone }})</span>
             </strong>
           </p>
-          <p class="text-body-2 text-grey">
+          <p class="text-body-2 text-medium-emphasis">
             لن يتم دمج العميلين. هل تريد المتابعة وإنشاء/تعديل هذا العميل بنفس الرقم
             (مثلاً لأفراد العائلة الذين يشتركون برقم واحد)؟
           </p>
         </v-card-text>
-        <v-card-actions>
+        <v-divider />
+        <v-card-actions class="pa-3">
           <v-spacer />
           <v-btn variant="text" @click="duplicateDialog = false">إلغاء</v-btn>
           <v-btn color="warning" :loading="loading" @click="confirmDuplicateSave">
@@ -92,6 +139,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useCustomerStore } from '@/stores/customer';
 import { useNotificationStore } from '@/stores/notification';
 import { normalizeIraqPhone } from '@/utils/phone';
+import PageHeader from '@/components/PageHeader.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -196,3 +244,17 @@ onMounted(async () => {
   }
 });
 </script>
+
+<style scoped lang="scss">
+.form-section {
+  &__title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: rgba(var(--v-theme-on-surface), 0.85);
+    margin-bottom: 0.75rem;
+    font-size: 0.95rem;
+  }
+}
+</style>

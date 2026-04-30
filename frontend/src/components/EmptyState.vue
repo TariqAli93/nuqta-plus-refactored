@@ -78,22 +78,32 @@ defineProps({
 }
 
 .empty-state-icon {
-  margin-bottom: 1.5rem;
-  opacity: 0.6;
+  margin-bottom: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 9999px;
+  background-color: rgba(var(--v-theme-on-surface), 0.04);
+  margin-inline: auto;
+  opacity: 0.85;
 }
 
 .empty-state-title {
   font-size: 1.25rem;
-  font-weight: 500;
+  font-weight: 600;
   margin-bottom: 0.5rem;
   color: rgb(var(--v-theme-on-surface));
 }
 
 .empty-state-description {
-  font-size: 0.875rem;
-  color: rgb(var(--v-theme-on-surface));
+  font-size: 0.9rem;
+  color: rgba(var(--v-theme-on-surface), 0.65);
   margin-bottom: 1.5rem;
-  line-height: 1.5;
+  line-height: 1.6;
+  max-width: 360px;
+  margin-inline: auto;
 }
 
 .empty-state-actions {

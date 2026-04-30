@@ -1,27 +1,27 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3">
-        <div>
-          <div class="font-semibold text-h6 text-primary">المخزون المنخفض</div>
-          <div class="text-caption text-medium-emphasis">
-            {{ inventoryStore.selectedWarehouse?.name || 'لم يتم اختيار مخزن' }}
-          </div>
-        </div>
-        <v-chip color="error" size="large">{{ inventoryStore.lowStock.length }} منتج</v-chip>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      title="المخزون المنخفض"
+      :subtitle="inventoryStore.selectedWarehouse?.name || 'لم يتم اختيار مخزن'"
+      icon="mdi-alert-circle-outline"
+      icon-color="error"
+    >
+      <v-chip color="error" size="default" prepend-icon="mdi-alert">
+        {{ inventoryStore.lowStock.length }} منتج
+      </v-chip>
+    </PageHeader>
 
     <v-alert
       v-if="!inventoryStore.selectedWarehouseId && !loading"
       type="info"
       variant="tonal"
+      border="start"
       class="mb-4"
     >
       لم يتم إعداد أي مخزن بعد. أنشئ فرعاً ومخزناً من "الفروع والمخازن" ثم عد إلى هذه الصفحة.
     </v-alert>
 
-    <v-card>
+    <v-card class="page-section">
       <v-data-table
         :headers="headers"
         :items="inventoryStore.lowStock"
@@ -48,6 +48,7 @@
 import { onMounted, ref, watch } from 'vue';
 import { useInventoryStore } from '@/stores/inventory';
 import { useAuthStore } from '@/stores/auth';
+import PageHeader from '@/components/PageHeader.vue';
 
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();

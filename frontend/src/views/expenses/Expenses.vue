@@ -1,28 +1,34 @@
 <template>
-  <v-container fluid class="expenses-page pa-3 pa-sm-4">
-    <v-card class="mb-4">
-      <div class="flex justify-space-between items-center pa-3">
-        <div class="text-h6 font-semibold text-primary">إدارة المصاريف</div>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-plus"
-          size="default"
-          aria-label="إضافة مصروف جديد"
-          @click="openCreate"
-        >
-          مصروف جديد
-        </v-btn>
-      </div>
-    </v-card>
+  <div class="page-shell expenses-page">
+    <PageHeader
+      title="إدارة المصاريف"
+      subtitle="تسجيل ومتابعة المصاريف التشغيلية"
+      icon="mdi-cash-minus"
+    >
+      <v-btn
+        color="primary"
+        prepend-icon="mdi-plus"
+        size="default"
+        aria-label="إضافة مصروف جديد"
+        @click="openCreate"
+      >
+        مصروف جديد
+      </v-btn>
+    </PageHeader>
 
     <!-- Summary cards -->
-    <v-row v-if="summary" dense class="mb-4">
+    <v-row v-if="summary" dense class="page-section">
       <v-col cols="12" sm="6" md="3">
-        <v-card class="mb-4">
+        <v-card class="h-100">
           <v-card-text>
-            <div class="text-caption">إجمالي المصاريف</div>
+            <div class="d-flex align-center gap-2 mb-1">
+              <v-icon size="18" color="primary">mdi-sigma</v-icon>
+              <span class="text-caption text-medium-emphasis">إجمالي المصاريف</span>
+            </div>
             <div class="text-h5 font-weight-bold">{{ moneyFmt(summary.total) }}</div>
-            <div class="text-caption text-medium-emphasis">{{ summary.count || 0 }} عملية</div>
+            <div class="text-caption text-medium-emphasis mt-1">
+              {{ summary.count || 0 }} عملية
+            </div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -33,66 +39,78 @@
         sm="3"
         md="3"
       >
-        <v-card>
+        <v-card class="h-100">
           <v-card-text>
-            <div class="text-caption">{{ row.currency }}</div>
-            <div class="text-h6">{{ moneyFmt(row.total) }}</div>
+            <div class="d-flex align-center gap-2 mb-1">
+              <v-icon size="18" color="success">mdi-currency-usd</v-icon>
+              <span class="text-caption text-medium-emphasis">{{ row.currency }}</span>
+            </div>
+            <div class="text-h6 font-weight-bold">{{ moneyFmt(row.total) }}</div>
           </v-card-text>
         </v-card>
       </v-col>
     </v-row>
 
     <!-- Filters -->
-    <v-card class="mb-4">
-      <v-card-text class="d-flex flex-wrap align-center gap-3">
-        <v-text-field
-          v-model="filters.dateFrom"
-          type="date"
-          label="من"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="max-width: 180px"
-        />
-        <v-text-field
-          v-model="filters.dateTo"
-          type="date"
-          label="إلى"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="max-width: 180px"
-        />
-        <v-select
-          v-model="filters.category"
-          :items="categoryOptions"
-          label="الفئة"
-          density="compact"
-          variant="outlined"
-          hide-details
-          clearable
-          style="max-width: 200px"
-        />
-        <v-select
-          v-if="isGlobalAdmin"
-          v-model="filters.branchId"
-          :items="branchOptions"
-          item-title="name"
-          item-value="id"
-          label="الفرع"
-          density="compact"
-          variant="outlined"
-          hide-details
-          clearable
-          style="max-width: 200px"
-        />
-        <v-btn variant="text" color="primary" @click="reload">تطبيق</v-btn>
+    <v-card class="page-section filter-toolbar">
+      <v-row dense>
+        <v-col cols="6" sm="4" md="3">
+          <v-text-field
+            v-model="filters.dateFrom"
+            type="date"
+            label="من تاريخ"
+            density="comfortable"
+            variant="outlined"
+            prepend-inner-icon="mdi-calendar-start"
+            hide-details
+          />
+        </v-col>
+        <v-col cols="6" sm="4" md="3">
+          <v-text-field
+            v-model="filters.dateTo"
+            type="date"
+            label="إلى تاريخ"
+            density="comfortable"
+            variant="outlined"
+            prepend-inner-icon="mdi-calendar-end"
+            hide-details
+          />
+        </v-col>
+        <v-col cols="12" sm="4" md="3">
+          <v-select
+            v-model="filters.category"
+            :items="categoryOptions"
+            label="الفئة"
+            density="comfortable"
+            variant="outlined"
+            prepend-inner-icon="mdi-tag-outline"
+            hide-details
+            clearable
+          />
+        </v-col>
+        <v-col v-if="isGlobalAdmin" cols="12" sm="6" md="3">
+          <v-select
+            v-model="filters.branchId"
+            :items="branchOptions"
+            item-title="name"
+            item-value="id"
+            label="الفرع"
+            density="comfortable"
+            variant="outlined"
+            prepend-inner-icon="mdi-source-branch"
+            hide-details
+            clearable
+          />
+        </v-col>
+      </v-row>
+      <div class="filter-toolbar__actions mt-3">
         <v-btn variant="text" @click="clearFilters">مسح</v-btn>
-      </v-card-text>
+        <v-btn color="primary" prepend-icon="mdi-check" @click="reload">تطبيق</v-btn>
+      </div>
     </v-card>
 
     <!-- Table -->
-    <v-card variant="outlined">
+    <v-card class="page-section">
       <v-data-table
         :headers="headers"
         :items="items"
@@ -116,6 +134,7 @@
             icon="mdi-pencil"
             size="small"
             variant="text"
+            title="تعديل"
             @click="openEdit(item)"
           />
           <v-btn
@@ -124,7 +143,16 @@
             size="small"
             variant="text"
             color="error"
+            title="حذف"
             @click="confirmDelete(item)"
+          />
+        </template>
+        <template #no-data>
+          <EmptyState
+            title="لا توجد مصاريف"
+            description="ابدأ بتسجيل مصروف جديد لمتابعة المصاريف التشغيلية."
+            icon="mdi-cash-minus"
+            compact
           />
         </template>
       </v-data-table>
@@ -133,68 +161,92 @@
     <!-- Create/Edit dialog -->
     <v-dialog v-model="dialog" max-width="520">
       <v-card>
-        <v-card-title>{{ editingId ? 'تعديل مصروف' : 'تسجيل مصروف جديد' }}</v-card-title>
-        <v-card-text>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="primary">{{ editingId ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
+          <span>{{ editingId ? 'تعديل مصروف' : 'تسجيل مصروف جديد' }}</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
           <v-form ref="form" @submit.prevent="save">
-            <v-select
-              v-model="formData.category"
-              :items="categoryOptions"
-              label="الفئة *"
-              variant="outlined"
-              :rules="[(v) => !!v || 'الفئة مطلوبة']"
-              required
-            />
-            <v-text-field
-              v-model.number="formData.amount"
-              type="number"
-              step="0.01"
-              label="المبلغ *"
-              variant="outlined"
-              :rules="[
-                (v) => !!v || 'المبلغ مطلوب',
-                (v) => Number(v) > 0 || 'المبلغ يجب أن يكون أكبر من صفر',
-              ]"
-              required
-            />
-            <v-select
-              v-model="formData.currency"
-              :items="['USD', 'IQD']"
-              label="العملة"
-              variant="outlined"
-            />
-            <v-text-field
-              v-model="formData.expenseDate"
-              type="date"
-              label="التاريخ"
-              variant="outlined"
-            />
-            <v-select
-              v-if="isGlobalAdmin"
-              v-model="formData.branchId"
-              :items="branchOptions"
-              item-title="name"
-              item-value="id"
-              label="الفرع"
-              variant="outlined"
-              clearable
-            />
-            <v-textarea
-              v-model="formData.note"
-              label="ملاحظات"
-              variant="outlined"
-              rows="2"
-              auto-grow
-            />
+            <v-row dense>
+              <v-col cols="12" sm="6">
+                <v-select
+                  v-model="formData.category"
+                  :items="categoryOptions"
+                  label="الفئة *"
+                  variant="outlined"
+                  density="comfortable"
+                  :rules="[(v) => !!v || 'الفئة مطلوبة']"
+                  required
+                />
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-text-field
+                  v-model="formData.expenseDate"
+                  type="date"
+                  label="التاريخ"
+                  variant="outlined"
+                  density="comfortable"
+                />
+              </v-col>
+              <v-col cols="12" sm="8">
+                <v-text-field
+                  v-model.number="formData.amount"
+                  type="number"
+                  step="0.01"
+                  label="المبلغ *"
+                  variant="outlined"
+                  density="comfortable"
+                  :rules="[
+                    (v) => !!v || 'المبلغ مطلوب',
+                    (v) => Number(v) > 0 || 'المبلغ يجب أن يكون أكبر من صفر',
+                  ]"
+                  required
+                />
+              </v-col>
+              <v-col cols="12" sm="4">
+                <v-select
+                  v-model="formData.currency"
+                  :items="['USD', 'IQD']"
+                  label="العملة"
+                  variant="outlined"
+                  density="comfortable"
+                />
+              </v-col>
+              <v-col v-if="isGlobalAdmin" cols="12">
+                <v-select
+                  v-model="formData.branchId"
+                  :items="branchOptions"
+                  item-title="name"
+                  item-value="id"
+                  label="الفرع"
+                  variant="outlined"
+                  density="comfortable"
+                  clearable
+                />
+              </v-col>
+              <v-col cols="12">
+                <v-textarea
+                  v-model="formData.note"
+                  label="ملاحظات"
+                  variant="outlined"
+                  density="comfortable"
+                  rows="2"
+                  auto-grow
+                />
+              </v-col>
+            </v-row>
           </v-form>
         </v-card-text>
-        <v-card-actions>
+        <v-divider />
+        <v-card-actions class="pa-3">
           <v-spacer />
           <v-btn variant="text" @click="dialog = false">إلغاء</v-btn>
           <v-btn color="primary" :loading="saving" @click="save">حفظ</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
-  </v-container>
+  </div>
 </template>
 
 <script setup>
@@ -203,6 +255,8 @@ import { useExpensesStore } from '@/stores/expenses';
 import { useAuthStore } from '@/stores/auth';
 import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
+import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
 
 const expensesStore = useExpensesStore();
 const authStore = useAuthStore();
@@ -357,13 +411,5 @@ onMounted(async () => {
 <style scoped lang="scss">
 .expenses-page {
   direction: rtl;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-.gap-2 {
-  gap: 0.5rem;
-}
-.gap-3 {
-  gap: 0.75rem;
 }
 </style>

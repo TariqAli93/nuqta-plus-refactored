@@ -1,44 +1,49 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3">
-        <div class="font-semibold text-h6 text-primary">حركات المخزون</div>
-        <v-btn color="primary" @click="router.back()">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </div>
+  <div class="page-shell">
+    <PageHeader
+      title="حركات المخزون"
+      subtitle="سجل حركات المخزون والتعديلات"
+      icon="mdi-history"
+    >
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()">
+        رجوع
+      </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar">
+      <v-row dense>
+        <v-col cols="12" md="6">
+          <v-select
+            v-model="filters.warehouseId"
+            :items="inventoryStore.warehouses"
+            item-title="name"
+            item-value="id"
+            label="المخزن"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-warehouse"
+            clearable
+            hide-details
+            @update:model-value="reload"
+          />
+        </v-col>
+        <v-col cols="12" md="6">
+          <v-select
+            v-model="filters.movementType"
+            :items="movementTypes"
+            label="نوع الحركة"
+            variant="outlined"
+            density="comfortable"
+            prepend-inner-icon="mdi-filter-variant"
+            clearable
+            hide-details
+            @update:model-value="reload"
+          />
+        </v-col>
+      </v-row>
     </v-card>
 
-    <v-card>
-      <v-card-text>
-        <v-row>
-          <v-col cols="12" md="6">
-            <v-select
-              v-model="filters.warehouseId"
-              :items="inventoryStore.warehouses"
-              item-title="name"
-              item-value="id"
-              label="المخزن"
-              density="comfortable"
-              clearable
-              hide-details
-              @update:model-value="reload"
-            />
-          </v-col>
-          <v-col cols="12" md="6">
-            <v-select
-              v-model="filters.movementType"
-              :items="movementTypes"
-              label="نوع الحركة"
-              density="comfortable"
-              clearable
-              hide-details
-              @update:model-value="reload"
-            />
-          </v-col>
-        </v-row>
-      </v-card-text>
-
+    <v-card class="page-section">
       <v-data-table
         :headers="headers"
         :items="inventoryStore.movements"
@@ -77,6 +82,7 @@ import { onMounted, reactive, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
 import PaginationControls from '@/components/PaginationControls.vue';
+import PageHeader from '@/components/PageHeader.vue';
 
 const router = useRouter();
 const inventoryStore = useInventoryStore();

@@ -1,0 +1,310 @@
+// ============================================
+// UI/UX Polish - Cross-cutting refinements
+// تحسينات بصرية مشتركة عبر الصفحات
+// ============================================
+//
+// Non-invasive layer that smooths spacing, hierarchy and density on
+// existing Vuetify markup. No component logic depends on these classes —
+// they only adjust visual rhythm.
+
+@use '../abstracts' as *;
+
+// ----------------------------------------------------------------
+// Standard "page" container — used to wrap top-level views so all
+// screens share the same outer padding, max width and rhythm.
+// ----------------------------------------------------------------
+.page-shell {
+  padding: $spacing-3 $spacing-4 $spacing-6;
+  max-width: 1600px;
+  margin-inline: auto;
+  width: 100%;
+
+  @media (max-width: 600px) {
+    padding: $spacing-3 $spacing-3 $spacing-5;
+  }
+}
+
+// Stack of cards/sections on a page — consistent vertical rhythm.
+.page-section + .page-section {
+  margin-top: $spacing-4;
+}
+
+// ----------------------------------------------------------------
+// Filter / toolbar block that sits above tables.
+// ----------------------------------------------------------------
+.filter-toolbar {
+  padding: $spacing-3 $spacing-4;
+
+  &__row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: $spacing-3;
+    align-items: end;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: $spacing-2;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  @media (max-width: 600px) {
+    padding: $spacing-3;
+
+    &__row {
+      grid-template-columns: 1fr;
+      gap: $spacing-2;
+    }
+  }
+}
+
+// ----------------------------------------------------------------
+// Section title block — for sub-section headings inside cards.
+// ----------------------------------------------------------------
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-3;
+  padding: $spacing-3 $spacing-4;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+
+  @include dark-theme {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+  }
+
+  &__label {
+    font-size: $font-size-md;
+    font-weight: $font-weight-semibold;
+    color: rgb(var(--v-theme-on-surface));
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-2;
+  }
+
+  &__hint {
+    font-size: $font-size-sm;
+    color: rgba(var(--v-theme-on-surface), 0.6);
+  }
+}
+
+// ----------------------------------------------------------------
+// Form polish — give all forms consistent breathing room and clearer
+// required-field affordances without changing markup.
+// ----------------------------------------------------------------
+
+// Default Vuetify text-field margins are tight when stacked vertically;
+// add a touch of bottom margin when no row/grid is in use.
+.v-form {
+  // Vuetify already adds spacing inside `v-row` / `v-col`. This rule only
+  // targets fields that are direct children of a form (not in a grid).
+  > .v-text-field,
+  > .v-textarea,
+  > .v-select,
+  > .v-autocomplete,
+  > .v-combobox,
+  > .v-switch,
+  > .v-checkbox {
+    margin-bottom: $spacing-3;
+  }
+}
+
+// Dialog forms tighten things up so the dialog doesn't grow too tall —
+// but still keep enough room between fields to breathe.
+.v-dialog .v-form {
+  > .v-text-field,
+  > .v-textarea,
+  > .v-select,
+  > .v-autocomplete {
+    margin-bottom: $spacing-2;
+  }
+}
+
+// Stronger asterisk styling for required fields.
+.v-input--required .v-label::after,
+.v-field--required .v-label::after {
+  content: ' *';
+  color: rgb(var(--v-theme-error));
+  font-weight: $font-weight-bold;
+}
+
+// Make hint and error messages a touch larger / clearer.
+.v-messages__message {
+  line-height: 1.45 !important;
+}
+
+// ----------------------------------------------------------------
+// Card polish — consistent radius and a softer, layered shadow.
+// ----------------------------------------------------------------
+.v-card {
+  border-radius: $border-radius-md !important;
+
+  &.v-card--variant-flat,
+  &.v-card--variant-elevated {
+    box-shadow:
+      0 1px 2px 0 rgba(0, 0, 0, 0.04),
+      0 1px 3px 0 rgba(0, 0, 0, 0.06) !important;
+  }
+
+  &.v-card--variant-outlined {
+    border-color: rgba(0, 0, 0, 0.08);
+
+    @include dark-theme {
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+  }
+}
+
+.v-card-title {
+  display: flex;
+  align-items: center;
+  gap: $spacing-2;
+  padding: $spacing-3 $spacing-4 !important;
+  font-size: $font-size-md !important;
+  letter-spacing: 0 !important;
+  min-height: 52px;
+}
+
+.v-card-text {
+  padding: $spacing-4 !important;
+}
+
+// ----------------------------------------------------------------
+// Data table polish — tighter, cleaner rows with comfy padding.
+// ----------------------------------------------------------------
+.v-data-table {
+  --v-table-row-height: 48px;
+
+  // Header — slightly stronger background, semibold text.
+  .v-data-table-header__content,
+  thead th {
+    font-weight: $font-weight-semibold !important;
+    letter-spacing: 0 !important;
+    color: rgba(var(--v-theme-on-surface), 0.78) !important;
+  }
+
+  // Cells — comfortable side padding, vertical centering.
+  td,
+  th {
+    padding-inline: $spacing-4 !important;
+  }
+
+  // Row dividers — softer than the default solid 1px black.
+  tbody tr {
+    border-bottom: 1px solid rgba(var(--v-border-color), 0.08);
+  }
+
+  // Hover — already provided by Vuetify, but slightly clearer.
+  tbody tr:hover {
+    background-color: rgba(var(--v-theme-primary), 0.04) !important;
+  }
+
+  // Cursor: rows that are clickable (we add `.cursor-pointer` to the
+  // table) should look interactive everywhere on the row.
+  &.cursor-pointer tbody tr {
+    cursor: pointer;
+  }
+
+  // Action-button column — keep all icon buttons tight and aligned.
+  td:last-child .v-btn {
+    margin-inline: 2px;
+  }
+
+  // No-data slot — center it with comfortable height regardless of row
+  // density. (Vuetify default is a thin 1-line cell.)
+  .v-data-table__empty-wrapper {
+    padding: $spacing-6 $spacing-4 !important;
+  }
+}
+
+// Stripe alternating rows on tables that opt-in via .v-data-table--striped
+.v-data-table.is-striped tbody tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.015);
+
+  @include dark-theme {
+    background-color: rgba(255, 255, 255, 0.02);
+  }
+}
+
+// ----------------------------------------------------------------
+// Buttons — make icon-only action buttons compact in tables.
+// ----------------------------------------------------------------
+.v-data-table .v-btn--icon.v-btn--size-small {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+// Primary button gets a subtle elevation lift — feels more "primary"
+// without a redesign.
+.v-btn--variant-elevated.v-btn--color-primary,
+.v-btn[color='primary'].v-btn--variant-elevated {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 2px 6px rgba(var(--v-theme-primary), 0.18) !important;
+}
+
+// ----------------------------------------------------------------
+// Chips inside table cells — reduce vertical jitter.
+// ----------------------------------------------------------------
+.v-data-table .v-chip {
+  height: auto;
+  padding-block: 2px;
+}
+
+// ----------------------------------------------------------------
+// v-list (used in Branches/Warehouses screens) — cleaner spacing
+// when used as a content list inside a card.
+// ----------------------------------------------------------------
+.v-card > .v-list {
+  padding-block: $spacing-2 !important;
+
+  > .v-list-item {
+    min-height: 56px;
+    padding-inline: $spacing-4 !important;
+
+    & + .v-list-item {
+      border-top: 1px solid rgba(var(--v-border-color), 0.06);
+    }
+  }
+}
+
+// ----------------------------------------------------------------
+// Loading state used by report-style pages.
+// ----------------------------------------------------------------
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  text-align: center;
+  gap: $spacing-3;
+}
+
+// ----------------------------------------------------------------
+// Status pill — small reusable inline chip-like element.
+// ----------------------------------------------------------------
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: $border-radius-full;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  line-height: 1.6;
+}
+
+// ----------------------------------------------------------------
+// RTL fine-tuning — Vuetify mostly handles this, but a few of the
+// utility classes used in the codebase need attention.
+// ----------------------------------------------------------------
+[dir='rtl'] {
+  .filter-toolbar__actions {
+    justify-content: flex-start;
+  }
+}

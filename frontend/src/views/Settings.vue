@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="page-shell">
     <!-- Error Alert -->
     <v-alert
       v-if="settingsStore.error"
@@ -7,23 +7,31 @@
       variant="tonal"
       closable
       class="mb-4"
+      border="start"
       @click:close="settingsStore.clearError"
     >
       {{ settingsStore.error }}
     </v-alert>
-    <!-- Header -->
+
+    <PageHeader
+      title="الإعدادات"
+      subtitle="إدارة معلومات الشركة، العملات، الاتصال، النسخ الاحتياطي والترخيص"
+      icon="mdi-cog"
+    />
 
     <v-row>
-      <v-col cols="12" md="2">
-        <v-card class="flex flex-col">
-          <div class="flex justify-space-between items-center pa-3">
-            <div class="text-h6 font-semibold text-primary">الاعدادات</div>
-          </div>
-
-          <v-tabs v-model="activeTab" class="pa-3" direction="vertical" spaced="both" hide-slider>
+      <v-col cols="12" md="3" lg="3">
+        <v-card class="settings-tabs-card">
+          <v-tabs
+            v-model="activeTab"
+            class="settings-tabs"
+            direction="vertical"
+            color="primary"
+            density="comfortable"
+          >
             <v-tab value="company">
               <v-icon start>mdi-domain</v-icon>
-              <span> معلومات الشركة</span>
+              <span>معلومات الشركة</span>
             </v-tab>
             <v-tab value="currency">
               <v-icon start>mdi-currency-usd</v-icon>
@@ -49,7 +57,7 @@
         </v-card>
       </v-col>
 
-      <v-col cols="12" md="10">
+      <v-col cols="12" md="9" lg="9">
         <v-window v-model="activeTab">
           <!-- Company Information Tab -->
           <v-window-item value="company" class="pa-0">
@@ -97,6 +105,7 @@ import LicenseStatus from '@/components/settings/LicenseStatus.vue';
 import ConnectionSettings from '@/components/settings/ConnectionSettings.vue';
 import ServerConnectionInfo from '@/components/settings/ServerConnectionInfo.vue';
 import MessagingSettings from '@/components/settings/MessagingSettings.vue';
+import PageHeader from '@/components/PageHeader.vue';
 
 // Stores
 const settingsStore = useSettingsStore();
@@ -125,3 +134,54 @@ onMounted(async () => {
   }
 });
 </script>
+
+<style scoped lang="scss">
+.settings-tabs-card {
+  position: sticky;
+  top: 1rem;
+  padding: 0.5rem;
+}
+
+.settings-tabs {
+  // tabs base
+  :deep(.v-tab) {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    height: 44px;
+    padding-inline: 0.85rem;
+    margin-block: 2px;
+    border-radius: 8px;
+    font-weight: 500;
+  }
+
+  // selected state
+  :deep(.v-tab--selected) {
+    background-color: rgba(var(--v-theme-primary), 0.08);
+  }
+
+  // icon spacing
+  :deep(.v-tab .v-icon) {
+    margin-inline-end: 0.5rem;
+  }
+}
+
+@media (max-width: 960px) {
+  .settings-tabs-card {
+    position: static;
+    padding: 0.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .settings-tabs {
+    :deep(.v-slide-group__container) {
+      overflow-x: auto;
+      scrollbar-width: none; // Firefox
+    }
+
+    :deep(.v-slide-group__container::-webkit-scrollbar) {
+      display: none; // Chrome
+    }
+  }
+}
+</style>

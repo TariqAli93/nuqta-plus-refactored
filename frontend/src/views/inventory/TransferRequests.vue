@@ -1,35 +1,40 @@
 <template>
-  <div>
-    <v-card class="mb-4">
-      <div class="flex items-center justify-space-between pa-3">
-        <div class="font-semibold text-h6 text-primary">طلبات نقل المخزون</div>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-plus"
-          :to="{ name: 'StockTransfer' }"
-        >
-          طلب نقل جديد
-        </v-btn>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      title="طلبات نقل المخزون"
+      subtitle="إدارة طلبات النقل بين المخازن"
+      icon="mdi-transfer"
+    >
+      <v-btn
+        color="primary"
+        prepend-icon="mdi-plus"
+        :to="{ name: 'StockTransfer' }"
+      >
+        طلب نقل جديد
+      </v-btn>
+    </PageHeader>
 
-    <v-card>
-      <v-card-text class="flex gap-3 items-center">
+    <v-card class="page-section filter-toolbar">
+      <div class="d-flex align-center gap-3 flex-wrap">
         <v-select
           v-model="statusFilter"
           :items="statusFilters"
           label="الحالة"
+          variant="outlined"
           density="comfortable"
+          prepend-inner-icon="mdi-filter-variant"
           hide-details
-          style="max-width: 200px"
+          style="max-width: 240px; min-width: 200px;"
           @update:model-value="reload"
         />
         <v-spacer />
-        <v-btn icon="mdi-refresh" variant="text" @click="reload">
-          <v-icon>mdi-refresh</v-icon>
+        <v-btn variant="text" prepend-icon="mdi-refresh" @click="reload">
+          تحديث
         </v-btn>
-      </v-card-text>
+      </div>
+    </v-card>
 
+    <v-card class="page-section">
       <v-data-table
         :headers="headers"
         :items="transfers"
@@ -102,6 +107,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useInventoryStore } from '@/stores/inventory';
 import { useAuthStore } from '@/stores/auth';
+import PageHeader from '@/components/PageHeader.vue';
 
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();

@@ -1,5 +1,5 @@
 <template>
-  <v-container fluid class="reports-page pa-3 pa-sm-4">
+  <div class="page-shell reports-page">
     <ReportHeader
       :date-from="filters.dateFrom"
       :date-to="filters.dateTo"
@@ -118,7 +118,7 @@
         :can-view-profit="canViewProfit"
       />
     </template>
-  </v-container>
+  </div>
 </template>
 
 <script setup>
@@ -382,17 +382,6 @@ onMounted(async () => {
 <style scoped lang="scss">
 .reports-page {
   direction: rtl;
-  max-width: 1600px;
-  margin: 0 auto;
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 280px;
-  text-align: center;
 }
 
 @media print {

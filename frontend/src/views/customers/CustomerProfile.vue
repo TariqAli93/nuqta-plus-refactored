@@ -1,8 +1,9 @@
 <template>
-  <div>
+  <div class="page-shell">
     <!-- Loading state ---------------------------------------------------- -->
-    <div v-if="loading" class="d-flex justify-center align-center" style="min-height: 240px">
+    <div v-if="loading" class="loading-state">
       <v-progress-circular indeterminate color="primary" size="56" />
+      <div class="text-body-2 text-medium-emphasis">جاري تحميل بيانات العميل…</div>
     </div>
 
     <!-- Error / not-found state ------------------------------------------ -->
