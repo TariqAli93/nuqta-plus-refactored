@@ -335,7 +335,12 @@ export class CashSessionService {
       .offset(offset);
 
     return {
-      data: rows.map((r) => this.serialize(r)),
+      data: rows.map((r) => ({
+        ...this.serialize(r),
+        cashierName: r.cashierName,
+        cashierUsername: r.cashierUsername,
+        branchName: r.branchName,
+      })),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
