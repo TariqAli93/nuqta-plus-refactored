@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="dialog" max-width="460" persistent>
+  <v-dialog v-model="dialog" max-width="460">
     <v-card class="bg-surface-soft rounded-lg">
       <v-card-title class="d-flex align-center gap-2">
         <v-icon color="primary">mdi-cash-register</v-icon>
@@ -44,11 +44,7 @@
       </v-card-text>
       <v-divider />
       <v-card-actions class="justify-end gap-2 pa-3">
-        <v-btn
-          variant="outlined"
-          :disabled="loading || !cancelable"
-          @click="onCancel"
-        >
+        <v-btn variant="outlined" :disabled="loading || !cancelable" @click="onCancel">
           إلغاء
         </v-btn>
         <v-btn
