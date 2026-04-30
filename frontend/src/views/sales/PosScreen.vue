@@ -6,12 +6,7 @@
         <!-- Shift status / open / close shift bar -->
         <div class="shift-bar">
           <template v-if="hasOpenSession">
-            <v-chip
-              size="small"
-              color="success"
-              variant="flat"
-              prepend-icon="mdi-cash-register"
-            >
+            <v-chip size="small" color="success" variant="flat" prepend-icon="mdi-cash-register">
               وردية #{{ currentSession.id }} — افتتاحي
               {{ formatMoney(currentSession.openingCash, currentSession.currency) }}
             </v-chip>
@@ -36,7 +31,12 @@
             </v-btn>
           </template>
           <template v-else>
-            <v-chip size="small" color="warning" variant="flat" prepend-icon="mdi-alert-circle-outline">
+            <v-chip
+              size="small"
+              color="warning"
+              variant="flat"
+              prepend-icon="mdi-alert-circle-outline"
+            >
               لا توجد وردية مفتوحة
             </v-chip>
             <v-spacer />
@@ -1200,8 +1200,7 @@ const checkout = async () => {
   if (!canSubmit.value) return;
   // Cash POS sales require an open shift. Card sales bypass this check —
   // the drawer doesn't move on a card transaction.
-  const isCashSale =
-    payment.method === 'cash' && Number(payment.paidAmount) > 0;
+  const isCashSale = payment.method === 'cash' && Number(payment.paidAmount) > 0;
   if (isCashSale && !hasOpenSession.value) {
     notify.warning('افتح وردية قبل تسجيل بيع نقدي');
     openShiftDialog.value = true;
@@ -1291,8 +1290,7 @@ const loadDrafts = async () => {
     // The axios interceptor rejects with either the response body or the
     // original error, so check both shapes for a usable message.
     console.error('Failed to load drafts:', err);
-    draftsError.value =
-      err?.message || err?.response?.data?.message || 'فشل تحميل المسودات';
+    draftsError.value = err?.message || err?.response?.data?.message || 'فشل تحميل المسودات';
     draftList.value = [];
   } finally {
     draftsLoading.value = false;
@@ -2802,7 +2800,9 @@ onUnmounted(() => {
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 
   &:hover {
     background: var(--pos-primary-soft);
@@ -2873,7 +2873,9 @@ onUnmounted(() => {
   border: 1px solid var(--pos-border);
   border-radius: var(--pos-radius-md);
   background: var(--pos-surface);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 
   &:hover {
     border-color: var(--pos-primary);

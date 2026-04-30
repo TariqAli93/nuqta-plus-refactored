@@ -31,7 +31,8 @@
       "Bash(npx eslint *)",
       "Bash(grep -E \"\\\\.\\(js|vue\\)$\")",
       "Bash(npx vue-tsc *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(VITE_TARGET=web npx vite build --mode production)"
     ]
   }
 }

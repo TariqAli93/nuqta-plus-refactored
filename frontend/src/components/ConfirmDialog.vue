@@ -9,13 +9,9 @@
     @update:model-value="onUpdate"
   >
     <v-card>
-      <v-card-title
-        :id="titleId"
-        :class="['text-white', `bg-${type}`]"
-        class="d-flex align-center gap-2"
-      >
-        <v-icon>{{ typeIcon }}</v-icon>
-        {{ title }}
+      <v-card-title :id="titleId" class="dialog-title">
+        <v-icon :color="type">{{ typeIcon }}</v-icon>
+        <span>{{ title }}</span>
       </v-card-title>
 
       <v-divider></v-divider>
@@ -39,14 +35,14 @@
 
       <v-divider></v-divider>
 
-      <v-card-actions class="justify-end gap-2 pa-3">
-        <v-btn variant="outlined" size="default" :aria-label="cancelLabel" @click="handleCancel">
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" :aria-label="cancelLabel" @click="handleCancel">
           {{ cancelText }}
         </v-btn>
         <v-btn
           :color="type"
           variant="elevated"
-          size="default"
           :loading="loading"
           :disabled="showInput && !isInputValid"
           :aria-label="confirmLabel"
@@ -218,8 +214,3 @@ watch(dialog, (isOpen) => {
 });
 </script>
 
-<style scoped lang="scss">
-.v-card-title {
-  padding: 1rem 1.5rem;
-}
-</style>

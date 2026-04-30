@@ -1,5 +1,11 @@
 <template>
   <div class="page-shell reports-page">
+    <PageHeader
+      title="التقارير المحاسبية"
+      subtitle="ملخص المبيعات، المخزون والمحاسبة"
+      icon="mdi-chart-box"
+    />
+
     <ReportHeader
       :date-from="filters.dateFrom"
       :date-to="filters.dateTo"
@@ -128,6 +134,7 @@ import { useReportStore } from '@/stores/report';
 import { useInventoryStore } from '@/stores/inventory';
 import { useSettingsStore } from '@/stores/settings';
 import EmptyState from '@/components/EmptyState.vue';
+import PageHeader from '@/components/PageHeader.vue';
 import ReportHeader from '@/components/reports/ReportHeader.vue';
 import ReportFilters from '@/components/reports/ReportFilters.vue';
 import ReportKpiCards from '@/components/reports/ReportKpiCards.vue';
@@ -380,10 +387,6 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
-.reports-page {
-  direction: rtl;
-}
-
 @media print {
   .reports-page :deep(.v-tabs),
   .reports-page :deep(.export-actions),

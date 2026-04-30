@@ -1,77 +1,78 @@
 <template>
-  <v-card>
-    <v-card-title class="d-flex align-center justify-space-between bg-error text-white">
-      <div class="d-flex align-center">
-        <v-icon class="ml-2">mdi-message-alert</v-icon>
+  <v-card class="page-section">
+    <div class="section-title">
+      <span class="section-title__label">
+        <v-icon size="20" color="error">mdi-message-alert</v-icon>
         <span>رسائل فشلت بالإرسال ({{ rows.length }})</span>
-      </div>
-      <v-btn
-        size="small"
-        variant="outlined"
-        color="white"
-        prepend-icon="mdi-refresh"
-        :loading="loading"
-        @click="refresh"
-      >
-        تحديث
-      </v-btn>
-    </v-card-title>
+      </span>
+      <span class="section-title__actions">
+        <v-btn
+          size="small"
+          variant="text"
+          color="primary"
+          prepend-icon="mdi-refresh"
+          :loading="loading"
+          @click="refresh"
+        >
+          تحديث
+        </v-btn>
+      </span>
+    </div>
 
-    <v-card-text class="pa-0">
-      <div v-if="loading && !rows.length" class="text-center pa-6">
-        <v-progress-circular indeterminate color="error" size="40" />
-      </div>
-
-      <div
-        v-else-if="!rows.length"
-        class="text-center pa-6 text-medium-emphasis"
-      >
-        لا توجد رسائل فشلت أو معلقة.
-      </div>
-
-      <v-table v-else density="compact">
-        <thead>
-          <tr>
-            <th>التاريخ</th>
-            <th>النوع</th>
-            <th>المستلم</th>
-            <th>الحالة</th>
-            <th>المحاولات</th>
-            <th>الخطأ</th>
-            <th>إجراء</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in rows" :key="row.id">
-            <td>{{ formatDate(row.createdAt) }}</td>
-            <td>{{ typeLabel(row.type) }}</td>
-            <td dir="ltr" class="text-mono">{{ row.recipientPhone }}</td>
-            <td>
-              <v-chip :color="statusColor(row.status)" size="x-small">
-                {{ statusLabel(row.status) }}
-              </v-chip>
-            </td>
-            <td>{{ row.attempts || 0 }} / {{ row.maxAttempts || 5 }}</td>
-            <td class="text-error" style="max-width: 280px">
-              <span class="text-caption">{{ row.error || '—' }}</span>
-            </td>
-            <td>
-              <v-btn
-                size="x-small"
-                variant="text"
-                color="primary"
-                prepend-icon="mdi-replay"
-                :loading="retryingId === row.id"
-                :disabled="row.status === 'sent'"
-                @click="retry(row)"
-              >
-                إعادة المحاولة
-              </v-btn>
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card-text>
+    <v-data-table
+      :headers="headers"
+      :items="rows"
+      :loading="loading"
+      density="comfortable"
+      hide-default-footer
+      items-per-page="50"
+    >
+      <template #loading>
+        <TableSkeleton :rows="3" :columns="headers.length" />
+      </template>
+      <template #no-data>
+        <EmptyState
+          title="لا توجد رسائل فشلت أو معلقة"
+          description="ستظهر هنا الرسائل التي فشلت بالإرسال أو علقت في قائمة الانتظار."
+          icon="mdi-message-check-outline"
+          icon-color="success"
+          compact
+        />
+      </template>
+      <template #[`item.createdAt`]="{ item }">
+        {{ formatDate(item.createdAt) }}
+      </template>
+      <template #[`item.type`]="{ item }">
+        {{ typeLabel(item.type) }}
+      </template>
+      <template #[`item.recipientPhone`]="{ item }">
+        <span dir="ltr" class="text-mono">{{ item.recipientPhone }}</span>
+      </template>
+      <template #[`item.status`]="{ item }">
+        <v-chip :color="statusColor(item.status)" variant="tonal" size="small">
+          {{ statusLabel(item.status) }}
+        </v-chip>
+      </template>
+      <template #[`item.attempts`]="{ item }">
+        {{ item.attempts || 0 }} / {{ item.maxAttempts || 5 }}
+      </template>
+      <template #[`item.error`]="{ item }">
+        <span class="text-caption text-error">{{ item.error || '—' }}</span>
+      </template>
+      <template #[`item.actions`]="{ item }">
+        <v-btn
+          size="small"
+          variant="text"
+          color="primary"
+          prepend-icon="mdi-replay"
+          :loading="retryingId === item.id"
+          :disabled="item.status === 'sent'"
+          @click="retry(item)"
+        >
+          إعادة المحاولة
+        </v-btn>
+      </template>
+    </v-data-table>
   </v-card>
 </template>
 
@@ -79,6 +80,18 @@
 import { computed, ref, onMounted } from 'vue';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
+import EmptyState from '@/components/EmptyState.vue';
+import TableSkeleton from '@/components/TableSkeleton.vue';
+
+const headers = [
+  { title: 'التاريخ', key: 'createdAt' },
+  { title: 'النوع', key: 'type' },
+  { title: 'المستلم', key: 'recipientPhone' },
+  { title: 'الحالة', key: 'status' },
+  { title: 'المحاولات', key: 'attempts' },
+  { title: 'الخطأ', key: 'error' },
+  { title: 'إجراء', key: 'actions', sortable: false },
+];
 
 // "Stuck" = stayed in `processing` status for longer than this. Matches the
 // queue worker's PROCESSING_LOCK_TIMEOUT_MS — anything older has effectively

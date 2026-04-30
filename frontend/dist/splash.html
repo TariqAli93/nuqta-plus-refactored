@@ -1,0 +1,206 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NuqtaPlus — Loading</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@200;300;400;500;600;700;800;900;1000&display=swap" rel="stylesheet">
+
+    <style>
+      :root {
+        --left-bg-light: #000000;
+        --left-bg-dark: #0c0c0c;
+
+        --right-bg-light: #f0ece4;
+        --right-bg-dark: #1a1a1a;
+
+        --text-light: #ffffff;
+        --text-dark: #e5e5e5;
+
+        --progress-bg: rgba(255, 255, 255, 0.15);
+        --progress-fill: #f15a24; /* Adobe Orange accent */
+
+        --transition: 0.35s ease;
+      }
+
+      @media (prefers-color-scheme: light) {
+        .left-pane {
+          background: var(--left-bg-light);
+          color: var(--text-light);
+        }
+        .right-pane {
+          background: var(--right-bg-light);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .left-pane {
+          background: var(--left-bg-dark);
+          color: var(--text-dark);
+        }
+        .right-pane {
+          background: var(--right-bg-dark);
+        }
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        font-family: 'Cairo', sans-serif;
+        overflow: hidden;
+      }
+
+      .container {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        border-radius: 14px;
+        overflow: hidden;
+      }
+
+      /* LEFT SIDE */
+
+      .left-pane {
+        width: 40%;
+        padding: 40px 48px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 35px;
+      }
+
+      .branding-top {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .app-name {
+        font-size: 34px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+      }
+
+      .copyright,
+      .artist,
+      .init {
+        font-size: 14px;
+        line-height: 1.6;
+        opacity: 0.8;
+      }
+
+      /* PROGRESS BAR (Adobe Style) */
+
+      .progress-wrapper {
+        width: 100%;
+        max-width: 260px;
+        height: 3px;
+        background: var(--progress-bg);
+        border-radius: 2px;
+        margin-top: 8px;
+        overflow: hidden;
+        opacity: 0;
+        transition: opacity 0.4s ease;
+      }
+
+      .progress-bar {
+        width: 0%;
+        height: 100%;
+        background: var(--progress-fill);
+        transition: width 0.18s linear;
+      }
+
+      .version-box {
+        font-size: 13px;
+        opacity: 0.8;
+        margin-top: 10px;
+      }
+
+      /* RIGHT SIDE ARTWORK */
+
+      .right-pane {
+        width: 60%;
+        background-size: cover;
+        background-position: center;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <!-- LEFT SECTION -->
+      <div class="left-pane">
+        <div class="branding-top">
+          <img
+            src="./icon.png"
+            alt="Logo"
+            width="70"
+            height="70"
+            style="border-radius: 12px"
+            onerror="this.style.display='none'"
+          />
+
+          <div class="app-name">نقطة بلس</div>
+
+          <div class="artist">تصميم وتطوير كودل للحلول البرمجية</div>
+
+          <div class="copyright">
+            . جميع الحقوق محفوظة.<br />
+            لمزيد من التفاصيل، راجع شاشة "حول النظام".
+          </div>
+
+          <div class="init">جارٍ التحميل، يرجى الانتظار...</div>
+
+          <!-- Adobe-style Progress Bar -->
+          <div class="progress-wrapper" id="progressWrapper">
+            <div class="progress-bar" id="progressBar"></div>
+          </div>
+        </div>
+
+        <div class="version-box">Version <span id="appVersion">—</span></div>
+      </div>
+
+      <!-- RIGHT SECTION -->
+      <div class="right-pane" style="background-image: url('./assets/splash-mockup.png')"></div>
+    </div>
+
+    <script>
+      // Show progress after a short delay (Adobe behavior)
+      setTimeout(() => {
+        const wrapper = document.getElementById('progressWrapper');
+        wrapper.style.opacity = 1;
+
+        const bar = document.getElementById('progressBar');
+        let p = 0;
+
+        const totalDuration = 10000; // 10 seconds
+        const interval = 100; // update every 100ms
+        const target = 96; // stop early until app loads
+        const increment = target / (totalDuration / interval);
+
+        const timer = setInterval(() => {
+          p += increment;
+          if (p >= target) p = target;
+          bar.style.width = p + '%';
+        }, interval);
+      }, 800);
+
+      // Version from Electron
+      if (window.splashAPI?.getAppVersion) {
+        window.splashAPI.getAppVersion().then((v) => {
+          document.getElementById('appVersion').textContent = v || '';
+        });
+      }
+    </script>
+  </body>
+</html>

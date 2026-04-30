@@ -5,14 +5,25 @@
       subtitle="إنشاء طلب نقل بضاعة من مخزن إلى آخر"
       icon="mdi-transfer"
     >
-      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()">
-        رجوع
-      </v-btn>
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()"> رجوع </v-btn>
     </PageHeader>
 
     <v-card class="page-section mx-auto">
       <v-card-text>
         <v-row>
+          <v-col cols="12">
+            <v-autocomplete
+              v-model="form.productId"
+              :items="fromStock"
+              item-title="label"
+              item-value="productId"
+              label="المنتج"
+              density="comfortable"
+              variant="outlined"
+              :disabled="!form.fromWarehouseId"
+            />
+          </v-col>
+
           <v-col cols="12" md="6">
             <v-select
               v-model="form.fromWarehouseId"
@@ -47,17 +58,7 @@
               {{ noDestinationsText }}
             </div>
           </v-col>
-          <v-col cols="12">
-            <v-autocomplete
-              v-model="form.productId"
-              :items="fromStock"
-              item-title="label"
-              item-value="productId"
-              label="المنتج"
-              density="comfortable"
-              :disabled="!form.fromWarehouseId"
-            />
-          </v-col>
+
           <v-col cols="12" md="6">
             <v-text-field
               v-model.number="form.quantity"
@@ -71,11 +72,7 @@
             />
           </v-col>
           <v-col cols="12" md="6">
-            <v-text-field
-              v-model="form.notes"
-              label="ملاحظات (اختياري)"
-              density="comfortable"
-            />
+            <v-text-field v-model="form.notes" label="ملاحظات (اختياري)" density="comfortable" />
           </v-col>
         </v-row>
       </v-card-text>
@@ -124,9 +121,7 @@ const destinationOptions = ref([]);
 // Source dropdown options come from the inventory store, which only contains
 // the warehouses the backend authorized for the current user. We just keep
 // active rows here — no role-based filtering on the frontend.
-const sourceOptions = computed(() =>
-  inventoryStore.warehouses.filter((w) => w.isActive)
-);
+const sourceOptions = computed(() => inventoryStore.warehouses.filter((w) => w.isActive));
 
 // User can change source iff the backend gave them more than one warehouse.
 // No role check needed.
@@ -182,10 +177,7 @@ const loadTransferTargets = async () => {
     });
     destinationOptions.value = response?.data || [];
     // Drop a stale destination if it isn't in the new target list.
-    if (
-      form.toWarehouseId &&
-      !destinationOptions.value.some((w) => w.id === form.toWarehouseId)
-    ) {
+    if (form.toWarehouseId && !destinationOptions.value.some((w) => w.id === form.toWarehouseId)) {
       form.toWarehouseId = null;
     }
   } catch (error) {

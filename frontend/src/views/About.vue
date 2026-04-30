@@ -1,24 +1,21 @@
 <template>
-  <div>
-    <!-- Header -->
-    <v-card class="mb-4">
-      <div class="pa-4 d-flex align-center">
-        <v-icon size="32" color="primary" class="ml-3">mdi-information</v-icon>
-        <div>
-          <div class="text-h5 font-weight-bold">حول البرنامج</div>
-          <div class="text-subtitle-2 text-medium-emphasis">معلومات عن النظام والشركة المطورة</div>
-        </div>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      title="حول البرنامج"
+      subtitle="معلومات عن النظام والشركة المطورة"
+      icon="mdi-information"
+    />
 
     <v-row>
       <!-- معلومات البرنامج -->
       <v-col cols="12" md="6">
         <v-card class="h-100">
-          <v-card-title class="d-flex align-center bg-primary">
-            <v-icon class="ml-2">mdi-application</v-icon>
-            معلومات البرنامج
-          </v-card-title>
+          <div class="section-title">
+            <span class="section-title__label">
+              <v-icon size="20" color="primary">mdi-application</v-icon>
+              معلومات البرنامج
+            </span>
+          </div>
           <v-card-text class="pt-4">
             <v-list density="comfortable">
               <v-list-item>
@@ -77,10 +74,12 @@
       <!-- معلومات الشركة المطورة -->
       <v-col cols="12" md="6">
         <v-card class="h-100">
-          <v-card-title class="d-flex align-center bg-primary">
-            <v-icon class="ml-2">mdi-domain</v-icon>
-            الشركة المطورة
-          </v-card-title>
+          <div class="section-title">
+            <span class="section-title__label">
+              <v-icon size="20" color="primary">mdi-domain</v-icon>
+              الشركة المطورة
+            </span>
+          </div>
           <v-card-text class="pt-4">
             <v-list density="comfortable">
               <v-list-item>
@@ -108,10 +107,12 @@
       <!-- معلومات التواصل -->
       <v-col cols="12">
         <v-card>
-          <v-card-title class="d-flex align-center bg-primary">
-            <v-icon class="ml-2">mdi-phone</v-icon>
-            معلومات التواصل
-          </v-card-title>
+          <div class="section-title">
+            <span class="section-title__label">
+              <v-icon size="20" color="primary">mdi-phone</v-icon>
+              معلومات التواصل
+            </span>
+          </div>
           <v-card-text class="pt-4">
             <v-row>
               <v-col cols="12" sm="6" md="4">
@@ -220,6 +221,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import PageHeader from '@/components/PageHeader.vue';
 
 const getAppVersion = ref('');
 

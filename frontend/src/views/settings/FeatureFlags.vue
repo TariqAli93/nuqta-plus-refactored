@@ -1,29 +1,22 @@
 <template>
-  <v-container max-width="860">
-    <v-card class="mb-4" rounded="xl">
-      <div class="flex items-center justify-space-between pa-4">
-        <div>
-          <div class="font-weight-bold text-h6">إعدادات الميزات</div>
-          <div class="text-caption text-medium-emphasis">
-            فعّل الوحدات التي تحتاجها فقط. الميزات المعطّلة تختفي من الواجهة.
-          </div>
-        </div>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-wizard-hat"
-          :to="{ name: 'SetupWizard' }"
-        >
-          معالج الإعداد
-        </v-btn>
-      </div>
-    </v-card>
+  <div class="page-shell">
+    <PageHeader
+      title="إعدادات الميزات"
+      subtitle="فعّل الوحدات التي تحتاجها فقط. الميزات المعطّلة تختفي من الواجهة."
+      icon="mdi-toggle-switch"
+    >
+      <v-btn color="primary" prepend-icon="mdi-wizard-hat" :to="{ name: 'SetupWizard' }">
+        معالج الإعداد
+      </v-btn>
+    </PageHeader>
 
-    <v-card v-for="group in groups" :key="group.title" class="mb-4" rounded="xl">
-      <v-card-title class="d-flex align-center gap-2">
-        <v-icon :color="group.color">{{ group.icon }}</v-icon>
-        <span>{{ group.title }}</span>
-      </v-card-title>
-      <v-divider />
+    <v-card v-for="group in groups" :key="group.title" class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" :color="group.color">{{ group.icon }}</v-icon>
+          <span>{{ group.title }}</span>
+        </span>
+      </div>
       <v-list lines="two">
         <v-list-item v-for="item in group.items" :key="item.key">
           <template #prepend>
@@ -50,9 +43,10 @@
       type="info"
       variant="tonal"
       density="compact"
+      class="mt-4"
       text="للتغيير تحتاج صلاحية المدير العام."
     />
-  </v-container>
+  </div>
 </template>
 
 <script setup>
@@ -60,6 +54,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import api from '@/plugins/axios';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
+import PageHeader from '@/components/PageHeader.vue';
 
 const authStore = useAuthStore();
 const notify = useNotificationStore();

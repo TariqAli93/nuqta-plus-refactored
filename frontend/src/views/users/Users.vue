@@ -1,207 +1,290 @@
 <template>
-  <div class="space-y-6">
-    <!-- 🔹 لوحة البحث والفلترة -->
-    <v-card class="mb-4">
-      <div class="flex justify-space-between items-center pa-3">
-        <div class="text-h6 font-semibold text-primary">إدارة المستخدمين</div>
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="openForm()">مستخدم جديد</v-btn>
+  <div class="page-shell">
+    <PageHeader
+      title="إدارة المستخدمين"
+      subtitle="إدارة حسابات الموظفين، الصلاحيات والفروع المعيّنة"
+      icon="mdi-account-multiple"
+    >
+      <v-btn color="primary" prepend-icon="mdi-plus" size="default" @click="openForm()">
+        مستخدم جديد
+      </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar pa-3">
+      <v-row dense>
+        <v-col cols="12" md="3">
+          <v-text-field
+            v-model="store.filters.search"
+            label="بحث بالاسم"
+            prepend-inner-icon="mdi-magnify"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            clearable
+            @keyup.enter="store.fetch()"
+          />
+        </v-col>
+        <v-col cols="12" md="3">
+          <v-select
+            v-model="store.filters.role"
+            :items="roleOptions"
+            label="الدور"
+            item-title="title"
+            item-value="value"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            clearable
+          />
+        </v-col>
+        <v-col cols="12" md="3">
+          <v-select
+            v-model="store.filters.isActive"
+            :items="statusOptions"
+            label="الحالة"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            clearable
+          />
+        </v-col>
+
+        <v-col cols="12" md="3" class="d-flex align-center justify-end">
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="store.fetch()">
+            تحديث
+          </v-btn>
+        </v-col>
+      </v-row>
+    </v-card>
+
+    <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          قائمة المستخدمين
+        </span>
       </div>
-    </v-card>
-
-    <v-card class="mb-4">
-      <v-card-text>
-        <v-row dense class="flex justify-center items-center">
-          <v-col cols="12" md="4">
-            <v-text-field
-              v-model="store.filters.search"
-              label="بحث بالاسم"
-              prepend-inner-icon="mdi-magnify"
-              variant="outlined"
-              density="comfortable"
-              clearable
-              @keyup.enter="store.fetch()"
-            />
-          </v-col>
-          <v-col cols="12" md="4">
-            <v-select
-              v-model="store.filters.role"
-              :items="roleOptions"
-              label="الدور"
-              item-title="title"
-              item-value="value"
-              variant="outlined"
-              density="comfortable"
-              clearable
-            />
-          </v-col>
-          <v-col cols="12" md="4">
-            <v-select
-              v-model="store.filters.isActive"
-              :items="statusOptions"
-              label="الحالة"
-              variant="outlined"
-              density="comfortable"
-              clearable
-            />
-          </v-col>
-          <v-col cols="12">
-            <v-btn color="primary" variant="flat" @click="store.fetch()">تحديث</v-btn>
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
-
-    <!-- 🔹 جدول المستخدمين -->
-    <v-card>
       <v-data-table
         :items="store.list"
         :loading="store.loading"
         :headers="headers"
         :items-per-page="store.limit"
-        class="elevation-0"
+        density="comfortable"
+        hide-default-footer
       >
         <template #loading>
-          <v-skeleton-loader type="table"></v-skeleton-loader>
+          <TableSkeleton :rows="5" :columns="headers.length" />
         </template>
-
+        <template #no-data>
+          <EmptyState
+            title="لا يوجد مستخدمون"
+            description="ابدأ بإضافة مستخدم جديد"
+            icon="mdi-account-multiple-outline"
+            compact
+          />
+        </template>
         <template #[`item.role`]="{ item }">
-          <v-chip color="primary" variant="flat" size="small">
+          <v-chip color="primary" variant="tonal" size="small">
             {{ getRoleName(item.role) }}
           </v-chip>
         </template>
-
         <template #[`item.isActive`]="{ item }">
-          <v-chip :color="item.isActive ? 'success' : 'grey'" variant="flat" size="small">
+          <v-chip :color="item.isActive ? 'success' : 'grey'" variant="tonal" size="small">
             {{ item.isActive ? 'نشط' : 'معطل' }}
           </v-chip>
         </template>
-
         <template #[`item.actions`]="{ item }">
-          <v-btn icon variant="text" color="primary" @click="openForm(item)">
-            <v-icon>mdi-pencil</v-icon>
+          <v-btn
+            icon="mdi-pencil"
+            size="small"
+            variant="text"
+            color="primary"
+            title="تعديل"
+            @click="openForm(item)"
+          >
+            <v-icon size="20">mdi-pencil</v-icon>
           </v-btn>
-          <v-btn icon variant="text" color="warning" @click="openResetPwDialog(item)">
-            <v-icon>mdi-lock-reset</v-icon>
+          <v-btn
+            icon="mdi-lock-reset"
+            size="small"
+            variant="text"
+            color="warning"
+            title="تغيير كلمة المرور"
+            @click="openResetPwDialog(item)"
+          >
+            <v-icon size="20">mdi-lock-reset</v-icon>
           </v-btn>
-          <v-btn icon variant="text" color="error" @click="remove(item)">
-            <v-icon>mdi-delete</v-icon>
+          <v-btn
+            icon="mdi-delete"
+            size="small"
+            variant="text"
+            color="error"
+            title="حذف"
+            @click="remove(item)"
+          >
+            <v-icon size="20">mdi-delete</v-icon>
           </v-btn>
         </template>
       </v-data-table>
     </v-card>
 
-    <!-- 🔹 نافذة إنشاء/تعديل المستخدم -->
+    <!-- Create/edit user dialog -->
     <v-dialog v-model="showForm" max-width="600">
-      <v-card elevation="10" rounded="xl">
-        <v-card-title class="bg-secondary text-white">
-          {{ form.id ? 'تعديل مستخدم' : 'مستخدم جديد' }}
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon>{{ form.id ? 'mdi-pencil' : 'mdi-account-plus' }}</v-icon>
+          <span>{{ form.id ? 'تعديل مستخدم' : 'مستخدم جديد' }}</span>
         </v-card-title>
-        <v-divider></v-divider>
-        <v-card-text>
-          <v-form ref="formRef" class="space-y-3" @submit.prevent="save">
-            <v-text-field
-              v-model="form.username"
-              label="اسم المستخدم"
-              :disabled="!!form.id"
-              required
-              variant="outlined"
-            />
-            <v-text-field
-              v-model="form.fullName"
-              label="الاسم الكامل"
-              required
-              variant="outlined"
-            />
-            <v-text-field v-model="form.phone" label="الهاتف" variant="outlined" />
-            <v-select
-              v-model="form.role"
-              :items="roleOptions"
-              item-title="title"
-              item-value="value"
-              label="الدور"
-              required
-              variant="outlined"
-            />
-            <v-select
-              v-if="!isGlobalRole(form.role)"
-              v-model="form.assignedBranchId"
-              :items="inventoryStore.branches"
-              item-title="name"
-              item-value="id"
-              label="الفرع المعيّن"
-              :rules="[rules.required]"
-              variant="outlined"
-              @update:model-value="onBranchChange"
-            />
-            <v-select
-              v-if="!isGlobalRole(form.role) && form.assignedBranchId"
-              v-model="form.assignedWarehouseId"
-              :items="warehousesForForm"
-              item-title="name"
-              item-value="id"
-              label="المخزن المعيّن (اختياري)"
-              clearable
-              variant="outlined"
-            />
-            <v-text-field
-              v-if="!form.id"
-              v-model="form.password"
-              label="كلمة المرور"
-              type="password"
-              required
-              variant="outlined"
-            />
-            <v-switch v-model="form.isActive" label="نشط" color="primary" inset />
+        <v-divider />
+        <v-card-text class="pt-4">
+          <v-form ref="formRef" @submit.prevent="save">
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="form.username"
+                  label="اسم المستخدم"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-account"
+                  :disabled="!!form.id"
+                  required
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="form.fullName"
+                  label="الاسم الكامل"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-card-account-details-outline"
+                  required
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="form.phone"
+                  label="الهاتف"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-phone"
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select
+                  v-model="form.role"
+                  :items="roleOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="الدور"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-shield-account"
+                  required
+                />
+              </v-col>
+              <v-col v-if="!isGlobalRole(form.role)" cols="12" md="6">
+                <v-select
+                  v-model="form.assignedBranchId"
+                  :items="inventoryStore.branches"
+                  item-title="name"
+                  item-value="id"
+                  label="الفرع المعيّن"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-source-branch"
+                  :rules="[rules.required]"
+                  @update:model-value="onBranchChange"
+                />
+              </v-col>
+              <v-col v-if="!isGlobalRole(form.role) && form.assignedBranchId" cols="12" md="6">
+                <v-select
+                  v-model="form.assignedWarehouseId"
+                  :items="warehousesForForm"
+                  item-title="name"
+                  item-value="id"
+                  label="المخزن المعيّن (اختياري)"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-warehouse"
+                  clearable
+                />
+              </v-col>
+              <v-col v-if="!form.id" cols="12" md="6">
+                <v-text-field
+                  v-model="form.password"
+                  label="كلمة المرور"
+                  type="password"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-lock"
+                  required
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-switch
+                  v-model="form.isActive"
+                  color="primary"
+                  density="comfortable"
+                  hide-details
+                  inset
+                  :label="form.isActive ? 'نشط' : 'معطل'"
+                />
+              </v-col>
+            </v-row>
           </v-form>
         </v-card-text>
-        <v-divider></v-divider>
-        <v-card-actions class="justify-end gap-2">
-          <v-btn color="primary" variant="elevated" @click="save">حفظ</v-btn>
+        <v-divider />
+        <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="showForm = false">إلغاء</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-content-save" @click="save"> حفظ </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <!-- تغير كلمة المرور🔹 -->
-    <v-dialog v-model="resetPwDialog" max-width="600">
-      <!-- محتوى حوار تغيير كلمة المرور -->
-      <v-card elevation="10" rounded="xl">
-        <v-card-title class="bg-secondary text-white"> تغيير كلمة المرور </v-card-title>
-        <v-divider></v-divider>
-        <v-card-text>
+    <!-- Reset password dialog -->
+    <v-dialog v-model="resetPwDialog" max-width="520">
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon>mdi-lock-reset</v-icon>
+          <span>تغيير كلمة المرور</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
           <v-form ref="resetPwRef" lazy-validation @submit.prevent="resetPw">
             <v-text-field
               v-model="resetPwInfo.newPassword"
               label="كلمة المرور الجديدة"
               type="password"
-              :rules="[rules.required, rules.minLength]"
               variant="outlined"
+              density="comfortable"
+              prepend-inner-icon="mdi-lock"
+              :rules="[rules.required, rules.minLength]"
               class="mb-2"
             />
             <v-text-field
               v-model="resetPwInfo.confirmPassword"
               label="تأكيد كلمة المرور"
               type="password"
+              variant="outlined"
+              density="comfortable"
+              prepend-inner-icon="mdi-lock-check"
               :rules="[
                 rules.required,
                 rules.confirmPassword(resetPwInfo.newPassword),
                 rules.minLength,
               ]"
-              variant="outlined"
             />
-
-            <div class="flex justify-space-between align-center mt-3">
-              <v-btn
-                type="submit"
-                color="primary"
-                class="tracking-wide shadow-lg hover:shadow-xl transition-all duration-300"
-                >تغيير كلمة المرور</v-btn
-              >
-              <v-btn variant="text" @click="closeResetPwDialog">إلغاء</v-btn>
-            </div>
           </v-form>
         </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="closeResetPwDialog">إلغاء</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-check" @click="resetPw">
+            تغيير كلمة المرور
+          </v-btn>
+        </v-card-actions>
       </v-card>
     </v-dialog>
 
@@ -224,6 +307,9 @@ import { useUsersStore } from '@/stores/users';
 import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
+import TableSkeleton from '@/components/TableSkeleton.vue';
 
 const store = useUsersStore();
 const inventoryStore = useInventoryStore();
@@ -236,11 +322,9 @@ const warehousesForForm = computed(() =>
 );
 
 const onBranchChange = () => {
-  // Reset warehouse when branch changes so the old selection can't leak.
   form.assignedWarehouseId = null;
 };
 
-// Delete dialog state
 const deleteDialog = ref(false);
 const selectedItem = ref(null);
 
@@ -251,7 +335,7 @@ const headers = [
   { title: 'الهاتف', key: 'phone' },
   { title: 'الدور', key: 'role' },
   { title: 'الحالة', key: 'isActive' },
-  { title: 'خيارات', key: 'actions', sortable: false },
+  { title: 'إجراءات', key: 'actions', sortable: false },
 ];
 
 const statusOptions = [
@@ -259,7 +343,6 @@ const statusOptions = [
   { title: 'معطل', value: false },
 ];
 
-// Role enum options
 const roleOptions = [
   { title: 'مدير عام', value: 'global_admin' },
   { title: 'مدير فرع', value: 'branch_admin' },
@@ -398,6 +481,10 @@ async function resetPw() {
 }
 
 onMounted(async () => {
-  await Promise.all([store.fetch(), inventoryStore.fetchBranches(), inventoryStore.fetchWarehouses()]);
+  await Promise.all([
+    store.fetch(),
+    inventoryStore.fetchBranches(),
+    inventoryStore.fetchWarehouses(),
+  ]);
 });
 </script>

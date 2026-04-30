@@ -1,30 +1,27 @@
 <template>
-  <div class="new-sale-page">
-    <!-- Header -->
-    <v-card class="mb-4" elevation="2">
-      <v-card-title class="d-flex align-center justify-space-between pa-4">
-        <div class="d-flex align-center gap-3">
-          <v-icon size="28" color="primary">mdi-cart-plus</v-icon>
-          <span class="text-h5 font-weight-bold">
-            بطاقة تقسيط جديدة
-          </span>
-        </div>
-        <v-btn color="primary" @click="handleCancel">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </v-card-title>
-    </v-card>
+  <div class="page-shell new-sale-page">
+    <PageHeader
+      title="بطاقة تقسيط جديدة"
+      subtitle="إنشاء فاتورة بيع بالأقساط"
+      icon="mdi-cart-plus"
+    >
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="handleCancel">
+        رجوع
+      </v-btn>
+    </PageHeader>
 
     <v-row>
       <!-- Main Content Column -->
       <v-col cols="12" lg="8">
         <v-form ref="form">
           <!-- Customer & Currency Section -->
-          <v-card class="mb-4" elevation="1">
-            <v-card-title class="d-flex align-center ga-2 pa-4">
-              <v-icon color="primary">mdi-account-circle</v-icon>
-              <span class="text-h6 font-weight-medium">معلومات العميل والعملة</span>
-            </v-card-title>
+          <v-card class="page-section">
+            <div class="section-title">
+              <span class="section-title__label">
+                <v-icon size="20" color="primary">mdi-account-circle</v-icon>
+                <span>معلومات العميل والعملة</span>
+              </span>
+            </div>
             <v-card-text class="pa-4">
               <v-row>
                 <v-col cols="12" md="6">
@@ -50,16 +47,16 @@
           </v-card>
 
           <!-- Products Section -->
-          <v-card class="mb-4" elevation="1">
-            <v-card-title class="d-flex align-center justify-space-between pa-4">
-              <div class="d-flex align-center ga-2">
-                <v-icon color="primary">mdi-package-variant</v-icon>
-                <span class="text-h6 font-weight-medium">المنتجات</span>
-              </div>
-              <v-chip v-if="sale.items.length > 0" color="primary" variant="tonal">
+          <v-card class="page-section">
+            <div class="section-title">
+              <span class="section-title__label">
+                <v-icon size="20" color="primary">mdi-package-variant</v-icon>
+                <span>المنتجات</span>
+              </span>
+              <v-chip v-if="sale.items.length > 0" color="primary" variant="tonal" size="small">
                 {{ sale.items.length }} منتج
               </v-chip>
-            </v-card-title>
+            </div>
             <v-card-text class="pa-4">
               <!-- Barcode Scanner -->
               <v-text-field
@@ -291,11 +288,13 @@
           </v-alert>
 
           <!-- Payment Section -->
-          <v-card class="mb-4" elevation="1">
-            <v-card-title class="d-flex align-center ga-2 pa-4">
-              <v-icon color="primary">mdi-credit-card</v-icon>
-              <span class="text-h6 font-weight-medium">معلومات الدفع</span>
-            </v-card-title>
+          <v-card class="page-section">
+            <div class="section-title">
+              <span class="section-title__label">
+                <v-icon size="20" color="primary">mdi-credit-card</v-icon>
+                <span>معلومات الدفع</span>
+              </span>
+            </div>
             <v-card-text class="pa-4">
               <v-row>
                 <v-col cols="12" md="4">
@@ -352,11 +351,13 @@
 
           <!-- Installment Details -->
           <v-expand-transition>
-            <v-card v-if="sale.paymentType === 'installment'" class="mb-4" elevation="1">
-              <v-card-title class="d-flex align-center ga-2 pa-4">
-                <v-icon color="primary">mdi-calendar-clock</v-icon>
-                <span class="text-h6 font-weight-medium">تفاصيل التقسيط</span>
-              </v-card-title>
+            <v-card v-if="sale.paymentType === 'installment'" class="page-section">
+              <div class="section-title">
+                <span class="section-title__label">
+                  <v-icon size="20" color="primary">mdi-calendar-clock</v-icon>
+                  <span>تفاصيل التقسيط</span>
+                </span>
+              </div>
               <v-card-text class="pa-4">
                 <v-row>
                   <v-col cols="12" md="4">
@@ -431,8 +432,12 @@
 
                 <!-- Installment Schedule Table -->
                 <v-card variant="outlined" class="mt-4">
-                  <v-card-title class="text-h6 pa-3">جدول الأقساط</v-card-title>
-                  <v-divider />
+                  <div class="section-title">
+                    <span class="section-title__label">
+                      <v-icon size="20" color="primary">mdi-calendar-month-outline</v-icon>
+                      <span>جدول الأقساط</span>
+                    </span>
+                  </div>
                   <v-table density="comfortable">
                     <thead>
                       <tr>
@@ -478,11 +483,13 @@
           </v-expand-transition>
 
           <!-- Notes Section -->
-          <v-card class="mb-4" elevation="1">
-            <v-card-title class="d-flex align-center ga-2 pa-4">
-              <v-icon color="primary">mdi-note-text</v-icon>
-              <span class="text-h6 font-weight-medium">ملاحظات</span>
-            </v-card-title>
+          <v-card class="page-section">
+            <div class="section-title">
+              <span class="section-title__label">
+                <v-icon size="20" color="primary">mdi-note-text</v-icon>
+                <span>ملاحظات</span>
+              </span>
+            </div>
             <v-card-text class="pa-4">
               <v-textarea
                 v-model="sale.notes"
@@ -500,11 +507,13 @@
 
       <!-- Summary Sidebar -->
       <v-col cols="12" lg="4">
-        <v-card class="sticky-summary" elevation="2" style="position: sticky; top: 20px">
-          <v-card-title class="d-flex align-center ga-2 pa-4 bg-primary">
-            <v-icon color="white">mdi-calculator</v-icon>
-            <span class="text-h6 font-weight-bold text-white">ملخص البيع</span>
-          </v-card-title>
+        <v-card class="sticky-summary page-section" style="position: sticky; top: 20px">
+          <div class="section-title">
+            <span class="section-title__label">
+              <v-icon size="20" color="primary">mdi-calculator</v-icon>
+              <span>ملخص البيع</span>
+            </span>
+          </div>
           <v-card-text class="pa-4">
             <div class="summary-list">
               <div
@@ -572,6 +581,7 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import CustomerSelector from '@/components/CustomerSelector.vue';
 import CreditScoreCard from '@/components/CreditScoreCard.vue';
+import PageHeader from '@/components/PageHeader.vue';
 import { useKeyboardShortcuts, createPageShortcuts } from '@/composables/useKeyboardShortcuts';
 import FormFieldHelp from '@/components/FormFieldHelp.vue';
 import { SALE_SOURCE_NEW_SALE, SALE_TYPE_INSTALLMENT, SALE_TYPE_CASH } from '@/constants/sales';
@@ -1420,34 +1430,17 @@ const handleInterestAmountChange = (value) => {
 };
 </script>
 
-<style scoped>
-.new-sale-page {
-  padding-bottom: 2rem;
-}
-
-.bg-surface-variant {
-  background-color: rgba(var(--v-theme-surface-variant), 0.1);
-}
-
-.summary-list {
-  background-color: rgba(var(--v-theme-surface), 1);
-  border-radius: 8px;
-}
-
-.summary-item {
-  transition: background-color 0.2s ease;
-}
-
+<style scoped lang="scss">
 .summary-item-highlight {
-  background-color: rgba(var(--v-theme-primary), 0.1);
-  border-radius: 4px;
+  background-color: rgba(var(--v-theme-primary), 0.08);
+  border-radius: 8px;
   padding: 0.5rem;
   margin-top: 0.5rem;
-}
 
-.summary-item-highlight .text-body-1 {
-  color: rgb(var(--v-theme-primary));
-  font-size: 1.1rem;
+  .text-body-1 {
+    color: rgb(var(--v-theme-primary));
+    font-size: 1.1rem;
+  }
 }
 
 .sticky-summary {
@@ -1455,20 +1448,10 @@ const handleInterestAmountChange = (value) => {
   overflow-y: auto;
 }
 
-/* Responsive adjustments */
 @media (max-width: 960px) {
   .sticky-summary {
     position: relative !important;
     top: 0 !important;
   }
-}
-
-/* Smooth transitions */
-.v-card {
-  transition: box-shadow 0.2s ease;
-}
-
-.v-card:hover {
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
 }
 </style>

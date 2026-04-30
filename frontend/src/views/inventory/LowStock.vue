@@ -22,22 +22,42 @@
     </v-alert>
 
     <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="error">mdi-alert-octagon-outline</v-icon>
+          <span>قائمة المنتجات</span>
+        </span>
+      </div>
       <v-data-table
         :headers="headers"
         :items="inventoryStore.lowStock"
         :loading="loading"
         density="comfortable"
+        hide-default-footer
+        items-per-page="50"
       >
+        <template #loading>
+          <TableSkeleton :rows="5" :columns="headers.length" />
+        </template>
         <template #[`item.quantity`]="{ item }">
           <v-chip color="error" size="small">{{ item.quantity }}</v-chip>
         </template>
         <template #no-data>
-          <div class="pa-8 text-center text-medium-emphasis">
-            <template v-if="inventoryStore.selectedWarehouseId">
-              لا توجد منتجات منخفضة المخزون 🎉
-            </template>
-            <template v-else>اختر مخزناً لعرض قائمة المنخفض.</template>
-          </div>
+          <EmptyState
+            v-if="inventoryStore.selectedWarehouseId"
+            title="لا توجد منتجات منخفضة المخزون"
+            description="جميع منتجاتك ضمن الحد الآمن للمخزون."
+            icon="mdi-check-circle"
+            icon-color="success"
+            compact
+          />
+          <EmptyState
+            v-else
+            title="لم يتم اختيار مخزن"
+            description="اختر مخزناً من شريط الأدوات لعرض قائمة المنخفض."
+            icon="mdi-warehouse"
+            compact
+          />
         </template>
       </v-data-table>
     </v-card>
@@ -49,6 +69,8 @@ import { onMounted, ref, watch } from 'vue';
 import { useInventoryStore } from '@/stores/inventory';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
+import TableSkeleton from '@/components/TableSkeleton.vue';
 
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();

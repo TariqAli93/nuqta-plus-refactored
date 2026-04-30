@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell expenses-page">
+  <div class="page-shell">
     <PageHeader
       title="إدارة المصاريف"
       subtitle="تسجيل ومتابعة المصاريف التشغيلية"
@@ -17,44 +17,28 @@
     </PageHeader>
 
     <!-- Summary cards -->
-    <v-row v-if="summary" dense class="page-section">
-      <v-col cols="12" sm="6" md="3">
-        <v-card class="h-100">
-          <v-card-text>
-            <div class="d-flex align-center gap-2 mb-1">
-              <v-icon size="18" color="primary">mdi-sigma</v-icon>
-              <span class="text-caption text-medium-emphasis">إجمالي المصاريف</span>
-            </div>
-            <div class="text-h5 font-weight-bold">{{ moneyFmt(summary.total) }}</div>
-            <div class="text-caption text-medium-emphasis mt-1">
-              {{ summary.count || 0 }} عملية
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-      <v-col
+    <div v-if="summary" class="summary-grid page-section">
+      <StatCard
+        label="إجمالي المصاريف"
+        :value="moneyFmt(summary.total)"
+        icon="mdi-sigma"
+        icon-color="primary"
+        :hint="`${summary.count || 0} عملية`"
+      />
+      <StatCard
         v-for="row in summary.byCurrency || []"
         :key="`cur-${row.currency}`"
-        cols="6"
-        sm="3"
-        md="3"
-      >
-        <v-card class="h-100">
-          <v-card-text>
-            <div class="d-flex align-center gap-2 mb-1">
-              <v-icon size="18" color="success">mdi-currency-usd</v-icon>
-              <span class="text-caption text-medium-emphasis">{{ row.currency }}</span>
-            </div>
-            <div class="text-h6 font-weight-bold">{{ moneyFmt(row.total) }}</div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
+        :label="row.currency"
+        :value="moneyFmt(row.total)"
+        icon="mdi-currency-usd"
+        icon-color="success"
+      />
+    </div>
 
     <!-- Filters -->
-    <v-card class="page-section filter-toolbar">
+    <v-card class="page-section filter-toolbar pa-3">
       <v-row dense>
-        <v-col cols="6" sm="4" md="3">
+        <v-col cols="12" sm="6" md="6">
           <v-text-field
             v-model="filters.dateFrom"
             type="date"
@@ -65,7 +49,7 @@
             hide-details
           />
         </v-col>
-        <v-col cols="6" sm="4" md="3">
+        <v-col cols="12" sm="6" md="6">
           <v-text-field
             v-model="filters.dateTo"
             type="date"
@@ -76,7 +60,7 @@
             hide-details
           />
         </v-col>
-        <v-col cols="12" sm="4" md="3">
+        <v-col cols="12" sm="6" md="6">
           <v-select
             v-model="filters.category"
             :items="categoryOptions"
@@ -88,7 +72,7 @@
             clearable
           />
         </v-col>
-        <v-col v-if="isGlobalAdmin" cols="12" sm="6" md="3">
+        <v-col v-if="isGlobalAdmin" cols="12" sm="6" md="6">
           <v-select
             v-model="filters.branchId"
             :items="branchOptions"
@@ -102,15 +86,22 @@
             clearable
           />
         </v-col>
+
+        <v-col cols="12">
+          <v-btn variant="text" class="ml-2" @click="clearFilters">مسح</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-check" @click="reload">تطبيق</v-btn>
+        </v-col>
       </v-row>
-      <div class="filter-toolbar__actions mt-3">
-        <v-btn variant="text" @click="clearFilters">مسح</v-btn>
-        <v-btn color="primary" prepend-icon="mdi-check" @click="reload">تطبيق</v-btn>
-      </div>
     </v-card>
 
     <!-- Table -->
     <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          قائمة المصاريف
+        </span>
+      </div>
       <v-data-table
         :headers="headers"
         :items="items"
@@ -119,6 +110,9 @@
         items-per-page="25"
         class="expenses-table"
       >
+        <template #loading>
+          <TableSkeleton :rows="5" :columns="headers.length" />
+        </template>
         <template #[`item.amount`]="{ item }">
           <span class="font-weight-bold">{{ moneyFmt(item.amount) }} {{ item.currency }}</span>
         </template>
@@ -161,8 +155,8 @@
     <!-- Create/Edit dialog -->
     <v-dialog v-model="dialog" max-width="520">
       <v-card>
-        <v-card-title class="d-flex align-center gap-2">
-          <v-icon color="primary">{{ editingId ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
+        <v-card-title class="dialog-title">
+          <v-icon>{{ editingId ? 'mdi-pencil' : 'mdi-cash-plus' }}</v-icon>
           <span>{{ editingId ? 'تعديل مصروف' : 'تسجيل مصروف جديد' }}</span>
         </v-card-title>
         <v-divider />
@@ -257,6 +251,8 @@ import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import StatCard from '@/components/StatCard.vue';
+import TableSkeleton from '@/components/TableSkeleton.vue';
 
 const expensesStore = useExpensesStore();
 const authStore = useAuthStore();
@@ -407,9 +403,3 @@ onMounted(async () => {
   await reload();
 });
 </script>
-
-<style scoped lang="scss">
-.expenses-page {
-  direction: rtl;
-}
-</style>

@@ -1,84 +1,55 @@
 <template>
-  <v-container fluid class="shift-report pa-3 pa-sm-4">
-    <!-- ── Header ─────────────────────────────────────────────────────── -->
-    <header class="shift-report__header">
-      <div class="shift-report__title">
-        <div class="shift-report__icon">
-          <v-icon size="22" color="primary">mdi-cash-register</v-icon>
-        </div>
-        <div>
-          <h1 class="text-h6 mb-0">تقرير الورديات</h1>
-          <div class="text-caption text-medium-emphasis">
-            متابعة نقدية الكاشير لكل وردية مع الفروع والفروقات
-          </div>
-        </div>
-      </div>
-      <div class="shift-report__actions">
-        <v-btn
-          variant="text"
-          :loading="loading"
-          prepend-icon="mdi-refresh"
-          @click="reload"
-        >
-          تحديث
-        </v-btn>
-      </div>
-    </header>
+  <div class="page-shell shift-report">
+    <PageHeader
+      title="تقرير الورديات"
+      subtitle="متابعة نقدية الكاشير لكل وردية مع الفروع والفروقات"
+      icon="mdi-cash-register"
+    >
+      <v-btn
+        variant="tonal"
+        color="primary"
+        :loading="loading"
+        prepend-icon="mdi-refresh"
+        @click="reload"
+      >
+        تحديث
+      </v-btn>
+    </PageHeader>
 
     <!-- ── KPI cards ──────────────────────────────────────────────────── -->
-    <v-row dense class="mt-2">
-      <v-col cols="12" sm="6" md="3">
-        <v-card rounded="xl" elevation="0" class="kpi pa-4 h-100">
-          <div class="kpi__icon kpi__icon--primary">
-            <v-icon color="primary">mdi-clipboard-text-clock-outline</v-icon>
-          </div>
-          <div class="kpi__label">إجمالي الورديات</div>
-          <div class="kpi__value">{{ summary.total }}</div>
-          <div class="kpi__note">
-            مفتوحة: {{ summary.open }} · مغلقة: {{ summary.closed }}
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="12" sm="6" md="3">
-        <v-card rounded="xl" elevation="0" class="kpi pa-4 h-100">
-          <div class="kpi__icon kpi__icon--success">
-            <v-icon color="success">mdi-cash-plus</v-icon>
-          </div>
-          <div class="kpi__label">إجمالي المعدود</div>
-          <div class="kpi__value">{{ formatMoney(summary.totalCounted) }}</div>
-          <div class="kpi__note">من الورديات المغلقة فقط</div>
-        </v-card>
-      </v-col>
-      <v-col cols="12" sm="6" md="3">
-        <v-card rounded="xl" elevation="0" class="kpi pa-4 h-100">
-          <div class="kpi__icon kpi__icon--info">
-            <v-icon color="info">mdi-scale-balance</v-icon>
-          </div>
-          <div class="kpi__label">إجمالي المتوقع</div>
-          <div class="kpi__value">{{ formatMoney(summary.totalExpected) }}</div>
-          <div class="kpi__note">افتتاحي + النقد الوارد</div>
-        </v-card>
-      </v-col>
-      <v-col cols="12" sm="6" md="3">
-        <v-card rounded="xl" elevation="0" class="kpi pa-4 h-100">
-          <div class="kpi__icon" :class="varianceIconClass(summary.totalVariance)">
-            <v-icon :color="varianceColor(summary.totalVariance)">
-              mdi-swap-vertical-bold
-            </v-icon>
-          </div>
-          <div class="kpi__label">إجمالي الفروقات</div>
-          <div class="kpi__value" :class="varianceTextClass(summary.totalVariance)">
-            {{ formatMoney(summary.totalVariance) }}
-          </div>
-          <div class="kpi__note">
-            عجز: {{ summary.shortCount }} · زيادة: {{ summary.overCount }}
-          </div>
-        </v-card>
-      </v-col>
-    </v-row>
+    <div class="summary-grid page-section">
+      <StatCard
+        label="إجمالي الورديات"
+        :value="summary.total"
+        icon="mdi-clipboard-text-clock-outline"
+        icon-color="primary"
+        :hint="`مفتوحة: ${summary.open} · مغلقة: ${summary.closed}`"
+      />
+      <StatCard
+        label="إجمالي المعدود"
+        :value="formatMoney(summary.totalCounted)"
+        icon="mdi-cash-plus"
+        icon-color="success"
+        hint="من الورديات المغلقة فقط"
+      />
+      <StatCard
+        label="إجمالي المتوقع"
+        :value="formatMoney(summary.totalExpected)"
+        icon="mdi-scale-balance"
+        icon-color="info"
+        hint="افتتاحي + النقد الوارد"
+      />
+      <StatCard
+        label="إجمالي الفروقات"
+        :value="formatMoney(summary.totalVariance)"
+        icon="mdi-swap-vertical-bold"
+        :icon-color="varianceColor(summary.totalVariance)"
+        :hint="`عجز: ${summary.shortCount} · زيادة: ${summary.overCount}`"
+      />
+    </div>
 
     <!-- ── Filters ────────────────────────────────────────────────────── -->
-    <v-card rounded="xl" elevation="0" class="filters mt-4 pa-3">
+    <v-card class="page-section filter-toolbar pa-3">
       <v-row dense align="center">
         <v-col v-if="showBranchFilter" cols="12" sm="6" md="3">
           <v-select
@@ -147,29 +118,27 @@
     </v-card>
 
     <!-- ── Table ──────────────────────────────────────────────────────── -->
-    <v-card rounded="xl" elevation="0" class="mt-4 sessions-card">
-      <div class="sessions-card__header">
-        <div class="sessions-card__title">
-          <v-icon size="18" color="primary">mdi-format-list-bulleted</v-icon>
+    <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
           <span>قائمة الورديات</span>
-        </div>
-        <div class="sessions-card__sub">
-          {{ pagination.total }} وردية مطابقة
-        </div>
+        </span>
+        <span class="section-title__hint">{{ pagination.total }} وردية مطابقة</span>
       </div>
-      <v-divider />
 
       <div class="sessions-card__table">
-        <div v-if="loading && sessions.length === 0" class="sessions-card__state">
-          <v-progress-circular indeterminate color="primary" />
-          <div class="text-medium-emphasis mt-2">جاري التحميل…</div>
+        <div v-if="loading && sessions.length === 0" class="loading-state loading-state--compact">
+          <v-progress-circular indeterminate color="primary" size="40" />
+          <div class="text-body-2 text-medium-emphasis">جاري التحميل…</div>
         </div>
-        <div v-else-if="sessions.length === 0" class="sessions-card__state">
-          <v-icon size="48" class="text-medium-emphasis">mdi-tray-remove</v-icon>
-          <div class="text-body-2 text-medium-emphasis mt-2">
-            لا توجد ورديات مطابقة للبحث
-          </div>
-        </div>
+        <EmptyState
+          v-else-if="sessions.length === 0"
+          title="لا توجد ورديات مطابقة"
+          description="جرّب تعديل الفلاتر أو الفترة الزمنية."
+          icon="mdi-tray-remove"
+          compact
+        />
         <v-table v-else density="comfortable" hover>
           <thead>
             <tr>
@@ -200,10 +169,7 @@
                     <div class="cashier-cell__name">
                       {{ s.cashierName || s.cashierUsername || '—' }}
                     </div>
-                    <div
-                      v-if="s.cashierUsername && s.cashierName"
-                      class="cashier-cell__username"
-                    >
+                    <div v-if="s.cashierUsername && s.cashierName" class="cashier-cell__username">
                       @{{ s.cashierUsername }}
                     </div>
                   </div>
@@ -219,9 +185,7 @@
                 >
                   {{ s.branchName }}
                 </v-chip>
-                <span v-else class="text-medium-emphasis text-caption">
-                  بدون فرع
-                </span>
+                <span v-else class="text-medium-emphasis text-caption"> بدون فرع </span>
               </td>
               <td class="text-end mono">
                 {{ formatMoney(s.openingCash, s.currency) }}
@@ -233,7 +197,11 @@
                 {{ s.closingCash != null ? formatMoney(s.closingCash, s.currency) : '—' }}
               </td>
               <td class="text-end mono" :class="varianceTextClass(s.variance)">
-                <span v-if="s.variance != null" class="variance-pill" :class="variancePillClass(s.variance)">
+                <span
+                  v-if="s.variance != null"
+                  class="variance-pill"
+                  :class="variancePillClass(s.variance)"
+                >
                   <v-icon size="14">{{ varianceIcon(s.variance) }}</v-icon>
                   {{ formatMoney(s.variance, s.currency) }}
                 </span>
@@ -268,15 +236,14 @@
           </tbody>
         </v-table>
       </div>
-    </v-card>
 
-    <PaginationControls
-      v-if="pagination.total > 0"
-      :pagination="pagination"
-      class="mt-2"
-      @update:page="onPageChange"
-      @update:items-per-page="onLimitChange"
-    />
+      <PaginationControls
+        v-if="pagination.total > 0"
+        :pagination="pagination"
+        @update:page="onPageChange"
+        @update:items-per-page="onLimitChange"
+      />
+    </v-card>
 
     <!-- ── Detail dialog ──────────────────────────────────────────────── -->
     <v-dialog v-model="detailOpen" max-width="640" scrollable>
@@ -338,9 +305,11 @@
               <div class="detail-stat detail-stat--strong">
                 <span class="detail-stat__label">المعدود</span>
                 <span class="detail-stat__value">
-                  {{ detail.closingCash != null
-                    ? formatMoney(detail.closingCash, detail.currency)
-                    : '—' }}
+                  {{
+                    detail.closingCash != null
+                      ? formatMoney(detail.closingCash, detail.currency)
+                      : '—'
+                  }}
                 </span>
               </div>
             </v-col>
@@ -348,9 +317,9 @@
               <div class="detail-stat" :class="varianceCardClass(detail.variance)">
                 <span class="detail-stat__label">الفرق</span>
                 <span class="detail-stat__value">
-                  {{ detail.variance != null
-                    ? formatMoney(detail.variance, detail.currency)
-                    : '—' }}
+                  {{
+                    detail.variance != null ? formatMoney(detail.variance, detail.currency) : '—'
+                  }}
                 </span>
               </div>
             </v-col>
@@ -392,7 +361,7 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-  </v-container>
+  </div>
 </template>
 
 <script setup>
@@ -400,6 +369,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useCashSessionStore } from '@/stores/cashSession';
 import { useInventoryStore } from '@/stores/inventory';
 import PaginationControls from '@/components/PaginationControls.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import StatCard from '@/components/StatCard.vue';
+import EmptyState from '@/components/EmptyState.vue';
 
 const store = useCashSessionStore();
 const inventoryStore = useInventoryStore();
@@ -432,16 +404,10 @@ const branchOptions = computed(() =>
 // Branch filter shows whenever there is more than one branch in scope —
 // non-global users still get it when they're authorised on multiple branches,
 // e.g. a regional manager with cross-branch read access.
-const showBranchFilter = computed(
-  () => (inventoryStore.branches?.length || 0) > 1
-);
+const showBranchFilter = computed(() => (inventoryStore.branches?.length || 0) > 1);
 
 const hasActiveFilter = computed(
-  () =>
-    !!filters.status ||
-    !!filters.branchId ||
-    !!filters.startDate ||
-    !!filters.endDate
+  () => !!filters.status || !!filters.branchId || !!filters.startDate || !!filters.endDate
 );
 
 // ── Summary KPIs (computed from the loaded page) ──────────────────────────
@@ -560,12 +526,6 @@ const variancePillClass = (v) => {
   return num > 0 ? 'variance-pill--over' : 'variance-pill--short';
 };
 
-const varianceIconClass = (v) => {
-  const num = Number(v);
-  if (Math.abs(num) < 0.0001) return 'kpi__icon--success';
-  return num > 0 ? 'kpi__icon--info' : 'kpi__icon--error';
-};
-
 const varianceCardClass = (v) => {
   if (v === null || v === undefined) return '';
   const num = Number(v);
@@ -592,99 +552,9 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
-.shift-report {
-  &__header {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 0.5rem;
-  }
-  &__title {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  &__icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(var(--v-theme-primary), 0.12);
-  }
-  &__actions {
-    margin-inline-start: auto;
-  }
-}
+.sessions-card__table {
+  overflow-x: auto;
 
-.kpi {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  background: rgb(var(--v-theme-surface));
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-
-  &__icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 0.5rem;
-
-    &--primary { background: rgba(var(--v-theme-primary), 0.12); }
-    &--success { background: rgba(var(--v-theme-success), 0.12); }
-    &--info    { background: rgba(var(--v-theme-info), 0.12); }
-    &--error   { background: rgba(var(--v-theme-error), 0.12); }
-  }
-  &__label {
-    color: rgba(var(--v-theme-on-surface), 0.7);
-    font-size: 0.85rem;
-  }
-  &__value {
-    font-size: 1.4rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  &__note {
-    font-size: 0.75rem;
-    color: rgba(var(--v-theme-on-surface), 0.55);
-  }
-}
-
-.filters {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.06);
-}
-
-.sessions-card {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.06);
-  overflow: hidden;
-
-  &__header {
-    display: flex;
-    align-items: center;
-    padding: 0.85rem 1rem;
-  }
-  &__title {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-weight: 600;
-  }
-  &__sub {
-    margin-inline-start: auto;
-    color: rgba(var(--v-theme-on-surface), 0.6);
-    font-size: 0.85rem;
-  }
-  &__state {
-    padding: 3rem 1rem;
-    text-align: center;
-  }
-  &__table {
-    overflow-x: auto;
-  }
   tbody tr {
     cursor: pointer;
     transition: background 0.15s ease;
@@ -766,9 +636,15 @@ onMounted(async () => {
   &--strong {
     background: rgba(var(--v-theme-primary), 0.08);
   }
-  &--ok    { background: rgba(var(--v-theme-success), 0.1); }
-  &--over  { background: rgba(var(--v-theme-info), 0.1); }
-  &--short { background: rgba(var(--v-theme-error), 0.1); }
+  &--ok {
+    background: rgba(var(--v-theme-success), 0.1);
+  }
+  &--over {
+    background: rgba(var(--v-theme-info), 0.1);
+  }
+  &--short {
+    background: rgba(var(--v-theme-error), 0.1);
+  }
 }
 
 .detail-notes {

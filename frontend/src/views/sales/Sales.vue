@@ -31,7 +31,7 @@
       </v-tooltip>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar">
+    <v-card class="page-section filter-toolbar pa-3">
       <v-row dense>
         <v-col cols="12" sm="6" md="3">
           <v-select
@@ -158,10 +158,7 @@
             >
               {{ formatCurrency(item.total, item.currency) }}
             </div>
-            <div
-              v-if="Number(item.returnedTotal) > 0"
-              class="text-success font-weight-bold"
-            >
+            <div v-if="Number(item.returnedTotal) > 0" class="text-success font-weight-bold">
               {{
                 formatCurrency(
                   Math.max(0, Number(item.total) - Number(item.returnedTotal)),
@@ -360,9 +357,7 @@ const installmentsReason = installmentsGate.reason;
 // surface it when installments are enabled AND the user can use them.
 const emptyStateActions = computed(() => {
   if (!canUseInstallments.value) return [];
-  return [
-    { text: 'بيع جديد', icon: 'mdi-plus', to: '/sales/new', color: 'primary' },
-  ];
+  return [{ text: 'بيع جديد', icon: 'mdi-plus', to: '/sales/new', color: 'primary' }];
 });
 
 const deleteSaleDialog = ref(false);

@@ -9,12 +9,13 @@
     <v-row>
       <!-- User Information Card -->
       <v-col cols="12" md="6">
-        <v-card>
-          <v-card-title class="d-flex align-center">
-            <v-icon class="me-2">mdi-account</v-icon>
-            <span>معلومات المستخدم</span>
-          </v-card-title>
-          <v-divider></v-divider>
+        <v-card class="h-100">
+          <div class="section-title">
+            <span class="section-title__label">
+              <v-icon size="20" color="primary">mdi-account</v-icon>
+              <span>معلومات المستخدم</span>
+            </span>
+          </div>
           <v-card-text>
             <v-list lines="two">
               <v-list-item>
@@ -57,12 +58,13 @@
 
       <!-- Change Password Card -->
       <v-col cols="12" md="6">
-        <v-card>
-          <v-card-title class="d-flex align-center">
-            <v-icon class="me-2">mdi-lock-reset</v-icon>
-            <span>تغيير كلمة المرور</span>
-          </v-card-title>
-          <v-divider></v-divider>
+        <v-card class="h-100">
+          <div class="section-title">
+            <span class="section-title__label">
+              <v-icon size="20" color="primary">mdi-lock-reset</v-icon>
+              <span>تغيير كلمة المرور</span>
+            </span>
+          </div>
           <v-card-text>
             <v-form ref="passwordForm" @submit.prevent="changePassword">
               <v-text-field
@@ -123,11 +125,12 @@
       <!-- Permissions Card -->
       <v-col cols="12">
         <v-card>
-          <v-card-title class="d-flex align-center">
-            <v-icon class="me-2">mdi-shield-lock</v-icon>
-            <span>الصلاحيات</span>
-          </v-card-title>
-          <v-divider></v-divider>
+          <div class="section-title">
+            <span class="section-title__label">
+              <v-icon size="20" color="primary">mdi-shield-lock</v-icon>
+              <span>الصلاحيات</span>
+            </span>
+          </div>
           <v-card-text>
             <v-alert v-if="!userPermissions.length" type="info" variant="tonal" class="mb-0">
               <v-icon start>mdi-information</v-icon>

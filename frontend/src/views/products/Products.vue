@@ -17,7 +17,7 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar">
+    <v-card class="page-section filter-toolbar pa-3">
       <v-row dense>
         <v-col cols="12" md="8">
           <v-text-field

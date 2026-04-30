@@ -1,96 +1,113 @@
 <template>
-  <div class="space-y-6">
-    <!-- 🔹 شريط الأدوات العلوي -->
-    <v-card class="mb-4">
-      <div class="flex justify-space-between items-center pa-3">
-        <div class="text-h6 font-semibold text-primary">إدارة الصلاحيات</div>
-        <v-btn color="primary" prepend-icon="mdi-plus" class="rounded-lg" @click="openForm()">
-          صلاحية جديدة
-        </v-btn>
+  <div class="page-shell">
+    <PageHeader
+      title="إدارة الصلاحيات"
+      subtitle="تعريف الصلاحيات حسب المورد والإجراء"
+      icon="mdi-shield-key"
+    >
+      <v-btn color="primary" prepend-icon="mdi-plus" size="default" @click="openForm()">
+        صلاحية جديدة
+      </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section filter-toolbar">
+      <v-text-field
+        v-model="search"
+        label="بحث بالاسم أو المورد"
+        prepend-inner-icon="mdi-magnify"
+        variant="outlined"
+        density="comfortable"
+        hide-details
+        clearable
+        @input="fetch"
+      />
+    </v-card>
+
+    <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          قائمة الصلاحيات
+        </span>
       </div>
-    </v-card>
-
-    <!-- 🔹 البحث -->
-    <v-card class="mb-4">
-      <v-card-text>
-        <v-text-field
-          v-model="search"
-          label="بحث بالاسم أو المورد"
-          prepend-inner-icon="mdi-magnify"
-          variant="outlined"
-          density="comfortable"
-          clearable
-          hide-details
-          @input="fetch"
-        />
-      </v-card-text>
-    </v-card>
-
-    <!-- 🔹 جدول الصلاحيات -->
-    <v-card>
       <v-data-table
         :headers="headers"
         :items="store.list"
         :loading="store.loading"
-        density="comfortable"
-        hover
-        class="elevation-0"
         :search="search"
+        density="comfortable"
+        hide-default-footer
+        items-per-page="50"
       >
         <template #loading>
-          <v-skeleton-loader type="table"></v-skeleton-loader>
+          <TableSkeleton :rows="5" :columns="headers.length" />
         </template>
-
-        <!-- 🔸 عمود الإجراء -->
+        <template #no-data>
+          <EmptyState
+            title="لا توجد صلاحيات"
+            description="ابدأ بإنشاء صلاحية جديدة"
+            icon="mdi-shield-key-outline"
+            compact
+          />
+        </template>
         <template #[`item.action`]="{ item }">
-          <v-chip color="primary" variant="flat" size="small">
+          <v-chip color="primary" variant="tonal" size="small">
             {{ translateAction(item.action) }}
           </v-chip>
         </template>
-
-        <!-- 🔸 عمود الوصف -->
         <template #[`item.description`]="{ item }">
-          <span class="text-gray-600 dark:text-gray-300 text-sm">
+          <span class="text-body-2 text-medium-emphasis">
             {{ item.description || '—' }}
           </span>
         </template>
-
         <template #[`item.name`]="{ item }">
           <span>{{ translatePermission(item.name) }}</span>
         </template>
-
-        <!-- 🔸 عمود العمليات -->
         <template #[`item.actions`]="{ item }">
-          <div class="flex justify-center gap-2">
-            <v-btn icon size="small" variant="text" color="primary" @click="openForm(item)">
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-            <v-btn icon size="small" variant="text" color="error" @click="remove(item)">
-              <v-icon>mdi-delete</v-icon>
-            </v-btn>
-          </div>
+          <v-btn
+            icon="mdi-pencil"
+            size="small"
+            variant="text"
+            color="primary"
+            title="تعديل"
+            @click="openForm(item)"
+          >
+            <v-icon size="20">mdi-pencil</v-icon>
+          </v-btn>
+          <v-btn
+            icon="mdi-delete"
+            size="small"
+            variant="text"
+            color="error"
+            title="حذف"
+            @click="remove(item)"
+          >
+            <v-icon size="20">mdi-delete</v-icon>
+          </v-btn>
         </template>
       </v-data-table>
     </v-card>
 
-    <!-- 🔹 نافذة إنشاء صلاحيات متعددة -->
+    <!-- Create permissions dialog -->
     <v-dialog v-model="showForm" max-width="600">
-      <v-card elevation="12" rounded="xl" class="overflow-hidden">
-        <v-card-title class="bg-secondary text-white"> صلاحيات جديدة </v-card-title>
-
-        <v-card-text class="py-6 px-6">
-          <v-form ref="formRef" class="space-y-4" @submit.prevent="save">
-            <!-- ✅ اختيار المورد -->
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon>mdi-shield-plus</v-icon>
+          <span>صلاحيات جديدة</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <v-form ref="formRef" @submit.prevent="save">
             <v-select
               v-model="form.resource"
               :items="Object.keys(permissionsList)"
               label="المورد (Resource)"
               variant="outlined"
               density="comfortable"
+              prepend-inner-icon="mdi-folder-shield"
+              class="mb-3"
               required
             />
-
-            <!-- ✅ اختيار متعدد للإجراءات -->
             <v-select
               v-model="form.actions"
               :items="actions"
@@ -99,44 +116,52 @@
               item-value="value"
               variant="outlined"
               density="comfortable"
+              prepend-inner-icon="mdi-cog"
               chips
               multiple
               required
+              class="mb-3"
             />
-
             <v-textarea
               v-model="form.description"
               label="الوصف (اختياري)"
-              auto-grow
               variant="outlined"
               density="comfortable"
+              prepend-inner-icon="mdi-text"
               rows="2"
+              auto-grow
             />
           </v-form>
 
-          <!-- 🔹 عرض المعاينة -->
-          <div v-if="form.resource && form.actions.length" class="mt-4 text-sm text-gray-700">
-            <div class="font-semibold mb-1">المعاينة:</div>
-            <ul>
-              <li v-for="action in form.actions" :key="action">
+          <div v-if="form.resource && form.actions.length" class="mt-4">
+            <div class="text-subtitle-2 font-weight-semibold mb-2">المعاينة:</div>
+            <div class="d-flex flex-wrap gap-2">
+              <v-chip
+                v-for="action in form.actions"
+                :key="action"
+                color="primary"
+                variant="tonal"
+                size="small"
+              >
                 {{ translateAction(action) }} {{ translateResource(form.resource) }}
-                <span class="text-gray-400 text-xs">({{ form.resource }}:{{ action }})</span>
-              </li>
-            </ul>
+                <span class="text-caption text-medium-emphasis ms-1">
+                  ({{ form.resource }}:{{ action }})
+                </span>
+              </v-chip>
+            </div>
           </div>
         </v-card-text>
-
-        <v-divider></v-divider>
-
-        <v-card-actions class="flex justify-end gap-2 px-4 py-3">
-          <v-btn color="primary" variant="elevated" @click="save">حفظ</v-btn>
+        <v-divider />
+        <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" color="grey" @click="closeForm">إلغاء</v-btn>
+          <v-btn variant="text" @click="closeForm">إلغاء</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-content-save" @click="save">
+            حفظ
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <!-- Delete Confirmation Dialog -->
     <ConfirmDialog
       v-model="deleteDialog"
       title="حذف الصلاحية"
@@ -154,11 +179,13 @@ import { ref, reactive, onMounted } from 'vue';
 import { usePermissionsStore } from '@/stores/permissions';
 import { useNotificationStore } from '@/stores/notification';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
+import TableSkeleton from '@/components/TableSkeleton.vue';
 
 const store = usePermissionsStore();
 const notification = useNotificationStore();
 
-// Delete dialog state
 const deleteDialog = ref(false);
 const selectedItem = ref(null);
 
@@ -168,11 +195,7 @@ const search = ref('');
 
 function translatePermission(name) {
   if (!name) return '—';
-
-  // تقسيم النص إلى جزأين: resource و action
   const [resource, action] = name.split(':');
-
-  // ترجمة الموارد (resources)
   const resourceMap = {
     users: 'المستخدمين',
     roles: 'الأدوار',
@@ -185,8 +208,6 @@ function translatePermission(name) {
     reports: 'التقارير',
     dashboard: 'لوحة التحكم',
   };
-
-  // ترجمة الأفعال (actions)
   const actionMap = {
     create: 'إنشاء',
     read: 'عرض',
@@ -194,22 +215,18 @@ function translatePermission(name) {
     delete: 'حذف',
     manage: 'إدارة',
   };
-
-  // إنشاء الترجمة العربية
   const resourceText = resourceMap[resource] || resource;
   const actionText = actionMap[action] || action;
-
   return `${actionText} ${resourceText}`;
 }
 
-// ✅ جدول الأعمدة
 const headers = [
   { title: 'المعرف', key: 'id', align: 'center' },
   { title: 'الاسم', key: 'name' },
   { title: 'المورد', key: 'resource' },
   { title: 'الإجراء', key: 'action' },
   { title: 'الوصف', key: 'description' },
-  { title: 'خيارات', key: 'actions', sortable: false, align: 'center' },
+  { title: 'إجراءات', key: 'actions', sortable: false, align: 'center' },
 ];
 
 const actions = [
@@ -231,7 +248,6 @@ const permissionsList = {
   settings: ['manage', 'create', 'read', 'update', 'delete'],
 };
 
-// 🔸 الترجمة العربية
 const translateResource = (r) =>
   ({
     users: 'المستخدمين',
@@ -255,7 +271,6 @@ const translateAction = (a) =>
     manage: 'إدارة',
   })[a] || a;
 
-// ✅ نموذج الصلاحية
 const form = reactive({
   resource: '',
   actions: [],
@@ -276,11 +291,8 @@ function closeForm() {
   showForm.value = false;
 }
 
-// 🔹 حفظ / تعديل
 async function save() {
   if (!form.resource || form.actions.length === 0) return;
-
-  // ✅ إنشاء صلاحيات متعددة دفعة واحدة
   const permissionsToCreate = form.actions.map((action) => ({
     name: `${form.resource}:${action}`,
     resource: form.resource,
@@ -297,7 +309,6 @@ async function save() {
   await store.fetch();
 }
 
-// 🔹 حذف
 async function remove(item) {
   selectedItem.value = item;
   deleteDialog.value = true;
@@ -312,7 +323,6 @@ async function confirmDelete() {
   }
 }
 
-// 🔹 تحميل البيانات
 async function fetch() {
   await store.fetch(search.value);
 }

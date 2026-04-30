@@ -1,16 +1,10 @@
 <template>
   <div class="page-shell">
-    <PageHeader
-      title="حركات المخزون"
-      subtitle="سجل حركات المخزون والتعديلات"
-      icon="mdi-history"
-    >
-      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()">
-        رجوع
-      </v-btn>
+    <PageHeader title="حركات المخزون" subtitle="سجل حركات المخزون والتعديلات" icon="mdi-history">
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()"> رجوع </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar">
+    <v-card class="page-section filter-toolbar pa-3">
       <v-row dense>
         <v-col cols="12" md="6">
           <v-select
@@ -44,6 +38,12 @@
     </v-card>
 
     <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          <span>سجل الحركات</span>
+        </span>
+      </div>
       <v-data-table
         :headers="headers"
         :items="inventoryStore.movements"
@@ -54,6 +54,17 @@
         density="comfortable"
         hide-default-footer
       >
+        <template #loading>
+          <TableSkeleton :rows="5" :columns="headers.length" />
+        </template>
+        <template #no-data>
+          <EmptyState
+            title="لا توجد حركات مخزون"
+            description="ستظهر هنا جميع حركات المخزون والتعديلات."
+            icon="mdi-history"
+            compact
+          />
+        </template>
         <template #[`item.movementType`]="{ item }">
           <v-chip :color="typeColor(item.movementType)" size="small">
             {{ typeLabel(item.movementType) }}
@@ -83,6 +94,8 @@ import { useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
 import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
+import TableSkeleton from '@/components/TableSkeleton.vue';
 
 const router = useRouter();
 const inventoryStore = useInventoryStore();
@@ -148,10 +161,13 @@ const changePage = (page) => {
   reload();
 };
 
-watch(() => inventoryStore.selectedWarehouseId, (v) => {
-  filters.warehouseId = v || null;
-  reload();
-});
+watch(
+  () => inventoryStore.selectedWarehouseId,
+  (v) => {
+    filters.warehouseId = v || null;
+    reload();
+  }
+);
 
 onMounted(async () => {
   if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();

@@ -175,9 +175,9 @@ $v-data-table-header-bg-dark: rgba(255, 255, 255, 0.02);
 
       &--open {
         // darken sureface on open
-        background-color: rgba(var(--v-theme-background), 0.88);
+        background-color: rgba(var(--v-theme-background), 0.88) !important;
         @include dark-theme {
-          background-color: rgba(var(--v-theme-background), 0.67);
+          background-color: rgba(var(--v-theme-background), 0.15) !important;
         }
       }
     }

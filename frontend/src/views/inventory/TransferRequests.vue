@@ -5,16 +5,12 @@
       subtitle="إدارة طلبات النقل بين المخازن"
       icon="mdi-transfer"
     >
-      <v-btn
-        color="primary"
-        prepend-icon="mdi-plus"
-        :to="{ name: 'StockTransfer' }"
-      >
+      <v-btn color="primary" prepend-icon="mdi-plus" :to="{ name: 'StockTransfer' }">
         طلب نقل جديد
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar">
+    <v-card class="page-section filter-toolbar pa-3">
       <div class="d-flex align-center gap-3 flex-wrap">
         <v-select
           v-model="statusFilter"
@@ -24,23 +20,32 @@
           density="comfortable"
           prepend-inner-icon="mdi-filter-variant"
           hide-details
-          style="max-width: 240px; min-width: 200px;"
+          style="max-width: 240px; min-width: 200px"
           @update:model-value="reload"
         />
         <v-spacer />
-        <v-btn variant="text" prepend-icon="mdi-refresh" @click="reload">
-          تحديث
-        </v-btn>
+        <v-btn variant="text" prepend-icon="mdi-refresh" @click="reload"> تحديث </v-btn>
       </div>
     </v-card>
 
     <v-card class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
+          <span>قائمة الطلبات</span>
+        </span>
+      </div>
       <v-data-table
         :headers="headers"
         :items="transfers"
         :loading="loading"
         density="comfortable"
+        hide-default-footer
+        items-per-page="50"
       >
+        <template #loading>
+          <TableSkeleton :rows="5" :columns="headers.length" />
+        </template>
         <template #[`item.status`]="{ item }">
           <v-chip :color="statusColor(item.status)" size="small">
             {{ statusLabel(item.status) }}
@@ -75,7 +80,12 @@
           <span v-else class="text-caption text-medium-emphasis">—</span>
         </template>
         <template #no-data>
-          <div class="pa-8 text-center text-medium-emphasis">لا توجد طلبات</div>
+          <EmptyState
+            title="لا توجد طلبات نقل"
+            description="ابدأ بإنشاء طلب نقل جديد للمخزون."
+            icon="mdi-transfer"
+            compact
+          />
         </template>
       </v-data-table>
     </v-card>
@@ -108,6 +118,8 @@ import { computed, onMounted, ref } from 'vue';
 import { useInventoryStore } from '@/stores/inventory';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
+import TableSkeleton from '@/components/TableSkeleton.vue';
 
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();
@@ -135,9 +147,7 @@ const headers = [
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
 
-const canApprove = computed(() =>
-  authStore.hasPermission('approve_warehouse_transfer')
-);
+const canApprove = computed(() => authStore.hasPermission('approve_warehouse_transfer'));
 
 const statusLabel = (s) =>
   ({ pending: 'قيد الموافقة', approved: 'معتمد', rejected: 'مرفوض' })[s] || s;

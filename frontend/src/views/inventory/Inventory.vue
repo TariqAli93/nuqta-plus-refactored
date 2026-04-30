@@ -36,7 +36,7 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar">
+    <v-card class="page-section filter-toolbar pa-3">
       <v-row dense>
         <v-col cols="12" md="8">
           <v-text-field
@@ -197,9 +197,7 @@ const router = useRouter();
 const route = useRoute();
 
 const canAdjust = computed(() => authStore.hasPermission?.('inventory:adjust') === true);
-const canRequestTransfer = computed(
-  () => authStore.hasPermission?.('inventory:transfer') === true
-);
+const canRequestTransfer = computed(() => authStore.hasPermission?.('inventory:transfer') === true);
 
 const search = ref('');
 const lowStockOnly = ref(false);

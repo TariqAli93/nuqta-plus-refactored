@@ -15,7 +15,7 @@
       <router-link
         to="/"
         class="flex justify-center align-center pa-1 absolute top-0 left-0 w-full border-b z-50"
-        style="background-color: rgba(var(--v-theme-background), 1)"
+        style="background-color: rgba(var(--v-theme-surface), 1)"
         aria-label="الرئيسية"
       >
         <img
@@ -93,8 +93,8 @@
       </v-list>
     </v-navigation-drawer>
 
-    <v-app-bar app elevation="0" dark class="border-b" color="background">
-      <v-container class="flex align-center">
+    <v-app-bar app elevation="0" dark class="border-b" color="surface">
+      <v-container fluid class="flex align-center container">
         <v-app-bar-nav-icon
           :aria-label="drawer ? 'إخفاء القائمة الجانبية' : 'إظهار القائمة الجانبية'"
           @click="toggleDrawer"
@@ -192,7 +192,7 @@
       </v-container>
     </v-app-bar>
 
-    <v-main>
+    <v-main class="bg-surface">
       <v-container fluid>
         <router-view v-slot="{ Component, route: routeData }">
           <transition :name="transitionName" mode="out-in">
@@ -203,7 +203,7 @@
     </v-main>
 
     <!-- Footer -->
-    <v-footer color="background" app>
+    <v-footer app>
       <v-container>
         <v-row align="center" no-gutters>
           <v-col cols="12" md="12" class="flex justify-between items-center flex-wrap gap-2">

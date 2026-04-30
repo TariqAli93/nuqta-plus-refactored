@@ -1,52 +1,57 @@
 <template>
-  <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <h1 class="text-h4 font-weight-bold">التنبيهات</h1>
-      <div class="d-flex gap-2">
-        <v-btn
-          v-if="hasUnreadAlerts"
-          color="primary"
-          variant="outlined"
-          prepend-icon="mdi-check-all"
-          @click="markAllAsRead"
-        >
-          تحديد الكل كمقروء
-        </v-btn>
-        <v-btn
-          color="primary"
-          variant="outlined"
-          prepend-icon="mdi-refresh"
-          :loading="alertStore.loading"
-          @click="refreshAlerts"
-        >
-          تحديث
-        </v-btn>
-      </div>
-    </div>
+  <div class="page-shell">
+    <PageHeader
+      title="التنبيهات"
+      subtitle="أقساط متأخرة، منتجات قليلة المخزون، تنبيهات النظام"
+      icon="mdi-bell"
+    >
+      <v-btn
+        v-if="hasUnreadAlerts"
+        color="primary"
+        variant="tonal"
+        prepend-icon="mdi-check-all"
+        @click="markAllAsRead"
+      >
+        تحديد الكل كمقروء
+      </v-btn>
+      <v-btn
+        color="primary"
+        variant="tonal"
+        prepend-icon="mdi-refresh"
+        :loading="alertStore.loading"
+        @click="refreshAlerts"
+      >
+        تحديث
+      </v-btn>
+    </PageHeader>
 
     <!-- Loading State -->
-    <div v-if="alertStore.loading && !alertStore.lastUpdated" class="text-center pa-8">
-      <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
-      <p class="mt-4 text-grey">جاري تحميل التنبيهات...</p>
+    <div v-if="alertStore.loading && !alertStore.lastUpdated" class="loading-state">
+      <v-progress-circular indeterminate color="primary" size="48" />
+      <div class="text-body-2 text-medium-emphasis">جاري تحميل التنبيهات…</div>
     </div>
 
     <!-- No Alerts -->
-    <v-card v-else-if="!alertStore.hasAlerts" class="text-center pa-8">
-      <v-icon size="64" color="success" class="mb-4">mdi-check-circle</v-icon>
-      <div class="text-h6 mb-2">لا توجد تنبيهات</div>
-      <div class="text-body-2 text-grey">كل شيء على ما يرام!</div>
+    <v-card v-else-if="!alertStore.hasAlerts" class="page-section">
+      <EmptyState
+        title="لا توجد تنبيهات"
+        description="كل شيء على ما يرام"
+        icon="mdi-check-circle"
+        icon-color="success"
+        compact
+      />
     </v-card>
 
     <!-- Alerts Content -->
     <div v-else>
       <!-- Overdue Installments -->
-      <v-card v-if="alertStore.overdueCount > 0" class="mb-4">
-        <v-card-title class="d-flex align-center justify-space-between bg-error text-white">
-          <div class="d-flex align-center">
-            <v-icon class="ml-2">mdi-calendar-alert</v-icon>
+      <v-card v-if="alertStore.overdueCount > 0" class="page-section">
+        <div class="section-title">
+          <span class="section-title__label">
+            <v-icon size="20" color="error">mdi-calendar-alert</v-icon>
             <span>أقساط متأخرة ({{ alertStore.overdueCount }})</span>
-          </div>
-        </v-card-title>
+          </span>
+        </div>
         <v-card-text class="pa-0">
           <v-list>
             <v-list-item
@@ -97,11 +102,13 @@
       </v-card>
 
       <!-- Out of Stock Products -->
-      <v-card v-if="alertStore.outOfStockCount > 0" class="mb-4">
-        <v-card-title class="d-flex align-center bg-red-lighten-1 text-white">
-          <v-icon class="ml-2">mdi-package-variant-remove</v-icon>
-          <span>منتجات منعدمة المخزون ({{ alertStore.outOfStockCount }})</span>
-        </v-card-title>
+      <v-card v-if="alertStore.outOfStockCount > 0" class="page-section">
+        <div class="section-title">
+          <span class="section-title__label">
+            <v-icon size="20" color="error">mdi-package-variant-remove</v-icon>
+            <span>منتجات منعدمة المخزون ({{ alertStore.outOfStockCount }})</span>
+          </span>
+        </div>
         <v-card-text class="pa-0">
           <v-list>
             <v-list-item
@@ -147,11 +154,13 @@
       </v-card>
 
       <!-- Low Stock Products -->
-      <v-card v-if="alertStore.lowStockCount > 0" class="mb-4">
-        <v-card-title class="d-flex align-center bg-orange text-white">
-          <v-icon class="ml-2">mdi-alert</v-icon>
-          <span>منتجات قليلة المخزون ({{ alertStore.lowStockCount }})</span>
-        </v-card-title>
+      <v-card v-if="alertStore.lowStockCount > 0" class="page-section">
+        <div class="section-title">
+          <span class="section-title__label">
+            <v-icon size="20" color="warning">mdi-alert</v-icon>
+            <span>منتجات قليلة المخزون ({{ alertStore.lowStockCount }})</span>
+          </span>
+        </div>
         <v-card-text class="pa-0">
           <v-list>
             <v-list-item
@@ -207,6 +216,8 @@ import { useAlertStore } from '@/stores/alert';
 import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
 import NotificationFailures from '@/components/notifications/NotificationFailures.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import EmptyState from '@/components/EmptyState.vue';
 
 const alertStore = useAlertStore();
 const notificationStore = useNotificationStore();

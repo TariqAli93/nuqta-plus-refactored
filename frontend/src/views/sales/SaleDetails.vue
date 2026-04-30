@@ -174,12 +174,14 @@
     <!-- Interest Information Card for Installment Sales -->
     <v-card
       v-if="sale && sale.paymentType === 'installment' && sale.interestAmount > 0"
-      class="mb-4 border-warning"
+      class="page-section"
     >
-      <v-card-title class="bg-warning-lighten-4 text-warning-darken-2">
-        <v-icon class="ml-2">mdi-calculator</v-icon>
-        تفاصيل حساب الفائدة
-      </v-card-title>
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="warning">mdi-calculator</v-icon>
+          <span>تفاصيل حساب الفائدة</span>
+        </span>
+      </div>
       <v-card-text>
         <v-row>
           <v-col cols="12" md="3">
@@ -529,11 +531,11 @@
     <!-- Return / Refund Dialog -->
     <v-dialog v-model="returnDialog" max-width="900" persistent>
       <v-card>
-        <v-card-title class="bg-warning text-white d-flex align-center">
-          <v-icon class="ml-2">mdi-keyboard-return</v-icon>
-          إرجاع / استرداد
+        <v-card-title class="dialog-title">
+          <v-icon color="warning">mdi-keyboard-return</v-icon>
+          <span>إرجاع / استرداد</span>
           <v-spacer />
-          <v-btn icon variant="text" @click="closeReturnDialog">
+          <v-btn icon variant="text" size="small" @click="closeReturnDialog">
             <v-icon>mdi-close</v-icon>
           </v-btn>
         </v-card-title>
@@ -682,11 +684,13 @@
     </v-dialog>
 
     <!-- Add Payment Form -->
-    <v-card v-if="sale && sale.status === 'pending' && sale.remainingAmount > 0" class="mb-4">
-      <v-card-title class="bg-warning-lighten-4">
-        <v-icon class="ml-2">mdi-cash-plus</v-icon>
-        إضافة دفعة جديدة
-      </v-card-title>
+    <v-card v-if="sale && sale.status === 'pending' && sale.remainingAmount > 0" class="page-section">
+      <div class="section-title">
+        <span class="section-title__label">
+          <v-icon size="20" color="warning">mdi-cash-plus</v-icon>
+          <span>إضافة دفعة جديدة</span>
+        </span>
+      </div>
       <v-card-text class="pt-4">
         <v-form @submit.prevent="addPayment">
           <v-row>

@@ -60,6 +60,7 @@ defineProps({
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
   background-color: rgb(var(--v-theme-surface));
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   border-radius: 12px;
   box-shadow:
     0 1px 2px 0 rgba(0, 0, 0, 0.04),

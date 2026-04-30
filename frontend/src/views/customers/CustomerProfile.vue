@@ -20,100 +20,92 @@
     </v-card>
 
     <template v-else-if="profile">
-      <!-- 1. Header ------------------------------------------------------- -->
-      <v-card class="mb-4">
-        <div class="pa-4 d-flex flex-wrap align-center gap-4">
-          <v-avatar size="56" color="primary" class="text-white">
-            <v-icon size="32">mdi-account</v-icon>
-          </v-avatar>
+      <!-- 1. Page Header --------------------------------------------------- -->
+      <PageHeader
+        :title="profile.customer.name"
+        :subtitle="profile.customer.phone || profile.customer.address || 'ملف العميل'"
+        icon="mdi-account-circle"
+      >
+        <v-btn
+          v-if="profile.customer.phone"
+          prepend-icon="mdi-phone"
+          variant="tonal"
+          color="success"
+          @click="showCustomerPhoneNumber = true"
+        >
+          إظهار رقم الهاتف
+        </v-btn>
 
-          <div class="flex-grow-1">
-            <div class="d-flex align-center flex-wrap gap-2">
-              <div class="text-h5 font-weight-bold text-primary">
-                {{ profile.customer.name }}
-              </div>
-              <v-chip
-                size="small"
-                :color="profile.customer.isActive ? 'success' : 'grey'"
+        <v-tooltip
+          v-if="canSendCustomerMessages"
+          location="bottom"
+          :text="whatsAppDisabledReason"
+          :disabled="canSendWhatsApp"
+        >
+          <template #activator="{ props: tooltipProps }">
+            <span v-bind="tooltipProps">
+              <v-btn
+                prepend-icon="mdi-whatsapp"
                 variant="tonal"
+                color="success"
+                :disabled="!canSendWhatsApp"
+                :loading="messagingSettingsLoading"
+                @click="openWhatsAppDialog"
               >
-                {{ profile.customer.isActive ? 'نشط' : 'غير نشط' }}
-              </v-chip>
-              <v-chip
-                v-if="profile.customer.branch?.name"
-                size="small"
-                variant="tonal"
-                color="info"
-              >
-                <v-icon start size="16">mdi-store</v-icon>
-                {{ profile.customer.branch.name }}
-              </v-chip>
-            </div>
-            <div class="text-caption text-grey mt-1 d-flex flex-wrap gap-3">
-              <span v-if="profile.customer.phone">
-                <v-icon size="14">mdi-phone</v-icon>
-                {{ profile.customer.phone }}
-              </span>
-              <span v-if="profile.customer.address">
-                <v-icon size="14">mdi-map-marker</v-icon>
-                {{ profile.customer.address }}
-              </span>
-              <span v-if="profile.customer.createdAt">
-                <v-icon size="14">mdi-calendar</v-icon>
-                عميل منذ {{ formatDate(profile.customer.createdAt) }}
-              </span>
-            </div>
-          </div>
+                رسالة واتساب
+              </v-btn>
+            </span>
+          </template>
+          <span>{{ whatsAppDisabledReason }}</span>
+        </v-tooltip>
 
-          <div class="d-flex flex-wrap gap-2">
-            <v-btn
-              v-if="profile.customer.phone"
-              prepend-icon="mdi-phone"
-              variant="tonal"
-              color="success"
-              size="small"
-              @click="showCustomerPhoneNumber = true"
-            >
-              اضهار رقم الهاتف
-            </v-btn>
+        <v-btn
+          v-if="canEdit"
+          :to="`/customers/${profile.customer.id}/edit`"
+          prepend-icon="mdi-pencil"
+          variant="tonal"
+          color="primary"
+        >
+          تعديل
+        </v-btn>
+      </PageHeader>
 
-            <!-- WhatsApp message button — gated by notification settings ---- -->
-            <v-tooltip
-              v-if="canSendCustomerMessages"
-              location="bottom"
-              :text="whatsAppDisabledReason"
-              :disabled="canSendWhatsApp"
-            >
-              <template #activator="{ props: tooltipProps }">
-                <span v-bind="tooltipProps">
-                  <v-btn
-                    prepend-icon="mdi-whatsapp"
-                    variant="tonal"
-                    color="success"
-                    size="small"
-                    :disabled="!canSendWhatsApp"
-                    :loading="messagingSettingsLoading"
-                    @click="openWhatsAppDialog"
-                  >
-                    رسالة واتساب
-                  </v-btn>
-                </span>
-              </template>
-              <span>{{ whatsAppDisabledReason }}</span>
-            </v-tooltip>
-
-            <v-btn
-              v-if="canEdit"
-              :to="`/customers/${profile.customer.id}/edit`"
-              prepend-icon="mdi-pencil"
-              variant="tonal"
-              size="small"
-            >
-              تعديل
-            </v-btn>
-          </div>
-        </div>
-      </v-card>
+      <!-- Customer status chips -->
+      <div class="page-section d-flex flex-wrap gap-2 align-center">
+        <v-chip
+          size="small"
+          :color="profile.customer.isActive ? 'success' : 'grey'"
+          variant="tonal"
+        >
+          <v-icon start size="16">{{ profile.customer.isActive ? 'mdi-check-circle' : 'mdi-cancel' }}</v-icon>
+          {{ profile.customer.isActive ? 'نشط' : 'غير نشط' }}
+        </v-chip>
+        <v-chip
+          v-if="profile.customer.branch?.name"
+          size="small"
+          variant="tonal"
+          color="info"
+        >
+          <v-icon start size="16">mdi-store</v-icon>
+          {{ profile.customer.branch.name }}
+        </v-chip>
+        <v-chip
+          v-if="profile.customer.address"
+          size="small"
+          variant="tonal"
+        >
+          <v-icon start size="16">mdi-map-marker</v-icon>
+          {{ profile.customer.address }}
+        </v-chip>
+        <v-chip
+          v-if="profile.customer.createdAt"
+          size="small"
+          variant="tonal"
+        >
+          <v-icon start size="16">mdi-calendar</v-icon>
+          عميل منذ {{ formatDate(profile.customer.createdAt) }}
+        </v-chip>
+      </div>
 
       <!-- Multi-currency / conversion warnings ---------------------------- -->
       <v-alert
@@ -129,46 +121,48 @@
       </v-alert>
 
       <!-- 2. KPI cards ---------------------------------------------------- -->
-      <v-row class="mb-1">
-        <v-col v-for="kpi in kpiCards" :key="kpi.key" cols="6" md="4" lg="2">
-          <v-card class="pa-3 h-100" variant="tonal" :color="kpi.color">
-            <div class="text-caption text-grey-darken-1">{{ kpi.label }}</div>
-            <div class="text-h6 font-weight-bold mt-1">{{ kpi.value }}</div>
-            <div v-if="kpi.hint" class="text-caption text-grey mt-1">{{ kpi.hint }}</div>
-          </v-card>
-        </v-col>
-      </v-row>
+      <div class="summary-grid page-section">
+        <StatCard
+          v-for="kpi in kpiCards"
+          :key="kpi.key"
+          :label="kpi.label"
+          :value="kpi.value"
+          :icon="kpi.icon || 'mdi-information-outline'"
+          :icon-color="kpi.color || 'primary'"
+          :hint="kpi.hint"
+        />
+      </div>
 
       <!-- Per-currency breakdown when more than one currency is in play --- -->
-      <v-card v-if="profile.meta?.multiCurrency" class="mb-4" variant="outlined">
-        <v-card-title class="text-subtitle-1"> الأرصدة حسب العملة </v-card-title>
-        <v-divider />
-        <v-table density="compact">
-          <thead>
-            <tr>
-              <th>العملة</th>
-              <th class="text-end">إجمالي المشتريات</th>
-              <th class="text-end">المدفوع</th>
-              <th class="text-end">المتبقي</th>
-              <th class="text-end">عدد الفواتير</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in profile.summary.byCurrency" :key="row.currency">
-              <td>
-                <v-chip size="x-small">{{ row.currency }}</v-chip>
-              </td>
-              <td class="text-end">{{ formatCurrency(row.totalPurchases, row.currency) }}</td>
-              <td class="text-end text-success">
-                {{ formatCurrency(row.totalPaid, row.currency) }}
-              </td>
-              <td class="text-end" :class="row.totalRemaining > 0 ? 'text-error' : ''">
-                {{ formatCurrency(row.totalRemaining, row.currency) }}
-              </td>
-              <td class="text-end">{{ row.salesCount }}</td>
-            </tr>
-          </tbody>
-        </v-table>
+      <v-card v-if="profile.meta?.multiCurrency" class="page-section">
+        <div class="section-title">
+          <span class="section-title__label">
+            <v-icon size="20" color="primary">mdi-currency-usd</v-icon>
+            <span>الأرصدة حسب العملة</span>
+          </span>
+        </div>
+        <v-data-table
+          :headers="byCurrencyHeaders"
+          :items="profile.summary.byCurrency"
+          density="comfortable"
+          hide-default-footer
+          items-per-page="50"
+        >
+          <template #[`item.currency`]="{ item }">
+            <v-chip size="small" variant="tonal">{{ item.currency }}</v-chip>
+          </template>
+          <template #[`item.totalPurchases`]="{ item }">
+            {{ formatCurrency(item.totalPurchases, item.currency) }}
+          </template>
+          <template #[`item.totalPaid`]="{ item }">
+            <span class="text-success">{{ formatCurrency(item.totalPaid, item.currency) }}</span>
+          </template>
+          <template #[`item.totalRemaining`]="{ item }">
+            <span :class="item.totalRemaining > 0 ? 'text-error font-weight-bold' : ''">
+              {{ formatCurrency(item.totalRemaining, item.currency) }}
+            </span>
+          </template>
+        </v-data-table>
       </v-card>
 
       <!-- Aging buckets for this customer's overdue installments -->
@@ -872,6 +866,8 @@ import { useCollectionsStore } from '@/stores/collections';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
 import AgingPanel from '@/components/reports/AgingPanel.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import StatCard from '@/components/StatCard.vue';
 import api from '@/plugins/axios';
 import {
   formatCurrency,
@@ -1074,6 +1070,7 @@ const kpiCards = computed(() => {
       label: 'إجمالي المشتريات',
       value: formatCurrency(ps?.totalPurchases ?? 0, cur),
       color: 'primary',
+      icon: 'mdi-cart-outline',
       hint: profile.value.meta?.multiCurrency ? `بالعملة ${cur}` : null,
     },
     {
@@ -1081,33 +1078,46 @@ const kpiCards = computed(() => {
       label: 'المدفوع',
       value: formatCurrency(ps?.totalPaid ?? 0, cur),
       color: 'success',
+      icon: 'mdi-cash-check',
     },
     {
       key: 'remaining',
       label: 'المتبقي (الديون)',
       value: formatCurrency(ps?.totalRemaining ?? 0, cur),
       color: ps?.totalRemaining > 0 ? 'error' : 'success',
+      icon: 'mdi-cash-clock',
     },
     {
       key: 'overdue',
       label: 'المتأخر',
       value: formatCurrency(summary.overdueAmount, cur),
       color: summary.overdueAmount > 0 ? 'error' : 'success',
+      icon: 'mdi-calendar-alert',
     },
     {
       key: 'activeInst',
       label: 'أقساط نشطة',
       value: summary.activeInstallments,
       color: 'warning',
+      icon: 'mdi-calendar-clock',
     },
     {
       key: 'completedInst',
       label: 'أقساط مكتملة',
       value: summary.completedInstallments,
       color: 'success',
+      icon: 'mdi-check-circle-outline',
     },
   ];
 });
+
+const byCurrencyHeaders = [
+  { title: 'العملة', key: 'currency' },
+  { title: 'إجمالي المشتريات', key: 'totalPurchases', align: 'end' },
+  { title: 'المدفوع', key: 'totalPaid', align: 'end' },
+  { title: 'المتبقي', key: 'totalRemaining', align: 'end' },
+  { title: 'عدد الفواتير', key: 'salesCount', align: 'end' },
+];
 
 // ── Tables ──────────────────────────────────────────────────────────────
 const salesHeaders = [
