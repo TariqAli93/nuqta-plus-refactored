@@ -460,6 +460,7 @@ export class InventoryService {
         productName: products.name,
         warehouseId: productStockEntries.warehouseId,
         warehouseName: warehouses.name,
+        branchId: warehouses.branchId,
         branchName: branches.name,
         remainingQuantity: productStockEntries.remainingQuantity,
         expiryDate: productStockEntries.expiryDate,

@@ -122,6 +122,11 @@
             {{ getStatusText(item.status) }}
           </v-chip>
         </template>
+        <template #[`item.expiry`]="{ item }">
+          <v-chip :color="item.tracksExpiry ? 'info' : 'grey'" size="small" variant="tonal">
+            {{ item.tracksExpiry ? 'له تاريخ انتهاء' : 'بدون تاريخ انتهاء' }}
+          </v-chip>
+        </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
             icon="mdi-pencil"
@@ -212,6 +217,7 @@ const headers = [
   { title: 'المخزون', key: 'stock' },
   { title: 'الحد الأدنى للمخزون', key: 'minStock' },
   { title: 'باركود', key: 'barcode' },
+  { title: 'حالة الصلاحية', key: 'expiry' },
   { title: 'الحالة', key: 'status' },
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];

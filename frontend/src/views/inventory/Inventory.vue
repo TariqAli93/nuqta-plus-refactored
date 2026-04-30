@@ -80,6 +80,26 @@
         <template #[`item.sellingPrice`]="{ item }">
           {{ formatMoney(item.sellingPrice, item.currency) }}
         </template>
+        <template #[`item.nearestExpiry`]="{ item }">
+          {{ item.nearestExpiry || '—' }}
+        </template>
+        <template #[`item.expiryStatus`]="{ item }">
+          <v-chip
+            size="small"
+            variant="tonal"
+            :color="
+              item.expiryStatus === 'منتهي'
+                ? 'error'
+                : item.expiryStatus?.includes('7')
+                  ? 'warning'
+                  : item.expiryStatus === 'بدون تاريخ انتهاء'
+                    ? 'grey'
+                    : 'success'
+            "
+          >
+            {{ item.expiryStatus }}
+          </v-chip>
+        </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
             v-if="canAdjust"
@@ -226,10 +246,23 @@ const headers = [
   { title: 'السعر', key: 'sellingPrice' },
   { title: 'الكمية', key: 'quantity' },
   { title: 'الحد الأدنى', key: 'lowStockThreshold' },
+  { title: 'أقرب تاريخ انتهاء', key: 'nearestExpiry' },
+  { title: 'حالة الصلاحية', key: 'expiryStatus' },
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
 
-const filteredStock = computed(() => inventoryStore.stock);
+const expiryMap = ref(new Map());
+const filteredStock = computed(() =>
+  (inventoryStore.stock || []).map((row) => {
+    const key = `${row.productId}:${row.warehouseId || inventoryStore.selectedWarehouseId}`;
+    const ex = expiryMap.value.get(key);
+    return {
+      ...row,
+      nearestExpiry: ex?.nearestExpiry || null,
+      expiryStatus: ex?.status || (row.tracksExpiry ? 'صالح' : 'بدون تاريخ انتهاء'),
+    };
+  })
+);
 
 const formatMoney = (value, currency = 'IQD') => {
   const n = Number(value || 0);
@@ -242,6 +275,18 @@ const reload = async () => {
     search: search.value || undefined,
     lowStockOnly: lowStockOnly.value || undefined,
   });
+  const alerts = await inventoryStore.fetchExpiryAlerts({
+    warehouseId: inventoryStore.selectedWarehouseId,
+  });
+  const map = new Map();
+  for (const row of alerts || []) {
+    const key = `${row.productId}:${row.warehouseId}`;
+    const cur = map.get(key);
+    if (!cur || (row.expiryDate && (!cur.nearestExpiry || row.expiryDate < cur.nearestExpiry))) {
+      map.set(key, { nearestExpiry: row.expiryDate, status: row.status });
+    }
+  }
+  expiryMap.value = map;
 };
 
 watch(() => inventoryStore.selectedWarehouseId, reload);
@@ -309,7 +354,7 @@ const submitAdjust = async () => {
       quantityChange: direction === 'in' ? quantity : -quantity,
       reason: reason.trim(),
       expiryDate: selectedProductTracksExpiry.value && expiryDate ? expiryDate : null,
-      costPrice: costPrice || undefined,
+      costPrice: costPrice === '' || costPrice === null || costPrice === undefined ? undefined : costPrice,
     });
     adjustDialog.value = false;
     await reload();
