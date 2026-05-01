@@ -41,9 +41,7 @@
 
       <select-printer />
 
-      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.go(-1)">
-        رجوع
-      </v-btn>
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.go(-1)"> رجوع </v-btn>
     </PageHeader>
 
     <v-card v-if="sale" class="mb-4">
@@ -605,7 +603,7 @@
                 :suffix="sale.currency"
                 :min="0"
                 :max="maxRefundable"
-                :hint="`الحد الأقصى: ${formatCurrency(maxRefundable, sale.currency)}`"
+                :hint="`قيمة الإرجاع: ${formatCurrency(returnedValue, sale.currency)} — الحد الأقصى للاسترداد نقداً: ${formatCurrency(maxRefundable, sale.currency)}`"
                 persistent-hint
                 density="comfortable"
               />
@@ -684,7 +682,10 @@
     </v-dialog>
 
     <!-- Add Payment Form -->
-    <v-card v-if="sale && sale.status === 'pending' && sale.remainingAmount > 0" class="page-section">
+    <v-card
+      v-if="sale && sale.status === 'pending' && sale.remainingAmount > 0"
+      class="page-section"
+    >
       <div class="section-title">
         <span class="section-title__label">
           <v-icon size="20" color="warning">mdi-cash-plus</v-icon>
@@ -749,7 +750,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSaleStore } from '@/stores/sale';
 import { useSettingsStore } from '@/stores/settings';
@@ -1345,6 +1346,22 @@ onMounted(async () => {
     if (sale.value) {
       paymentData.value.currency = sale.value.currency;
     }
+
+    const autoRefundAmount = computed(() => {
+      const currency = sale.value?.currency || 'USD';
+      return roundReturnNearest(
+        Math.max(0, Math.min(returnedValue.value, maxRefundable.value)),
+        currency
+      );
+    });
+
+    watch(
+      autoRefundAmount,
+      (amount) => {
+        returnForm.value.refundAmount = amount;
+      },
+      { immediate: false }
+    );
   } catch (error) {
     console.error('Failed to load sale details:', error);
     notificationStore.error('فشل في تحميل تفاصيل المبيع');
