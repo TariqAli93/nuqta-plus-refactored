@@ -96,6 +96,10 @@ import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
+import {
+  getInventoryMovementTypeLabel,
+  inventoryMovementTypeLabels,
+} from '@/utils/inventoryMovementTypes';
 
 const router = useRouter();
 const inventoryStore = useInventoryStore();
@@ -105,18 +109,12 @@ const filters = reactive({
   movementType: null,
 });
 
-const movementTypes = [
-  { title: 'بيع', value: 'sale' },
-  { title: 'إلغاء بيع', value: 'sale_cancel' },
-  { title: 'استرجاع', value: 'sale_return' },
-  { title: 'نقل وارد', value: 'transfer_in' },
-  { title: 'نقل صادر', value: 'transfer_out' },
-  { title: 'إدخال يدوي', value: 'manual_adjustment_in' },
-  { title: 'خصم يدوي', value: 'manual_adjustment_out' },
-  { title: 'رصيد افتتاحي', value: 'opening_balance' },
-];
+const movementTypes = Object.keys(inventoryMovementTypeLabels).map((value) => ({
+  value,
+  title: getInventoryMovementTypeLabel(value),
+}));
 
-const typeLabel = (t) => movementTypes.find((x) => x.value === t)?.title || t;
+const typeLabel = (t) => getInventoryMovementTypeLabel(t);
 const typeColor = (t) =>
   ({
     sale: 'error',

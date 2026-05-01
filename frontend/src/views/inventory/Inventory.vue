@@ -227,6 +227,10 @@ import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import {
+  getInventoryMovementTypeLabel,
+  manualInventoryMovementTypes,
+} from '@/utils/inventoryMovementTypes';
 
 const inventoryStore = useInventoryStore();
 const notificationStore = useNotificationStore();
@@ -321,16 +325,10 @@ const adjustDialog = ref(false);
 const adjusting = ref(false);
 const preselectedProduct = ref(null);
 const adjustForm = ref({ productId: null, quantity: 1, movementType: 'stock_in', reason: '', expiryDate: '', costPrice: null });
-const movementTypeOptions = [
-  { title: 'رصيد افتتاحي', value: 'opening_balance' },
-  { title: 'إضافة مخزون', value: 'stock_in' },
-  { title: 'تسوية زيادة', value: 'adjustment_in' },
-  { title: 'تسوية نقصان', value: 'adjustment_out' },
-  { title: 'تالف', value: 'damaged' },
-  { title: 'فقدان', value: 'lost' },
-  { title: 'تصحيح مخزون (زيادة)', value: 'correction_in' },
-  { title: 'تصحيح مخزون (نقصان)', value: 'correction_out' },
-];
+const movementTypeOptions = manualInventoryMovementTypes.map((value) => ({
+  value,
+  title: getInventoryMovementTypeLabel(value),
+}));
 const increaseMovementTypes = new Set(['opening_balance', 'stock_in', 'adjustment_in', 'correction_in']);
 const isIncreaseMovement = computed(() => increaseMovementTypes.has(adjustForm.value.movementType));
 const selectedProductTracksExpiry = computed(() => {
