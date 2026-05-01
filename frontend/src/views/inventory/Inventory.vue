@@ -80,6 +80,26 @@
         <template #[`item.sellingPrice`]="{ item }">
           {{ formatMoney(item.sellingPrice, item.currency) }}
         </template>
+        <template #[`item.nearestExpiry`]="{ item }">
+          {{ item.nearestExpiry || '—' }}
+        </template>
+        <template #[`item.expiryStatus`]="{ item }">
+          <v-chip
+            size="small"
+            variant="tonal"
+            :color="
+              item.expiryStatus === 'منتهي'
+                ? 'error'
+                : item.expiryStatus?.includes('7')
+                  ? 'warning'
+                  : item.expiryStatus === 'بدون تاريخ انتهاء'
+                    ? 'grey'
+                    : 'success'
+            "
+          >
+            {{ item.expiryStatus }}
+          </v-chip>
+        </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
             v-if="canAdjust"
@@ -140,12 +160,9 @@
           <v-row dense>
             <v-col cols="12" sm="6">
               <v-select
-                v-model="adjustForm.direction"
-                :items="[
-                  { title: 'إضافة', value: 'in' },
-                  { title: 'خصم', value: 'out' },
-                ]"
-                label="الحركة"
+                v-model="adjustForm.movementType"
+                :items="movementTypeOptions"
+                label="نوع حركة المخزون"
                 variant="outlined"
                 density="comfortable"
               />
@@ -158,6 +175,8 @@
                 min="1"
                 variant="outlined"
                 density="comfortable"
+                hint="أدخل الكمية كرقم موجب، وسيحدد نوع الحركة هل هي زيادة أو نقصان."
+                persistent-hint
               />
             </v-col>
           </v-row>
@@ -168,6 +187,25 @@
             auto-grow
             variant="outlined"
             density="comfortable"
+          />
+          <v-text-field
+            v-if="isIncreaseMovement && selectedProductTracksExpiry"
+            v-model="adjustForm.expiryDate"
+            label="تاريخ الانتهاء"
+            type="date"
+            variant="outlined"
+            density="comfortable"
+            class="mt-2"
+          />
+          <v-text-field
+            v-if="isIncreaseMovement"
+            v-model.number="adjustForm.costPrice"
+            label="سعر الكلفة (اختياري)"
+            type="number"
+            min="0"
+            variant="outlined"
+            density="comfortable"
+            class="mt-2"
           />
         </v-card-text>
         <v-divider />
@@ -208,10 +246,23 @@ const headers = [
   { title: 'السعر', key: 'sellingPrice' },
   { title: 'الكمية', key: 'quantity' },
   { title: 'الحد الأدنى', key: 'lowStockThreshold' },
+  { title: 'أقرب تاريخ انتهاء', key: 'nearestExpiry' },
+  { title: 'حالة الصلاحية', key: 'expiryStatus' },
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
 
-const filteredStock = computed(() => inventoryStore.stock);
+const expiryMap = ref(new Map());
+const filteredStock = computed(() =>
+  (inventoryStore.stock || []).map((row) => {
+    const key = `${row.productId}:${row.warehouseId || inventoryStore.selectedWarehouseId}`;
+    const ex = expiryMap.value.get(key);
+    return {
+      ...row,
+      nearestExpiry: ex?.nearestExpiry || null,
+      expiryStatus: ex?.status || (row.tracksExpiry ? 'صالح' : 'بدون تاريخ انتهاء'),
+    };
+  })
+);
 
 const formatMoney = (value, currency = 'IQD') => {
   const n = Number(value || 0);
@@ -224,6 +275,18 @@ const reload = async () => {
     search: search.value || undefined,
     lowStockOnly: lowStockOnly.value || undefined,
   });
+  const alerts = await inventoryStore.fetchExpiryAlerts({
+    warehouseId: inventoryStore.selectedWarehouseId,
+  });
+  const map = new Map();
+  for (const row of alerts || []) {
+    const key = `${row.productId}:${row.warehouseId}`;
+    const cur = map.get(key);
+    if (!cur || (row.expiryDate && (!cur.nearestExpiry || row.expiryDate < cur.nearestExpiry))) {
+      map.set(key, { nearestExpiry: row.expiryDate, status: row.status });
+    }
+  }
+  expiryMap.value = map;
 };
 
 watch(() => inventoryStore.selectedWarehouseId, reload);
@@ -257,21 +320,40 @@ const maybeOpenAdjustFromRoute = async () => {
 const adjustDialog = ref(false);
 const adjusting = ref(false);
 const preselectedProduct = ref(null);
-const adjustForm = ref({ productId: null, quantity: 1, direction: 'in', reason: '' });
+const adjustForm = ref({ productId: null, quantity: 1, movementType: 'stock_in', reason: '', expiryDate: '', costPrice: null });
+const movementTypeOptions = [
+  { title: 'رصيد افتتاحي', value: 'opening_balance' },
+  { title: 'إضافة مخزون', value: 'stock_in' },
+  { title: 'تسوية زيادة', value: 'adjustment_in' },
+  { title: 'تسوية نقصان', value: 'adjustment_out' },
+  { title: 'تالف', value: 'damaged' },
+  { title: 'فقدان', value: 'lost' },
+  { title: 'تصحيح مخزون (زيادة)', value: 'correction_in' },
+  { title: 'تصحيح مخزون (نقصان)', value: 'correction_out' },
+];
+const increaseMovementTypes = new Set(['opening_balance', 'stock_in', 'adjustment_in', 'correction_in']);
+const isIncreaseMovement = computed(() => increaseMovementTypes.has(adjustForm.value.movementType));
+const selectedProductTracksExpiry = computed(() => {
+  const pid = Number(adjustForm.value.productId);
+  const row = (inventoryStore.stock || []).find((r) => Number(r.productId) === pid);
+  return !!row?.tracksExpiry;
+});
 
 const openAdjustDialog = (row) => {
   preselectedProduct.value = row;
   adjustForm.value = {
     productId: row ? row.productId : null,
     quantity: 1,
-    direction: 'in',
+    movementType: 'stock_in',
     reason: '',
+    expiryDate: '',
+    costPrice: null,
   };
   adjustDialog.value = true;
 };
 
 const submitAdjust = async () => {
-  const { productId, quantity, direction, reason } = adjustForm.value;
+  const { productId, quantity, movementType, reason, expiryDate, costPrice } = adjustForm.value;
   if (!productId || !quantity || !reason.trim()) {
     notificationStore.error('أكمل بيانات التعديل قبل الحفظ');
     return;
@@ -281,8 +363,11 @@ const submitAdjust = async () => {
     await inventoryStore.adjustStock({
       productId,
       warehouseId: inventoryStore.selectedWarehouseId,
-      quantityChange: direction === 'in' ? quantity : -quantity,
+      quantityChange: quantity,
+      movementType,
       reason: reason.trim(),
+      expiryDate: isIncreaseMovement.value && selectedProductTracksExpiry.value && expiryDate ? expiryDate : null,
+      costPrice: isIncreaseMovement.value && !(costPrice === '' || costPrice === null || costPrice === undefined) ? costPrice : undefined,
     });
     adjustDialog.value = false;
     await reload();

@@ -131,6 +131,12 @@ export function useNavigationMenu() {
             to: '/inventory/low-stock',
             permission: 'view:inventory',
           },
+          {
+            title: 'تنبيهات الصلاحية',
+            icon: 'mdi-calendar-alert',
+            to: '/inventory/expiry-alerts',
+            permission: 'view:inventory',
+          },
         ],
       },
     },

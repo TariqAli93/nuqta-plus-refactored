@@ -18,6 +18,7 @@ import {
   productStock,
   saleReturns,
   saleReturnItems,
+  saleItemStockEntries,
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -471,7 +472,7 @@ export class SaleService {
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
-        await tx.insert(saleItems).values({
+        const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: newSale.id,
           productId: item.productId,
           productName: product.name,
@@ -479,9 +480,9 @@ export class SaleService {
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
-        });
+        }).returning({ id: saleItems.id });
 
-        stockItems.push({ productId: item.productId, quantity: item.quantity });
+        stockItems.push({ productId: item.productId, quantity: item.quantity, saleItemId: insertedSaleItem.id });
       }
 
       // Per-warehouse stock deduction via inventoryService.
@@ -1356,6 +1357,9 @@ export class SaleService {
         priorByItemId.set(it.saleItemId, (priorByItemId.get(it.saleItemId) || 0) + it.quantity);
       }
     }
+    // Snapshot of quantities returned before this request. Used later to
+    // restore stock-entry quantities without mutating sale_item_stock_entries.
+    const previouslyReturnedByItem = new Map(priorByItemId);
 
     // Resolve every requested return item against the original sale's items.
     // We accept either saleItemId (preferred) or productId for callers that
@@ -1403,7 +1407,7 @@ export class SaleService {
       const remainingQty = target.quantity - prior;
       if (qty > remainingQty) {
         throw new ValidationError(
-          `Cannot return ${qty} of "${target.productName}" — only ${remainingQty} remain returnable`
+          'لا يمكن استرجاع كمية أكبر من الكمية المباعة أو الكمية المتبقية للاسترجاع'
         );
       }
 
@@ -1544,9 +1548,52 @@ export class SaleService {
       // 3. Restore stock for items that have a productId. Legacy sales with
       //    no warehouseId are skipped (movements need a warehouse).
       if (sale.warehouseId) {
-        const stockItems = resolvedItems
-          .filter((it) => it.saleItem.productId)
-          .map((it) => ({ productId: it.saleItem.productId, quantity: it.quantity }));
+        // Restore entry-level quantities (when trace rows exist), then always
+        // restore aggregate warehouse stock via InventoryService below.
+        const stockItems = [];
+        for (const it of resolvedItems) {
+          if (!it.saleItem?.id || !it.saleItem?.productId) continue;
+          let remaining = Number(it.quantity) || 0;
+          if (remaining <= 0) continue;
+          stockItems.push({ productId: it.saleItem.productId, quantity: remaining });
+          const previousReturned = Number(previouslyReturnedByItem.get(it.saleItem.id) || 0);
+          const restoreWindowStart = Math.max(0, previousReturned);
+          const restoreWindowEnd = Math.max(restoreWindowStart, previousReturned + remaining);
+          let traceCursor = 0;
+          const traces = await tx
+            .select({
+              id: saleItemStockEntries.id,
+              stockEntryId: saleItemStockEntries.productStockEntryId,
+              quantity: saleItemStockEntries.quantity,
+            })
+            .from(saleItemStockEntries)
+            .where(eq(saleItemStockEntries.saleItemId, it.saleItem.id))
+            .orderBy(desc(saleItemStockEntries.id))
+            .for('update');
+          for (const tr of traces) {
+            if (remaining <= 0) break;
+            const traceQty = Number(tr.quantity) || 0;
+            const traceStart = traceCursor;
+            const traceEnd = traceCursor + traceQty;
+            traceCursor = traceEnd;
+            const overlapStart = Math.max(restoreWindowStart, traceStart);
+            const overlapEnd = Math.min(restoreWindowEnd, traceEnd);
+            const giveBack = Math.max(0, overlapEnd - overlapStart);
+            if (giveBack <= 0) continue;
+            await tx.execute(sql`
+              UPDATE product_stock_entries
+              SET remaining_quantity = remaining_quantity + ${giveBack},
+                  status = CASE
+                    WHEN status = 'blocked' THEN 'blocked'
+                    WHEN expiry_date IS NOT NULL AND expiry_date < CURRENT_DATE THEN 'expired'
+                    ELSE 'active'
+                  END,
+                  updated_at = now()
+              WHERE id = ${tr.stockEntryId}
+            `);
+            remaining -= giveBack;
+          }
+        }
         if (stockItems.length > 0) {
           await InventoryService.restoreSaleStockMovement(tx, {
             saleId: sale.id,
@@ -1569,7 +1616,10 @@ export class SaleService {
         Math.max(0, sale.remainingAmount - debtReduction),
         currency
       );
-      const newStatus = newRemainingAmount <= 0 ? 'completed' : sale.status;
+      const fullReturned = priorReturnedTotal + returnedValue >= sale.total - tolerance;
+      const newStatus = fullReturned
+        ? 'returned'
+        : (priorReturnedTotal + returnedValue > 0 ? 'partially_returned' : (newRemainingAmount <= 0 ? 'completed' : sale.status));
       await tx
         .update(sales)
         .set({

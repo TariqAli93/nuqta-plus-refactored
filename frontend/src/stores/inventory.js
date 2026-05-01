@@ -439,5 +439,9 @@ export const useInventoryStore = defineStore('inventory', {
         this.loading = false;
       }
     },
+    async fetchExpiryAlerts(filters = {}) {
+      const response = await api.get('/inventory/expiry-alerts', { params: filters });
+      return response?.data || [];
+    },
   },
 });

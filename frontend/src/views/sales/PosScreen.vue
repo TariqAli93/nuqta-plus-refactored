@@ -78,6 +78,13 @@
             @keyup.enter="onBarcode"
             @keydown.esc.prevent="barcode = ''"
           />
+          <v-switch
+            v-model="hideExpired"
+            density="compact"
+            color="error"
+            hide-details
+            label="إخفاء المنتهي"
+          />
         </div>
 
         <v-slide-group show-arrows>
@@ -144,9 +151,9 @@
             'product--out': availableOf(p) <= 0,
             'product--featured': isFeatured(p),
           }"
-          :disabled="availableOf(p) <= 0"
+          :disabled="availableOf(p) <= 0 || expiryStatusOf(p) === 'منتهي'"
           :title="p.name"
-          :tabindex="availableOf(p) <= 0 ? -1 : 0"
+          :tabindex="availableOf(p) <= 0 || expiryStatusOf(p) === 'منتهي' ? -1 : 0"
           role="gridcell"
           @click="addProduct(p)"
           @keydown.enter.prevent="addProduct(p)"
@@ -157,6 +164,14 @@
           </span>
           <div class="product__name">{{ p.name }}</div>
           <div v-if="p.category" class="product__cat">{{ p.category }}</div>
+          <div v-if="expiryStatusOf(p)" class="product__expiry">
+            <v-chip size="x-small" variant="tonal" :color="expiryColor(expiryStatusOf(p))">
+              {{ expiryStatusOf(p) }}
+            </v-chip>
+            <span v-if="nearestExpiryOf(p)" class="product__expiry-date">
+              أقرب انتهاء: {{ nearestExpiryOf(p) }}
+            </span>
+          </div>
           <div class="product__foot">
             <span class="product__price">{{ formatMoney(p.sellingPrice, p.currency) }}</span>
             <span class="product__stock" :class="stockClass(p)">{{ availableOf(p) }}</span>
@@ -404,6 +419,9 @@
                   <v-icon size="10">mdi-note-text-outline</v-icon>
                   {{ truncate(item.note, 14) }}
                 </span>
+              </div>
+              <div v-if="cartExpiryWarning(item)" class="line__warn">
+                {{ cartExpiryWarning(item) }}
               </div>
             </div>
 
@@ -892,10 +910,12 @@ const debouncedSearch = ref('');
 const barcode = ref('');
 const selectedCategory = ref(null);
 const products = ref([]);
+const expiryAlerts = ref([]);
 const categories = ref([]);
 const loadingProducts = ref(false);
 const cartOpen = ref(false);
 const clearDialog = ref(false);
+const hideExpired = ref(false);
 
 // Numpad: a free-typed string we own as the source of truth for the readout.
 // Sync to/from payment.paidAmount so applyExact / addToPaid still drive it.
@@ -1074,9 +1094,12 @@ const isFeatured = (p) => Boolean(p?.isFeatured || p?.isBestSeller || p?.feature
 const filteredProducts = computed(() => {
   const q = debouncedSearch.value;
   const catId = selectedCategory.value;
-  if (!q && !catId) return products.value;
+  const base = hideExpired.value
+    ? products.value.filter((p) => expiryStatusOf(p) !== 'منتهي')
+    : products.value;
+  if (!q && !catId) return base;
 
-  return products.value.filter((p) => {
+  return base.filter((p) => {
     if (catId != null && p.categoryId !== catId) return false;
     if (!q) return true;
     return (
@@ -1086,6 +1109,37 @@ const filteredProducts = computed(() => {
     );
   });
 });
+
+const expiryByProductWarehouse = computed(() => {
+  const map = new Map();
+  for (const row of expiryAlerts.value || []) {
+    const key = `${row.productId}:${row.warehouseId}`;
+    const cur = map.get(key);
+    if (!cur || (row.expiryDate && (!cur.nearestExpiry || row.expiryDate < cur.nearestExpiry))) {
+      map.set(key, row);
+    }
+  }
+  return map;
+});
+
+const expiryInfoOf = (p) =>
+  expiryByProductWarehouse.value.get(`${p.id}:${inventoryStore.selectedWarehouseId || ''}`) || null;
+const nearestExpiryOf = (p) => expiryInfoOf(p)?.expiryDate || null;
+const expiryStatusOf = (p) => {
+  if (!p?.tracksExpiry) return 'بدون تاريخ انتهاء';
+  const status = expiryInfoOf(p)?.status;
+  if (!status) return 'صالح';
+  if (status === 'ينتهي خلال 7 أيام' || status === 'ينتهي خلال 30 يوم' || status === 'ينتهي خلال 60 يوم')
+    return 'ينتهي قريباً';
+  if (status === 'منتهي') return 'منتهي';
+  return 'صالح';
+};
+const expiryColor = (status) => {
+  if (status === 'منتهي') return 'error';
+  if (status === 'ينتهي قريباً') return 'warning';
+  if (status === 'بدون تاريخ انتهاء') return 'grey';
+  return 'success';
+};
 
 const categoriesWithCounts = computed(() => {
   const counts = new Map();
@@ -1142,6 +1196,14 @@ const loadProducts = async () => {
       warehouseId: inventoryStore.selectedWarehouseId || undefined,
     });
     products.value = response?.data || [];
+    try {
+      expiryAlerts.value =
+        (await inventoryStore.fetchExpiryAlerts({
+          warehouseId: inventoryStore.selectedWarehouseId || undefined,
+        })) || [];
+    } catch {
+      expiryAlerts.value = [];
+    }
   } finally {
     loadingProducts.value = false;
   }
@@ -1160,8 +1222,21 @@ watch(() => inventoryStore.selectedWarehouseId, loadProducts);
 
 // ── Cart interactions ──────────────────────────────────────────────────────
 const addProduct = (product) => {
+  if (expiryStatusOf(product) === 'منتهي') {
+    notify.warning('لا توجد كمية صالحة للبيع لهذا المنتج');
+    return;
+  }
   if (availableOf(product) <= 0) return;
   addItem(product);
+};
+
+const cartExpiryWarning = (item) => {
+  const p = products.value.find((x) => x.id === item.id || x.id === item.productId);
+  if (!p) return '';
+  const status = expiryStatusOf(p);
+  if (status === 'ينتهي قريباً') return 'ينتهي قريباً — تحقق من الصلاحية قبل البيع';
+  if (status === 'منتهي') return 'الكمية الصالحة للبيع غير كافية';
+  return '';
 };
 
 const commitQty = (id, raw) => {
@@ -1872,6 +1947,18 @@ onUnmounted(() => {
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
+.product__expiry {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.product__expiry-date {
+  font-size: 0.68rem;
+  color: rgba(var(--v-theme-on-surface), 0.58);
+}
+
 .product__foot {
   margin-top: auto;
   display: flex;
@@ -2224,6 +2311,12 @@ onUnmounted(() => {
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+}
+
+.line__warn {
+  margin-top: 4px;
+  font-size: 0.68rem;
+  color: rgb(var(--v-theme-warning));
 }
 
 .line__bottom {
