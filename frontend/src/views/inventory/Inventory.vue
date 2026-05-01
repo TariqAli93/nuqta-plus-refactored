@@ -160,12 +160,9 @@
           <v-row dense>
             <v-col cols="12" sm="6">
               <v-select
-                v-model="adjustForm.direction"
-                :items="[
-                  { title: 'إضافة', value: 'in' },
-                  { title: 'خصم', value: 'out' },
-                ]"
-                label="الحركة"
+                v-model="adjustForm.movementType"
+                :items="movementTypeOptions"
+                label="نوع حركة المخزون"
                 variant="outlined"
                 density="comfortable"
               />
@@ -178,6 +175,8 @@
                 min="1"
                 variant="outlined"
                 density="comfortable"
+                hint="أدخل الكمية كرقم موجب، وسيحدد نوع الحركة هل هي زيادة أو نقصان."
+                persistent-hint
               />
             </v-col>
           </v-row>
@@ -190,7 +189,7 @@
             density="comfortable"
           />
           <v-text-field
-            v-if="selectedProductTracksExpiry"
+            v-if="isIncreaseMovement && selectedProductTracksExpiry"
             v-model="adjustForm.expiryDate"
             label="تاريخ الانتهاء"
             type="date"
@@ -199,6 +198,7 @@
             class="mt-2"
           />
           <v-text-field
+            v-if="isIncreaseMovement"
             v-model.number="adjustForm.costPrice"
             label="سعر الكلفة (اختياري)"
             type="number"
@@ -227,6 +227,10 @@ import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import {
+  getInventoryMovementTypeLabel,
+  manualInventoryMovementTypes,
+} from '@/utils/inventoryMovementTypes';
 
 const inventoryStore = useInventoryStore();
 const notificationStore = useNotificationStore();
@@ -320,7 +324,13 @@ const maybeOpenAdjustFromRoute = async () => {
 const adjustDialog = ref(false);
 const adjusting = ref(false);
 const preselectedProduct = ref(null);
-const adjustForm = ref({ productId: null, quantity: 1, direction: 'in', reason: '', expiryDate: '', costPrice: null });
+const adjustForm = ref({ productId: null, quantity: 1, movementType: 'stock_in', reason: '', expiryDate: '', costPrice: null });
+const movementTypeOptions = manualInventoryMovementTypes.map((value) => ({
+  value,
+  title: getInventoryMovementTypeLabel(value),
+}));
+const increaseMovementTypes = new Set(['opening_balance', 'stock_in', 'adjustment_in', 'correction_in']);
+const isIncreaseMovement = computed(() => increaseMovementTypes.has(adjustForm.value.movementType));
 const selectedProductTracksExpiry = computed(() => {
   const pid = Number(adjustForm.value.productId);
   const row = (inventoryStore.stock || []).find((r) => Number(r.productId) === pid);
@@ -332,7 +342,7 @@ const openAdjustDialog = (row) => {
   adjustForm.value = {
     productId: row ? row.productId : null,
     quantity: 1,
-    direction: 'in',
+    movementType: 'stock_in',
     reason: '',
     expiryDate: '',
     costPrice: null,
@@ -341,7 +351,7 @@ const openAdjustDialog = (row) => {
 };
 
 const submitAdjust = async () => {
-  const { productId, quantity, direction, reason, expiryDate, costPrice } = adjustForm.value;
+  const { productId, quantity, movementType, reason, expiryDate, costPrice } = adjustForm.value;
   if (!productId || !quantity || !reason.trim()) {
     notificationStore.error('أكمل بيانات التعديل قبل الحفظ');
     return;
@@ -351,10 +361,11 @@ const submitAdjust = async () => {
     await inventoryStore.adjustStock({
       productId,
       warehouseId: inventoryStore.selectedWarehouseId,
-      quantityChange: direction === 'in' ? quantity : -quantity,
+      quantityChange: quantity,
+      movementType,
       reason: reason.trim(),
-      expiryDate: selectedProductTracksExpiry.value && expiryDate ? expiryDate : null,
-      costPrice: costPrice === '' || costPrice === null || costPrice === undefined ? undefined : costPrice,
+      expiryDate: isIncreaseMovement.value && selectedProductTracksExpiry.value && expiryDate ? expiryDate : null,
+      costPrice: isIncreaseMovement.value && !(costPrice === '' || costPrice === null || costPrice === undefined) ? costPrice : undefined,
     });
     adjustDialog.value = false;
     await reload();

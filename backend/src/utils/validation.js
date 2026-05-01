@@ -135,10 +135,19 @@ export const warehouseSchema = z.object({
 export const stockAdjustmentSchema = z.object({
   productId: z.number().int().positive(),
   warehouseId: z.number().int().positive(),
-  quantityChange: z
-    .number()
-    .int()
-    .refine((v) => v !== 0, 'Quantity change cannot be zero'),
+  quantityChange: z.number().int().positive('Quantity must be positive'),
+  movementType: z.enum([
+    'opening_balance',
+    'stock_in',
+    'adjustment_in',
+    'adjustment_out',
+    'damaged',
+    'lost',
+    'correction_in',
+    'correction_out',
+    'manual_adjustment_in',
+    'manual_adjustment_out',
+  ], { errorMap: () => ({ message: 'نوع حركة المخزون غير صالح' }) }),
   reason: z.string().min(2, 'Reason is required'),
   costPrice: z.coerce.number().nonnegative('Cost price must be non-negative').optional(),
   expiryDate: z

@@ -248,6 +248,7 @@ export class InventoryService {
       productId,
       warehouseId,
       quantityChange,
+      movementType,
       reason,
       costPrice,
       expiryDate,
@@ -258,25 +259,40 @@ export class InventoryService {
     if (!reason || !reason.trim()) {
       throw new ValidationError('Adjustment reason is required');
     }
-    if (!Number.isInteger(quantityChange) || quantityChange === 0) {
-      throw new ValidationError('Quantity change must be a non-zero integer');
+    if (!Number.isInteger(quantityChange) || quantityChange <= 0) {
+      throw new ValidationError('Quantity change must be a positive integer');
     }
-
-    const movementType =
-      quantityChange > 0 ? 'manual_adjustment_in' : 'manual_adjustment_out';
+    const increaseTypes = new Set([
+      'opening_balance',
+      'stock_in',
+      'adjustment_in',
+      'correction_in',
+      'manual_adjustment_in',
+    ]);
+    const decreaseTypes = new Set([
+      'adjustment_out',
+      'damaged',
+      'lost',
+      'correction_out',
+      'manual_adjustment_out',
+    ]);
+    if (!increaseTypes.has(movementType) && !decreaseTypes.has(movementType)) {
+      throw new ValidationError('نوع حركة المخزون غير صالح');
+    }
+    const signedQuantity = increaseTypes.has(movementType) ? quantityChange : -quantityChange;
 
     const result = await withTransaction((tx) =>
       applyStockChangeTx(tx, {
         productId,
         warehouseId,
-        quantityChange,
+        quantityChange: signedQuantity,
         movementType,
         referenceType: 'adjustment',
         notes: reason.trim(),
         userId,
         allowNegative,
       }).then(async (movementResult) => {
-        if (quantityChange > 0) {
+        if (signedQuantity > 0) {
           const [product] = await tx
             .select({ costPrice: products.costPrice })
             .from(products)
@@ -285,8 +301,8 @@ export class InventoryService {
           await tx.insert(productStockEntries).values({
             productId,
             warehouseId,
-            quantity: quantityChange,
-            remainingQuantity: quantityChange,
+            quantity: signedQuantity,
+            remainingQuantity: signedQuantity,
             costPrice: String(costPrice || product?.costPrice || 0),
             expiryDate: expiryDate || null,
             status: 'active',
