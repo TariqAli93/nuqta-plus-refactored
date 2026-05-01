@@ -13,9 +13,9 @@ export function buildDatabaseUrl() {
 
   const host = process.env.PG_HOST || '127.0.0.1';
   const port = process.env.PG_PORT || '5432';
-  const database = process.env.PG_DATABASE || 'nuqtaplus';
-  const user = process.env.PG_USER || 'nuqtaplus';
-  const password = process.env.PG_PASSWORD || 'nuqtaplus';
+  const database = process.env.PG_DATABASE || 'nuqta_db';
+  const user = process.env.PG_USER || 'postgres';
+  const password = process.env.PG_PASSWORD || 'root';
 
   return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
@@ -31,9 +31,9 @@ export function getPgConfig() {
   return {
     host: process.env.PG_HOST || '127.0.0.1',
     port: parseInt(process.env.PG_PORT || '5432', 10),
-    database: process.env.PG_DATABASE || 'nuqtaplus',
-    user: process.env.PG_USER || 'nuqtaplus',
-    password: process.env.PG_PASSWORD || 'nuqtaplus',
+    database: process.env.PG_DATABASE || 'nuqta_db',
+    user: process.env.PG_USER || 'postgres',
+    password: process.env.PG_PASSWORD || 'root',
   };
 }
 

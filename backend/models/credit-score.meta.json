@@ -1,0 +1,121 @@
+{
+  "modelVersion": "2.0.0-20260501",
+  "trainedAt": "2026-05-01T21:51:26.617Z",
+  "feature_order": [
+    "totalSalesOnInstallment",
+    "totalPaidOnTime",
+    "totalLatePayments",
+    "avgDelayDays",
+    "maxDelayDays",
+    "currentOutstandingDebt",
+    "activeInstallmentsCount",
+    "completedInstallmentsCount"
+  ],
+  "featureNames": [
+    "totalSalesOnInstallment",
+    "totalPaidOnTime",
+    "totalLatePayments",
+    "avgDelayDays",
+    "maxDelayDays",
+    "currentOutstandingDebt",
+    "activeInstallmentsCount",
+    "completedInstallmentsCount"
+  ],
+  "outputLabels": [
+    "non_default",
+    "default"
+  ],
+  "thresholdConfig": {
+    "low": 0.4,
+    "high": 0.7
+  },
+  "feature_ranges": {
+    "totalSalesOnInstallment": {
+      "min": 0,
+      "max": 100
+    },
+    "totalPaidOnTime": {
+      "min": 0,
+      "max": 100
+    },
+    "totalLatePayments": {
+      "min": 0,
+      "max": 50
+    },
+    "avgDelayDays": {
+      "min": 0,
+      "max": 90
+    },
+    "maxDelayDays": {
+      "min": 0,
+      "max": 180
+    },
+    "currentOutstandingDebt": {
+      "min": 0,
+      "max": 10000000
+    },
+    "activeInstallmentsCount": {
+      "min": 0,
+      "max": 20
+    },
+    "completedInstallmentsCount": {
+      "min": 0,
+      "max": 100
+    }
+  },
+  "outputLabelsLegacy": [
+    "LOW",
+    "MEDIUM",
+    "HIGH"
+  ],
+  "metrics": {
+    "train": {
+      "accuracy": 0.75,
+      "precision": 0.3333333333333333,
+      "recall": 1,
+      "f1": 0.5,
+      "tp": 1,
+      "fp": 2,
+      "tn": 5,
+      "fn": 0
+    },
+    "val": {
+      "accuracy": 1,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "tp": 1,
+      "fp": 0,
+      "tn": 2,
+      "fn": 0,
+      "auc": 1
+    }
+  },
+  "trainingSummary": {
+    "epochs": 600,
+    "learningRate": 0.5,
+    "l2": 0.001,
+    "positiveClassWeight": 7
+  },
+  "dataset": {
+    "n": 11,
+    "n_train": 8,
+    "n_val": 3,
+    "positive_rate": 0.18181818181818182,
+    "val_fraction": 0.2,
+    "split_strategy": "time-based"
+  },
+  "weights": [
+    -0.007544243103241058,
+    -0.48276484379042933,
+    1.9238518124842776,
+    1.0688066122614497,
+    0.5344033061307248,
+    -0.7502371266716571,
+    8.93977231861304,
+    0.4791610624517091
+  ],
+  "bias": -0.891575256810271,
+  "version": "2.0.0-20260501",
+  "trained_at": "2026-05-01T21:51:26.617Z"
+}
