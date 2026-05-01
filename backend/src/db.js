@@ -11,6 +11,13 @@ const { Pool, Client } = pg;
 // ── PostgreSQL connection pool ────────────────────────────────────────────
 let pool = null;
 let dbInstance = null;
+let bootstrapState = {
+  databaseReady: false,
+  migrationsApplied: false,
+  lastError: null,
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Resolve the target database name from environment configuration.
@@ -45,7 +52,7 @@ function getMaintenanceConfig() {
         port: parseInt(url.port || '5432', 10),
         user: decodeURIComponent(url.username) || 'postgres',
         password: decodeURIComponent(url.password) || 'root',
-        database: 'nuqta_db',
+        database: 'postgres',
         ssl: sslOption,
       };
     } catch {
@@ -58,7 +65,7 @@ function getMaintenanceConfig() {
     port: parseInt(process.env.PG_PORT || '5432', 10),
     user: process.env.PG_USER || 'postgres',
     password: process.env.PG_PASSWORD || 'root',
-    database: 'nuqta_db',
+    database: 'postgres',
     ssl: sslOption,
   };
 }
@@ -128,24 +135,44 @@ function createPool() {
 }
 
 async function initDB() {
-  // First, ensure the target database exists (create it if missing)
-  await ensureDatabase();
+  const attempts = Number(process.env.PG_CONNECT_RETRY_ATTEMPTS || 15);
+  const delayMs = Number(process.env.PG_CONNECT_RETRY_DELAY_MS || 2000);
 
-  pool = createPool();
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await ensureDatabase();
+      pool = createPool();
 
-  // Verify connectivity
-  try {
-    const client = await pool.connect();
-    const result = await client.query('SELECT current_database() AS db, version() AS ver');
-    console.log(`Connected to PostgreSQL: ${result.rows[0].db}`);
-    client.release();
-  } catch (error) {
-    console.error('Failed to connect to PostgreSQL:', error.message);
-    console.error('');
-    console.error('Make sure PostgreSQL is running and the connection details are correct.');
-    console.error('Set PG_HOST, PG_PORT, PG_DATABASE, PG_USER, PG_PASSWORD env vars,');
-    console.error('or provide a full DATABASE_URL connection string.');
-    throw error;
+      const client = await pool.connect();
+      const result = await client.query('SELECT current_database() AS db, version() AS ver');
+      console.log(`Connected to PostgreSQL: ${result.rows[0].db}`);
+      client.release();
+      bootstrapState.databaseReady = true;
+      break;
+    } catch (error) {
+      bootstrapState.lastError = error.message;
+      if (pool) {
+        try {
+          await pool.end();
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      pool = null;
+
+      if (attempt === attempts) {
+        console.error('Failed to connect to PostgreSQL:', error.message);
+        console.error('Make sure PostgreSQL is running and the connection details are correct.');
+        console.error('Set PG_HOST, PG_PORT, PG_DATABASE, PG_USER, PG_PASSWORD env vars,');
+        console.error('or provide a full DATABASE_URL connection string.');
+        throw error;
+      }
+
+      console.warn(
+        `PostgreSQL is not ready yet (attempt ${attempt}/${attempts}): ${error.message}. Retrying in ${delayMs}ms...`
+      );
+      await sleep(delayMs);
+    }
   }
 
   // Create Drizzle instance
@@ -159,11 +186,14 @@ async function initDB() {
   try {
     await migrate(db, { migrationsFolder });
     console.log('Database migrations applied successfully');
+    bootstrapState.migrationsApplied = true;
   } catch (error) {
     // If migration fails because tables exist, it's okay
     if (error.message?.includes('already exists')) {
       console.log('Migrations skipped - tables already exist');
+      bootstrapState.migrationsApplied = true;
     } else {
+      bootstrapState.lastError = error.message;
       throw error;
     }
   }
@@ -189,6 +219,8 @@ export const getPool = async () => {
   if (!pool) await dbPromise;
   return pool;
 };
+
+export const getBootstrapState = () => ({ ...bootstrapState });
 
 /**
  * Gracefully close the pool. Called during server shutdown.
