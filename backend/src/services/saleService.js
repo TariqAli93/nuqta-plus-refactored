@@ -1548,13 +1548,14 @@ export class SaleService {
       // 3. Restore stock for items that have a productId. Legacy sales with
       //    no warehouseId are skipped (movements need a warehouse).
       if (sale.warehouseId) {
-        // Prefer restoring to the original consumed stock entries when trace
-        // rows exist. Fallback to legacy aggregate restore when no trace is
-        // present (older sales).
-        const fallbackStockItems = [];
+        // Restore entry-level quantities (when trace rows exist), then always
+        // restore aggregate warehouse stock via InventoryService below.
+        const stockItems = [];
         for (const it of resolvedItems) {
           if (!it.saleItem?.id || !it.saleItem?.productId) continue;
           let remaining = Number(it.quantity) || 0;
+          if (remaining <= 0) continue;
+          stockItems.push({ productId: it.saleItem.productId, quantity: remaining });
           const previousReturned = Number(previouslyReturnedByItem.get(it.saleItem.id) || 0);
           const restoreWindowStart = Math.max(0, previousReturned);
           const restoreWindowEnd = Math.max(restoreWindowStart, previousReturned + remaining);
@@ -1582,22 +1583,22 @@ export class SaleService {
             await tx.execute(sql`
               UPDATE product_stock_entries
               SET remaining_quantity = remaining_quantity + ${giveBack},
-                  status = CASE WHEN status = 'blocked' THEN 'blocked' ELSE 'active' END,
+                  status = CASE
+                    WHEN status = 'blocked' THEN 'blocked'
+                    WHEN expiry_date IS NOT NULL AND expiry_date < CURRENT_DATE THEN 'expired'
+                    ELSE 'active'
+                  END,
                   updated_at = now()
               WHERE id = ${tr.stockEntryId}
-                AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE)
             `);
             remaining -= giveBack;
           }
-          if (remaining > 0) {
-            fallbackStockItems.push({ productId: it.saleItem.productId, quantity: remaining });
-          }
         }
-        if (fallbackStockItems.length > 0) {
+        if (stockItems.length > 0) {
           await InventoryService.restoreSaleStockMovement(tx, {
             saleId: sale.id,
             warehouseId: sale.warehouseId,
-            items: fallbackStockItems,
+            items: stockItems,
             userId,
             movementType: 'sale_return',
           });
