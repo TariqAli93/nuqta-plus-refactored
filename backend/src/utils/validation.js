@@ -90,6 +90,7 @@ export const productSchema = z.object({
   lowStockThreshold: z.number().int().nonnegative().optional(),
   unit: z.string().optional(),
   supplier: z.string().nullable().optional(),
+  tracksExpiry: z.boolean().optional(),
   isActive: z.boolean().optional(),
   status: z.enum(['available', 'out_of_stock', 'discontinued']).optional(),
 });
@@ -139,6 +140,12 @@ export const stockAdjustmentSchema = z.object({
     .int()
     .refine((v) => v !== 0, 'Quantity change cannot be zero'),
   reason: z.string().min(2, 'Reason is required'),
+  costPrice: z.coerce.number().nonnegative('Cost price must be non-negative').optional(),
+  expiryDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiry date must be YYYY-MM-DD')
+    .nullable()
+    .optional(),
   allowNegative: z.boolean().optional(),
 });
 
@@ -459,4 +466,3 @@ export const closeCashSessionSchema = z.object({
     .nonnegative('Closing cash cannot be negative'),
   notes: z.string().nullable().optional(),
 });
-

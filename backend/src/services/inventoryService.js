@@ -4,13 +4,15 @@ import {
   productStock,
   stockMovements,
   products,
+  productStockEntries,
+  saleItemStockEntries,
   warehouses,
   branches,
   users,
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import { eq, and, desc, sql, lte, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
 
 /**
@@ -174,6 +176,7 @@ export class InventoryService {
         currency: products.currency,
         minStock: products.minStock,
         lowStockThreshold: products.lowStockThreshold,
+        tracksExpiry: products.tracksExpiry,
         quantity: sql`COALESCE(${productStock.quantity}, 0)`.as('quantity'),
         warehouseId: sql`${warehouseId}::int`.as('warehouseId'),
       })
@@ -220,6 +223,7 @@ export class InventoryService {
       .select({
         warehouseId: productStock.warehouseId,
         warehouseName: warehouses.name,
+        branchName: branches.name,
         branchId: warehouses.branchId,
         branchName: branches.name,
         quantity: productStock.quantity,
@@ -245,6 +249,8 @@ export class InventoryService {
       warehouseId,
       quantityChange,
       reason,
+      costPrice,
+      expiryDate,
       allowNegative = false,
       userId = null,
     } = input;
@@ -269,6 +275,25 @@ export class InventoryService {
         notes: reason.trim(),
         userId,
         allowNegative,
+      }).then(async (movementResult) => {
+        if (quantityChange > 0) {
+          const [product] = await tx
+            .select({ costPrice: products.costPrice })
+            .from(products)
+            .where(eq(products.id, productId))
+            .limit(1);
+          await tx.insert(productStockEntries).values({
+            productId,
+            warehouseId,
+            quantity: quantityChange,
+            remainingQuantity: quantityChange,
+            costPrice: String(costPrice || product?.costPrice || 0),
+            expiryDate: expiryDate || null,
+            status: 'active',
+            createdBy: userId || null,
+          });
+        }
+        return movementResult;
       })
     );
 
@@ -321,6 +346,13 @@ export class InventoryService {
         notes: notes || null,
         userId,
       });
+      await InventoryService.moveStockEntriesTx(tx, {
+        productId,
+        fromWarehouseId,
+        toWarehouseId,
+        quantity,
+        userId,
+      });
 
       alertBus.emit('alerts.changed', 'inventory.transferred');
       return { referenceId, out, in: incoming };
@@ -335,6 +367,77 @@ export class InventoryService {
     if (!warehouseId) throw new ValidationError('Sale must have a warehouseId for stock tracking');
     for (const item of items) {
       if (!item.productId) continue;
+      let need = Number(item.quantity) || 0;
+      const today = new Date().toISOString().slice(0, 10);
+      let entries = await tx
+        .select()
+        .from(productStockEntries)
+        .where(
+          and(
+            eq(productStockEntries.productId, item.productId),
+            eq(productStockEntries.warehouseId, warehouseId),
+            sql`${productStockEntries.remainingQuantity} > 0`
+          )
+        )
+        .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
+        .for('update');
+      if (entries.length === 0) {
+        const [legacy] = await tx
+          .select({ quantity: productStock.quantity, costPrice: products.costPrice })
+          .from(productStock)
+          .leftJoin(products, eq(productStock.productId, products.id))
+          .where(and(eq(productStock.productId, item.productId), eq(productStock.warehouseId, warehouseId)))
+          .limit(1)
+          .for('update');
+        if (legacy && Number(legacy.quantity) > 0) {
+          await tx.insert(productStockEntries).values({
+            productId: item.productId,
+            warehouseId,
+            quantity: Number(legacy.quantity),
+            remainingQuantity: Number(legacy.quantity),
+            costPrice: String(legacy.costPrice || 0),
+            expiryDate: null,
+            status: 'active',
+            createdBy: userId || null,
+          });
+          entries = await tx
+            .select()
+            .from(productStockEntries)
+            .where(and(eq(productStockEntries.productId, item.productId), eq(productStockEntries.warehouseId, warehouseId), sql`${productStockEntries.remainingQuantity} > 0`))
+            .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
+            .for('update');
+        }
+      }
+      for (const e of entries) {
+        if (need <= 0) break;
+        if (e.expiryDate && e.expiryDate < today) continue;
+        const take = Math.min(need, Number(e.remainingQuantity || 0));
+        if (take <= 0) continue;
+        const updated = await tx.execute(sql`
+          UPDATE product_stock_entries
+          SET remaining_quantity = remaining_quantity - ${take},
+              status = CASE WHEN (remaining_quantity - ${take}) <= 0 THEN 'depleted' ELSE 'active' END,
+              updated_at = now()
+          WHERE id = ${e.id}
+            AND remaining_quantity >= ${take}
+          RETURNING id, remaining_quantity
+        `);
+        const updatedRows = updated.rows ?? updated;
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new ValidationError('الكمية الصالحة للبيع غير كافية');
+        }
+        if (item.saleItemId) {
+          await tx.insert(saleItemStockEntries).values({
+            saleItemId: item.saleItemId,
+            productStockEntryId: e.id,
+            quantity: take,
+          });
+        }
+        need -= take;
+      }
+      if (need > 0) {
+        throw new ValidationError('لا توجد كمية صالحة للبيع لهذا المنتج');
+      }
       await applyStockChangeTx(tx, {
         productId: item.productId,
         warehouseId,
@@ -346,6 +449,36 @@ export class InventoryService {
         userId,
       });
     }
+  }
+
+  async getExpiryAlerts({ warehouseId, productId, status } = {}) {
+    const db = await getDb();
+    const rows = await db
+      .select({
+        id: productStockEntries.id,
+        productId: productStockEntries.productId,
+        productName: products.name,
+        warehouseId: productStockEntries.warehouseId,
+        warehouseName: warehouses.name,
+        branchId: warehouses.branchId,
+        branchName: branches.name,
+        remainingQuantity: productStockEntries.remainingQuantity,
+        expiryDate: productStockEntries.expiryDate,
+        costPrice: productStockEntries.costPrice,
+      })
+      .from(productStockEntries)
+      .leftJoin(products, eq(productStockEntries.productId, products.id))
+      .leftJoin(warehouses, eq(productStockEntries.warehouseId, warehouses.id))
+      .leftJoin(branches, eq(warehouses.branchId, branches.id));
+    const today = new Date(); today.setHours(0,0,0,0);
+    return rows
+      .filter((r) => (!warehouseId || r.warehouseId === warehouseId) && (!productId || r.productId === productId))
+      .map((r) => {
+        const days = r.expiryDate ? Math.floor((new Date(r.expiryDate) - today) / 86400000) : null;
+        const expiryStatus = r.expiryDate == null ? 'بدون تاريخ انتهاء' : days < 0 ? 'منتهي' : days <= 7 ? 'ينتهي خلال 7 أيام' : days <= 30 ? 'ينتهي خلال 30 يوم' : days <= 60 ? 'ينتهي خلال 60 يوم' : 'صالح';
+        return { ...r, daysUntilExpiry: days, status: expiryStatus };
+      })
+      .filter((r) => !status || r.status === status);
   }
 
   /** Restore stock from a cancelled or returned sale. */
@@ -368,6 +501,52 @@ export class InventoryService {
         allowNegative: true, // restoring never fails on availability
       });
     }
+  }
+
+  static async moveStockEntriesTx(tx, { productId, fromWarehouseId, toWarehouseId, quantity, userId }) {
+    let need = Number(quantity) || 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const entries = await tx
+      .select()
+      .from(productStockEntries)
+      .where(
+        and(
+          eq(productStockEntries.productId, productId),
+          eq(productStockEntries.warehouseId, fromWarehouseId),
+          sql`${productStockEntries.remainingQuantity} > 0`,
+          sql`(${productStockEntries.expiryDate} IS NULL OR ${productStockEntries.expiryDate} >= ${today})`,
+          sql`${productStockEntries.status} = 'active'`
+        )
+      )
+      .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
+      .for('update');
+    for (const e of entries) {
+      if (need <= 0) break;
+      const take = Math.min(need, Number(e.remainingQuantity) || 0);
+      if (take <= 0) continue;
+      const out = await tx.execute(sql`
+        UPDATE product_stock_entries
+        SET remaining_quantity = remaining_quantity - ${take},
+            status = CASE WHEN (remaining_quantity - ${take}) <= 0 THEN 'depleted' ELSE 'active' END,
+            updated_at = now()
+        WHERE id = ${e.id} AND remaining_quantity >= ${take}
+        RETURNING id
+      `);
+      const outRows = out.rows ?? out;
+      if (!outRows || outRows.length === 0) throw new ValidationError('Transfer quantity is no longer available');
+      await tx.insert(productStockEntries).values({
+        productId,
+        warehouseId: toWarehouseId,
+        quantity: take,
+        remainingQuantity: take,
+        costPrice: e.costPrice,
+        expiryDate: e.expiryDate || null,
+        status: 'active',
+        createdBy: userId || null,
+      });
+      need -= take;
+    }
+    if (need > 0) throw new ValidationError('Insufficient valid stock for transfer');
   }
 
   /** Return movements with optional filters and simple pagination. */

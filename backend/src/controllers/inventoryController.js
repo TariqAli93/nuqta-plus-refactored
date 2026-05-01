@@ -116,4 +116,15 @@ export class InventoryController {
     const data = await inventoryService.getLowStockProducts(warehouseId);
     return reply.send({ success: true, data });
   }
+
+  async getExpiryAlerts(request, reply) {
+    const { warehouseId, productId, status } = request.query || {};
+    if (warehouseId) await enforceWarehouseScope(request.user, Number(warehouseId));
+    const data = await inventoryService.getExpiryAlerts({
+      warehouseId: warehouseId ? Number(warehouseId) : undefined,
+      productId: productId ? Number(productId) : undefined,
+      status,
+    });
+    return reply.send({ success: true, data });
+  }
 }

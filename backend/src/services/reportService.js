@@ -6,6 +6,8 @@ import {
   customers,
   products,
   saleItems,
+  saleReturns,
+  saleReturnItems,
   productStock,
   warehouses,
   stockMovements,
@@ -79,6 +81,16 @@ export class ReportService {
         unpaidBalances: sql`COALESCE(SUM(CASE WHEN ${sales.status} <> 'cancelled' THEN ${sales.remainingAmount}::numeric ELSE 0 END),0)`,
       })
       .from(sales)
+      .where(and(...saleConds))
+      .groupBy(sales.currency);
+
+    const returnRows = await db
+      .select({
+        currency: sales.currency,
+        returnedValue: sql`COALESCE(SUM(${saleReturns.returnedValue}::numeric),0)`,
+      })
+      .from(saleReturns)
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
       .where(and(...saleConds))
       .groupBy(sales.currency);
 
@@ -222,6 +234,18 @@ export class ReportService {
       .where(and(...saleConds))
       .groupBy(sales.currency);
 
+    const returnedCogsRows = await db
+      .select({
+        currency: sales.currency,
+        returnedCogs: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)`,
+      })
+      .from(saleReturnItems)
+      .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(products, eq(saleReturnItems.productId, products.id))
+      .where(and(...saleConds))
+      .groupBy(sales.currency);
+
     // ── Expenses summary (used by netProfit + dedicated expense panels) ─────
     const expenseConds = [];
     if (from) expenseConds.push(gte(expenses.expenseDate, from));
@@ -276,6 +300,16 @@ export class ReportService {
       netSales: toNum(r.netSales), revenue: toNum(r.revenue), unpaidBalances: toNum(r.unpaidBalances),
     }]));
 
+    for (const r of returnRows) {
+      const key = r.currency;
+      summaryByCurrency[key] ??= {};
+      const returned = toNum(r.returnedValue);
+      summaryByCurrency[key].returnedValue = returned;
+      summaryByCurrency[key].sales = Math.max(0, toNum(summaryByCurrency[key].sales) - returned);
+      summaryByCurrency[key].netSales = Math.max(0, toNum(summaryByCurrency[key].netSales) - returned);
+      summaryByCurrency[key].revenue = Math.max(0, toNum(summaryByCurrency[key].revenue) - returned);
+    }
+
     for (const r of paymentRows) {
       const key = r.currency;
       summaryByCurrency[key] ??= {};
@@ -297,6 +331,14 @@ export class ReportService {
       const key = r.currency;
       summaryByCurrency[key] ??= {};
       summaryByCurrency[key].cogs = toNum(r.cogs);
+    }
+    for (const r of returnedCogsRows) {
+      const key = r.currency;
+      summaryByCurrency[key] ??= {};
+      summaryByCurrency[key].cogs = Math.max(
+        0,
+        toNum(summaryByCurrency[key].cogs) - toNum(r.returnedCogs)
+      );
     }
 
     const currencies = Object.keys(summaryByCurrency);

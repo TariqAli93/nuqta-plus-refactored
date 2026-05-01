@@ -82,6 +82,7 @@ export const products = pgTable('products', {
   minStock: integer('min_stock').default(0),
   unit: text('unit').default('piece'),
   supplier: text('supplier'),
+  tracksExpiry: boolean('tracks_expiry').notNull().default(false),
   status: text('status').notNull().default('available'),
   // Inventory: per-warehouse low-stock threshold. Falls back to minStock when null.
   lowStockThreshold: integer('low_stock_threshold').default(0),
@@ -90,6 +91,7 @@ export const products = pgTable('products', {
   updatedAt: timestamp('updated_at').defaultNow(),
   createdBy: integer('created_by').references(() => users.id),
 });
+
 
 // ── Branches ──────────────────────────────────────────────────────────────
 export const branches = pgTable('branches', {
@@ -138,6 +140,36 @@ export const productStock = pgTable(
     ),
   })
 );
+
+export const productStockEntries = pgTable(
+  'product_stock_entries',
+  {
+    id: serial('id').primaryKey(),
+    productId: integer('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    warehouseId: integer('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id, { onDelete: 'cascade' }),
+    quantity: integer('quantity').notNull(),
+    remainingQuantity: integer('remaining_quantity').notNull(),
+    costPrice: numeric('cost_price', { precision: 18, scale: 4 }).notNull(),
+    expiryDate: date('expiry_date'),
+    receivedAt: timestamp('received_at').defaultNow(),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+    createdBy: integer('created_by').references(() => users.id),
+  },
+  (t) => ({
+    productWarehouseIdx: index('product_stock_entries_product_warehouse_idx').on(
+      t.productId,
+      t.warehouseId
+    ),
+    expiryIdx: index('product_stock_entries_expiry_idx').on(t.expiryDate),
+  })
+);
+
 
 // ── Stock Movements ───────────────────────────────────────────────────────
 export const stockMovements = pgTable(
@@ -305,6 +337,25 @@ export const saleItems = pgTable('sale_items', {
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+export const saleItemStockEntries = pgTable(
+  'sale_item_stock_entries',
+  {
+    id: serial('id').primaryKey(),
+    saleItemId: integer('sale_item_id')
+      .notNull()
+      .references(() => saleItems.id, { onDelete: 'cascade' }),
+    productStockEntryId: integer('product_stock_entry_id')
+      .notNull()
+      .references(() => productStockEntries.id, { onDelete: 'cascade' }),
+    quantity: integer('quantity').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    saleItemIdx: index('sale_item_stock_entries_sale_item_idx').on(t.saleItemId),
+    stockEntryIdx: index('sale_item_stock_entries_stock_entry_idx').on(t.productStockEntryId),
+  })
+);
 
 // ── Payments ──────────────────────────────────────────────────────────────
 export const payments = pgTable('payments', {
