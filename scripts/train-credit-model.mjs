@@ -33,7 +33,8 @@
  *   pnpm run train:credit-model -- --window=90 --val=0.2
  */
 
-import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import protobuf from 'protobufjs';
@@ -111,9 +112,9 @@ async function loadFromDb() {
   return await loadSnapshotsForTraining();
 }
 
-function loadFromFile(path) {
+async function loadFromFile(path) {
   if (!existsSync(path)) throw new Error(`Dataset file not found: ${path}`);
-  const raw = readFileSync(path, 'utf8');
+  const raw = await readFile(path, 'utf8');
   if (path.endsWith('.csv')) {
     const [header, ...lines] = raw.trim().split(/\r?\n/);
     const cols = header.split(',');
@@ -137,6 +138,12 @@ function loadFromFile(path) {
     });
   }
   return JSON.parse(raw);
+}
+
+async function atomicWriteFile(targetPath, data) {
+  const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+  await writeFile(tmpPath, data);
+  await rename(tmpPath, targetPath);
 }
 
 // Time-based split: sort by snapshot_date and split at the (1-valFrac) quantile.
@@ -366,7 +373,7 @@ async function main() {
   try {
     if (args.dataset) {
       console.log(`[train] loading dataset from ${args.dataset}`);
-      rows = loadFromFile(args.dataset);
+      rows = await loadFromFile(args.dataset);
     } else {
       console.log('[train] loading dataset from credit_snapshots');
       rows = await loadFromDb();
@@ -444,19 +451,27 @@ async function main() {
   const root = await protobuf.load(PROTO_PATH);
   const bytes = buildOnnxModel(root, Array.from(w), b);
 
-  mkdirSync(dirname(MODEL_OUT), { recursive: true });
-  writeFileSync(MODEL_OUT, bytes);
-  console.log(`[train] wrote ${MODEL_OUT} (${bytes.byteLength} bytes)`);
+  await mkdir(dirname(MODEL_OUT), { recursive: true });
 
-  // Write meta sidecar
+  const trainedAt = new Date().toISOString();
   const meta = {
-    version: `2.0.0-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}`,
-    trained_at: new Date().toISOString(),
+    modelVersion: `2.0.0-${trainedAt.slice(0, 10).replaceAll('-', '')}`,
+    trainedAt,
     feature_order: FEATURE_ORDER,
+    featureNames: FEATURE_ORDER,
+    outputLabels: ['non_default', 'default'],
+    thresholdConfig: { low: 0.4, high: 0.7 },
     feature_ranges: RANGES,
+    outputLabelsLegacy: ['LOW', 'MEDIUM', 'HIGH'],
     metrics: {
       train: trainMetrics,
       val: { ...valMetrics, auc },
+    },
+    trainingSummary: {
+      epochs: EPOCHS,
+      learningRate: LEARNING_RATE,
+      l2: L2,
+      positiveClassWeight: posWeight,
     },
     dataset: {
       n: rows.length,
@@ -469,7 +484,19 @@ async function main() {
     weights: Array.from(w),
     bias: b,
   };
-  writeFileSync(META_OUT, JSON.stringify(meta, null, 2));
+  meta.version = meta.modelVersion;
+  meta.trained_at = meta.trainedAt;
+
+  try {
+    await atomicWriteFile(MODEL_OUT, bytes);
+    await atomicWriteFile(META_OUT, JSON.stringify(meta, null, 2));
+  } catch (err) {
+    await rm(MODEL_OUT, { force: true });
+    await rm(META_OUT, { force: true });
+    throw new Error(`failed to write model artifacts atomically: ${err.message}`);
+  }
+
+  console.log(`[train] wrote ${MODEL_OUT} (${bytes.byteLength} bytes)`);
   console.log(`[train] wrote ${META_OUT}`);
 }
 

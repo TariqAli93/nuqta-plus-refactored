@@ -44,6 +44,7 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv);
+const modelRequired = process.env.CREDIT_MODEL_REQUIRED !== 'false';
 
 // Server build output (matches electron-builder.yml `directories.output`).
 const RELEASE_DIR = args.release
@@ -97,8 +98,13 @@ if (!fs.existsSync(PACKAGED_BACKEND)) {
   process.exit(1);
 }
 
-const modelOk = checkFile('credit-score.onnx', MODEL_PATH);
-const metaPresent = checkFile('credit-score.meta.json', META_PATH);
+const modelOk = checkFile('credit-score.onnx', MODEL_PATH, { mustBeNonEmpty: modelRequired });
+const metaPresent = checkFile('credit-score.meta.json', META_PATH, { mustBeNonEmpty: modelRequired });
+
+if (!modelRequired && (!modelOk || !metaPresent)) {
+  console.warn('[verify-credit-model] ⚠ CREDIT_MODEL_REQUIRED=false; missing model artifacts allowed (runtime uses RULES_ONLY fallback)');
+  process.exit(0);
+}
 
 if (metaPresent) {
   let meta;
@@ -112,12 +118,13 @@ if (metaPresent) {
     if (typeof meta !== 'object' || Array.isArray(meta)) {
       fail('credit-score.meta.json is not an object');
     } else {
-      if (!Array.isArray(meta.feature_order) || meta.feature_order.length === 0) {
-        fail('credit-score.meta.json missing required field: feature_order (non-empty array)');
+      const featureNames = meta.featureNames ?? meta.feature_order;
+      if (!Array.isArray(featureNames) || featureNames.length === 0) {
+        fail('credit-score.meta.json missing required field: featureNames (non-empty array)');
       } else {
-        ok(`feature_order has ${meta.feature_order.length} entries`);
+        ok(`featureNames has ${featureNames.length} entries`);
       }
-      const version = meta.version ?? meta.model_version;
+      const version = meta.modelVersion ?? meta.version ?? meta.model_version;
       if (!version || typeof version !== 'string') {
         fail('credit-score.meta.json missing required field: version (or model_version)');
       } else {

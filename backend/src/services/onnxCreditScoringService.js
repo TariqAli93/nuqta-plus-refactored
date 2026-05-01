@@ -105,6 +105,13 @@ let resolvedMetaPath = null;
 let featureOrder = DEFAULT_FEATURE_ORDER;
 let featureRanges = DEFAULT_RANGES;
 let modelVersion = 'rules-only';
+let fallbackLogged = false;
+
+function logFallback(reason) {
+  if (fallbackLogged) return;
+  fallbackLogged = true;
+  console.warn(`[onnx] fallback mode enabled (RULES_ONLY): ${reason}`);
+}
 
 // ── Public API ───────────────────────────────────────────────────────────
 
@@ -130,6 +137,7 @@ export async function initCreditScoreModel() {
   featureOrder = [...DEFAULT_FEATURE_ORDER];
   featureRanges = { ...DEFAULT_RANGES };
   modelVersion = 'rules-only';
+  fallbackLogged = false;
 
   // 1. Resolve + validate paths and meta cross-check before touching ORT.
   const artifacts = resolveCreditModelArtifacts(DEFAULT_FEATURE_ORDER);
@@ -138,25 +146,29 @@ export async function initCreditScoreModel() {
 
   if (artifacts.model.status !== 'found') {
     initError = `model file ${artifacts.model.status}: ${artifacts.model.reason ?? 'unknown'}`;
-    console.warn(`[onnx] ${initError} — falling back to RULES_ONLY`);
+    logFallback(initError);
     return false;
   }
   if (artifacts.meta.status !== 'found') {
     initError = `meta file ${artifacts.meta.status}: ${artifacts.meta.reason ?? 'unknown'}`;
-    console.warn(`[onnx] ${initError} — falling back to RULES_ONLY`);
+    logFallback(initError);
     return false;
   }
 
   // 2. Apply meta — feature_order has already been cross-checked by the resolver.
   const meta = artifacts.meta.meta;
   modelMeta = meta;
-  if (Array.isArray(meta.feature_order) && meta.feature_order.length) {
+  if (Array.isArray(meta.featureNames) && meta.featureNames.length) {
+    featureOrder = [...meta.featureNames];
+  } else if (Array.isArray(meta.feature_order) && meta.feature_order.length) {
     featureOrder = [...meta.feature_order];
   }
   if (meta.feature_ranges && typeof meta.feature_ranges === 'object') {
     featureRanges = { ...DEFAULT_RANGES, ...meta.feature_ranges };
   }
-  if (typeof meta.version === 'string' && meta.version.length) {
+  if (typeof meta.modelVersion === 'string' && meta.modelVersion.length) {
+    modelVersion = meta.modelVersion;
+  } else if (typeof meta.version === 'string' && meta.version.length) {
     modelVersion = meta.version;
   }
 
@@ -166,7 +178,7 @@ export async function initCreditScoreModel() {
     ort = mod.default ?? mod;
   } catch (err) {
     initError = `onnxruntime-node not installed: ${err.message}`;
-    console.warn(`[onnx] ${initError} — falling back to RULES_ONLY`);
+    logFallback(initError);
     return false;
   }
 
@@ -177,7 +189,7 @@ export async function initCreditScoreModel() {
     });
   } catch (err) {
     initError = `failed to create ONNX session: ${err.message}`;
-    console.error(`[onnx] ${initError} — falling back to RULES_ONLY`);
+    logFallback(initError);
     session = null;
     return false;
   }
