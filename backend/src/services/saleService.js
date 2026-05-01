@@ -1357,6 +1357,9 @@ export class SaleService {
         priorByItemId.set(it.saleItemId, (priorByItemId.get(it.saleItemId) || 0) + it.quantity);
       }
     }
+    // Snapshot of quantities returned before this request. Used later to
+    // restore stock-entry quantities without mutating sale_item_stock_entries.
+    const previouslyReturnedByItem = new Map(priorByItemId);
 
     // Resolve every requested return item against the original sale's items.
     // We accept either saleItemId (preferred) or productId for callers that
@@ -1552,6 +1555,10 @@ export class SaleService {
         for (const it of resolvedItems) {
           if (!it.saleItem?.id || !it.saleItem?.productId) continue;
           let remaining = Number(it.quantity) || 0;
+          const previousReturned = Number(previouslyReturnedByItem.get(it.saleItem.id) || 0);
+          const restoreWindowStart = Math.max(0, previousReturned);
+          const restoreWindowEnd = Math.max(restoreWindowStart, previousReturned + remaining);
+          let traceCursor = 0;
           const traces = await tx
             .select({
               id: saleItemStockEntries.id,
@@ -1564,7 +1571,13 @@ export class SaleService {
             .for('update');
           for (const tr of traces) {
             if (remaining <= 0) break;
-            const giveBack = Math.min(remaining, Number(tr.quantity) || 0);
+            const traceQty = Number(tr.quantity) || 0;
+            const traceStart = traceCursor;
+            const traceEnd = traceCursor + traceQty;
+            traceCursor = traceEnd;
+            const overlapStart = Math.max(restoreWindowStart, traceStart);
+            const overlapEnd = Math.min(restoreWindowEnd, traceEnd);
+            const giveBack = Math.max(0, overlapEnd - overlapStart);
             if (giveBack <= 0) continue;
             await tx.execute(sql`
               UPDATE product_stock_entries
@@ -1574,10 +1587,6 @@ export class SaleService {
               WHERE id = ${tr.stockEntryId}
                 AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE)
             `);
-            await tx
-              .update(saleItemStockEntries)
-              .set({ quantity: Number(tr.quantity) - giveBack })
-              .where(eq(saleItemStockEntries.id, tr.id));
             remaining -= giveBack;
           }
           if (remaining > 0) {
