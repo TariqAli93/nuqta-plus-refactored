@@ -124,17 +124,17 @@ function verifyCreditModelArtifacts() {
 
   // Allow opt-out only when explicitly building a no-model image (e.g. for
   // CI smoke tests). Production builds MUST have both artifacts.
-  const optOut = process.env.SKIP_CREDIT_MODEL_CHECK === 'true';
+  const modelRequired = process.env.CREDIT_MODEL_REQUIRED !== 'false';
+  const expectedModel = path.relative(ROOT, modelPath);
+  const expectedMeta = path.relative(ROOT, metaPath);
 
   if (!fs.existsSync(modelPath)) {
-    if (optOut) {
-      warn(`SKIP_CREDIT_MODEL_CHECK=true — shipping without ${path.relative(ROOT, modelPath)}`);
+    if (!modelRequired) {
+      warn(`CREDIT_MODEL_REQUIRED=false — shipping without ${expectedModel}`);
       return;
     }
     fail(
-      `credit-score.onnx is missing at ${path.relative(ROOT, modelPath)}.\n` +
-        '  Run `pnpm run train:credit-model` (after exporting a dataset) ' +
-        'before building. Set SKIP_CREDIT_MODEL_CHECK=true to bypass for CI.'
+      `Missing credit scoring model files.\nRun:\npnpm run train:credit-model\nExpected:\n- ${expectedModel}\n- ${expectedMeta}`
     );
   }
   if (fs.statSync(modelPath).size === 0) {
@@ -142,13 +142,12 @@ function verifyCreditModelArtifacts() {
   }
 
   if (!fs.existsSync(metaPath)) {
-    if (optOut) {
-      warn(`SKIP_CREDIT_MODEL_CHECK=true — shipping without ${path.relative(ROOT, metaPath)}`);
+    if (!modelRequired) {
+      warn(`CREDIT_MODEL_REQUIRED=false — shipping without ${expectedMeta}`);
       return;
     }
     fail(
-      `credit-score.meta.json is missing at ${path.relative(ROOT, metaPath)}.\n` +
-        '  The training script writes both files together — re-run train:credit-model.'
+      `Missing credit scoring model files.\nRun:\npnpm run train:credit-model\nExpected:\n- ${expectedModel}\n- ${expectedMeta}`
     );
   }
 
@@ -161,16 +160,16 @@ function verifyCreditModelArtifacts() {
   if (!meta || typeof meta !== 'object') {
     fail('credit-score.meta.json is not an object');
   }
-  if (!Array.isArray(meta.feature_order) || meta.feature_order.length === 0) {
-    fail('credit-score.meta.json missing required field: feature_order');
+  if (!Array.isArray(meta.featureNames) || meta.featureNames.length === 0) {
+    fail('credit-score.meta.json missing required field: featureNames');
   }
-  if (!meta.version && !meta.model_version) {
-    fail('credit-score.meta.json missing required field: version');
+  if (!meta.modelVersion) {
+    fail('credit-score.meta.json missing required field: modelVersion');
   }
 
   log(
-    `✓ credit-risk model artifacts present (version=${meta.version ?? meta.model_version}, ` +
-      `features=${meta.feature_order.length})`
+    `✓ credit-risk model artifacts present (version=${meta.modelVersion}, ` +
+      `features=${meta.featureNames.length})`
   );
 }
 

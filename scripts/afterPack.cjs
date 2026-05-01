@@ -59,6 +59,7 @@ const REQUIRED_AFTER_COPY = [
   // missing, but a server installer that omits them is a packaging bug.
   'models/credit-score.onnx',
   'models/credit-score.meta.json',
+  'node_modules/onnxruntime-node/package.json',
 
   // ── Windows Service host (WinSW) ──────────────────────────────────────
   'NuqtaPlusBackend.exe',
@@ -85,6 +86,7 @@ exports.default = async function afterPack(context) {
 
   // packager.projectDir === <repo>/frontend (electron-builder runs in frontend/)
   const repoRoot = path.resolve(packager.projectDir, '..');
+  const modelRequired = process.env.CREDIT_MODEL_REQUIRED !== 'false';
   const distBackend = path.join(repoRoot, 'dist-backend');
   const target = path.join(appOutDir, 'resources', 'backend');
 
@@ -135,8 +137,13 @@ exports.default = async function afterPack(context) {
 
   // ── Post-copy verification ─────────────────────────────────────────────
   // Fail the build if anything required for PostgreSQL-based runtime is missing.
+  const requiredAfterCopy = modelRequired
+    ? REQUIRED_AFTER_COPY
+    : REQUIRED_AFTER_COPY.filter(
+        (p) => p !== 'models/credit-score.onnx' && p !== 'models/credit-score.meta.json'
+      );
   const missing = [];
-  for (const rel of REQUIRED_AFTER_COPY) {
+  for (const rel of requiredAfterCopy) {
     const abs = path.join(target, rel);
     if (!fs.existsSync(abs)) {
       missing.push(rel);
@@ -156,21 +163,26 @@ exports.default = async function afterPack(context) {
   console.log(
     `[afterPack] ONNX runtime: ${ortPackaged ? '✓ present' : '– not present (rule-based fallback)'}`
   );
+  if (!modelRequired) {
+    console.warn('[afterPack] CREDIT_MODEL_REQUIRED=false — packaged runtime will use rule-based fallback if model is absent');
+    return;
+  }
 
   // Cross-check the meta sidecar shape so a stale or corrupt file fails the
   // build right here, not at customer install time.
   try {
     const metaAbs = path.join(target, 'models', 'credit-score.meta.json');
     const meta = JSON.parse(fs.readFileSync(metaAbs, 'utf8'));
-    if (!Array.isArray(meta.feature_order) || !meta.feature_order.length) {
-      throw new Error('feature_order missing or empty');
+    const featureNames = meta.featureNames ?? meta.feature_order;
+    if (!Array.isArray(featureNames) || !featureNames.length) {
+      throw new Error('featureNames missing or empty');
     }
-    if (!meta.version && !meta.model_version) {
-      throw new Error('version missing');
+    if (!meta.modelVersion && !meta.version) {
+      throw new Error('modelVersion missing');
     }
     console.log(
-      `[afterPack] credit-score model: ✓ version=${meta.version ?? meta.model_version} ` +
-        `features=${meta.feature_order.length}`
+      `[afterPack] credit-score model: ✓ version=${meta.modelVersion ?? meta.version} ` +
+        `features=${featureNames.length}`
     );
   } catch (err) {
     throw new Error(

@@ -239,10 +239,10 @@ export function resolveCreditModelArtifacts(expectedFeatureOrder = null) {
   if (
     Array.isArray(expectedFeatureOrder) &&
     meta.status === 'found' &&
-    Array.isArray(meta.meta?.feature_order)
+    (Array.isArray(meta.meta?.featureNames) || Array.isArray(meta.meta?.feature_order))
   ) {
     const a = expectedFeatureOrder.join(',');
-    const b = meta.meta.feature_order.join(',');
+    const b = (meta.meta.featureNames ?? meta.meta.feature_order).join(',');
     if (a !== b) {
       meta.status = 'invalid';
       meta.reason = `feature_order mismatch (expected [${a}], got [${b}])`;
