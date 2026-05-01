@@ -1407,7 +1407,7 @@ export class SaleService {
       const remainingQty = target.quantity - prior;
       if (qty > remainingQty) {
         throw new ValidationError(
-          `Cannot return ${qty} of "${target.productName}" — only ${remainingQty} remain returnable`
+          'لا يمكن استرجاع كمية أكبر من الكمية المباعة أو الكمية المتبقية للاسترجاع'
         );
       }
 
@@ -1615,7 +1615,10 @@ export class SaleService {
         Math.max(0, sale.remainingAmount - debtReduction),
         currency
       );
-      const newStatus = newRemainingAmount <= 0 ? 'completed' : sale.status;
+      const fullReturned = priorReturnedTotal + returnedValue >= sale.total - tolerance;
+      const newStatus = fullReturned
+        ? 'returned'
+        : (priorReturnedTotal + returnedValue > 0 ? 'partially_returned' : (newRemainingAmount <= 0 ? 'completed' : sale.status));
       await tx
         .update(sales)
         .set({
