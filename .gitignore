@@ -1,5 +1,6 @@
 dist-backend/
 frontend/dist-electron/
+frontend/dist/
 release/
 release-client/
 node_modules
