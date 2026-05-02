@@ -410,7 +410,9 @@
                   {{ formatMoney(Math.max(0, item.price - item.discount), currency) }}
                 </span>
                 <span class="line__sep">·</span>
-                <span class="line__unit-label">{{ item.unitName || 'للوحدة' }}</span>
+                <span class="line__unit-label">
+                  {{ item.unitName ? `سعر ${item.unitName}` : 'للوحدة' }}
+                </span>
                 <v-menu
                   v-if="item.units && item.units.length > 1"
                   location="bottom start"
@@ -419,13 +421,13 @@
                     <v-btn
                       v-bind="menuProps"
                       size="x-small"
-                      variant="text"
+                      variant="tonal"
                       color="primary"
                       class="line__unit-picker"
                       @click.stop
                     >
                       <v-icon size="14" start>mdi-swap-horizontal</v-icon>
-                      تغيير الوحدة
+                      {{ item.unitName || 'الوحدة' }}
                     </v-btn>
                   </template>
                   <v-list density="compact">
@@ -433,6 +435,7 @@
                       v-for="u in item.units"
                       :key="u.id"
                       :active="u.id === item.unitId"
+                      :disabled="u.isActive === false"
                       @click="updateLineUnit(item.id, u.id)"
                     >
                       <v-list-item-title>

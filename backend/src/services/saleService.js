@@ -481,6 +481,12 @@ export class SaleService {
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
+        // Snapshot the per-unit cost so reports stay correct after the
+        // catalog's unit cost changes. Override → that override; otherwise
+        // base cost × factor.
+        const baseCost = Number(product.costPrice) || 0;
+        const perUnitCost = unit.costPrice != null ? Number(unit.costPrice) : baseCost * unit.conversionFactor;
+
         const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: newSale.id,
           productId: item.productId,
@@ -493,6 +499,7 @@ export class SaleService {
           unitName: unit.name,
           unitConversionFactor: String(unit.conversionFactor),
           baseQuantity: baseQty,
+          unitCostPrice: String(perUnitCost || 0),
         }).returning({ id: saleItems.id });
 
         stockItems.push({
@@ -756,6 +763,9 @@ export class SaleService {
         unitName: saleItems.unitName,
         unitConversionFactor: saleItems.unitConversionFactor,
         baseQuantity: saleItems.baseQuantity,
+        // Frozen per-unit cost (NULL on legacy rows — falls back to current
+        // products.cost_price * baseQuantity).
+        unitCostPrice: saleItems.unitCostPrice,
         // Profit visibility — uses the product's current cost_price. Returns
         // null when the product was deleted so the UI can render "n/a".
         costPrice: products.costPrice,
@@ -780,19 +790,22 @@ export class SaleService {
     // Compute per-item + sale-level profit. profit=null on any item with a
     // missing cost (deleted product) so the UI can show "n/a" instead of
     // a misleading number. The sale-level total is null in that case too.
-    // Profit uses BASE quantity * BASE cost so unit-aware sales (2 درزن = 24
-    // قطعة) compute profit against the per-piece cost in `products.cost_price`.
-    // Legacy rows have baseQuantity = quantity / conversionFactor = 1 so the
-    // math still resolves correctly.
+    // Profit prefers the per-unit cost frozen at sale time (so reports stay
+    // correct even if the catalog's unit cost is changed later). Falls back
+    // to the product's current base cost × baseQuantity for legacy rows
+    // recorded before the unit-cost snapshot column existed.
     const enrichedItems = items.map((item) => {
-      const cost = item.costPrice == null ? null : Number(item.costPrice);
+      const baseCost = item.costPrice == null ? null : Number(item.costPrice);
       const qty = Number(item.quantity) || 0;
       const factor = Number(item.unitConversionFactor) || 1;
       const baseQty = Number(item.baseQuantity) || qty * factor;
-      const profit =
-        cost == null
-          ? null
-          : Number(item.unitPrice) * qty - n(item.discount) - cost * baseQty;
+      const unitCost = item.unitCostPrice == null ? null : Number(item.unitCostPrice);
+      let profit = null;
+      if (unitCost != null) {
+        profit = Number(item.unitPrice) * qty - n(item.discount) - unitCost * qty;
+      } else if (baseCost != null) {
+        profit = Number(item.unitPrice) * qty - n(item.discount) - baseCost * baseQty;
+      }
       return {
         ...item,
         unitPrice: n(item.unitPrice),
@@ -800,7 +813,8 @@ export class SaleService {
         subtotal: n(item.subtotal),
         unitConversionFactor: factor,
         baseQuantity: baseQty,
-        costPrice: cost,
+        unitCostPrice: unitCost,
+        costPrice: baseCost,
         profit,
       };
     });
@@ -1075,6 +1089,7 @@ export class SaleService {
           subtotal: saleItems.subtotal,
           unitConversionFactor: saleItems.unitConversionFactor,
           baseQuantity: saleItems.baseQuantity,
+          unitCostPrice: saleItems.unitCostPrice,
           productId: saleItems.productId,
           productCost: products.costPrice,
           currency: sales.currency,
@@ -1124,11 +1139,15 @@ export class SaleService {
       const factor = Number(item.unitConversionFactor) || 1;
       const baseQty = Number(item.baseQuantity) || item.quantity * factor;
       const lineRevenue = n(item.unitPrice) * item.quantity - itemDiscount;
-      const costPrice = n(item.productCost);
-      // Cost is per BASE unit; revenue is per selected unit. Multiply the
-      // cost by the base quantity to keep profit accurate when a customer
-      // buys 2 درزن (24 قطعة) for less per piece than the carton price.
-      const profit = lineRevenue - costPrice * baseQty;
+      // Prefer the snapshotted per-unit cost so a unit-cost override
+      // remains in effect for historical sales after a catalog edit. Falls
+      // back to the product's current base cost × baseQuantity (the
+      // legacy/no-snapshot path).
+      const unitCost = item.unitCostPrice == null ? null : Number(item.unitCostPrice);
+      const baseCost = n(item.productCost);
+      const profit = unitCost != null
+        ? lineRevenue - unitCost * item.quantity
+        : lineRevenue - baseCost * baseQty;
       if (byCur[c]) byCur[c].totalProfit += profit;
     }
 
@@ -2055,6 +2074,12 @@ export class SaleService {
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
+        // Snapshot per-unit cost so completed-draft sales record the same
+        // information a normal create() flow does — keeps profit reports
+        // accurate and immune to later catalog edits.
+        const baseCost = Number(product.costPrice) || 0;
+        const perUnitCost = unit.costPrice != null ? Number(unit.costPrice) : baseCost * unit.conversionFactor;
+
         const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: updatedSale.id,
           productId: item.productId,
@@ -2067,6 +2092,7 @@ export class SaleService {
           unitName: unit.name,
           unitConversionFactor: String(unit.conversionFactor),
           baseQuantity: baseQty,
+          unitCostPrice: String(perUnitCost || 0),
         }).returning({ id: saleItems.id });
 
         stockItems.push({

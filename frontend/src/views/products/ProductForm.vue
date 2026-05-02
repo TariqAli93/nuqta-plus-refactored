@@ -203,7 +203,7 @@
                 </div>
                 <div class="text-caption text-medium-emphasis mb-3">
                   يتم حفظ المخزون داخلياً حسب الوحدة الأساسية. أضف وحدات إضافية مثل
-                  درزن أو كارتون لتسهيل البيع والاستلام.
+                  <strong>درزن</strong> أو <strong>كارتون</strong> لتسهيل البيع والاستلام.
                 </div>
 
                 <v-row dense>
@@ -214,19 +214,45 @@
                       placeholder="قطعة"
                       variant="outlined"
                       density="comfortable"
+                      hint="مثال: قطعة، علبة، متر، كيلو، لتر"
+                      persistent-hint
                       :rules="[rules.required]"
                     />
+                  </v-col>
+                  <v-col cols="12" md="8" class="d-flex align-center">
+                    <div class="text-caption text-medium-emphasis">
+                      الوحدة الأساسية هي الوحدة التي يُحسب بها المخزون.
+                      السعر الافتراضي للوحدة الأساسية هو <strong>{{ formatNumber(formData.sellingPrice) }} {{ formData.currency }}</strong>.
+                    </div>
                   </v-col>
                 </v-row>
 
                 <v-divider class="my-3" />
 
-                <div class="text-subtitle-2 mb-2">وحدات إضافية</div>
+                <div class="d-flex align-center justify-space-between mb-2">
+                  <div class="text-subtitle-2">وحدات إضافية</div>
+                  <v-btn
+                    prepend-icon="mdi-plus"
+                    variant="tonal"
+                    color="primary"
+                    size="small"
+                    @click="addUnit"
+                  >
+                    إضافة وحدة
+                  </v-btn>
+                </div>
+
                 <div v-if="extraUnits.length === 0" class="text-caption text-medium-emphasis mb-3">
                   لا توجد وحدات إضافية. اضغط "إضافة وحدة" لتعريف درزن أو كارتون.
                 </div>
 
-                <div v-for="(u, idx) in extraUnits" :key="`u-${idx}`" class="mb-3">
+                <v-card
+                  v-for="(u, idx) in extraUnits"
+                  :key="`u-${idx}`"
+                  variant="tonal"
+                  color="surface"
+                  class="mb-3 pa-3"
+                >
                   <v-row dense align="center">
                     <v-col cols="12" md="3">
                       <v-text-field
@@ -235,39 +261,43 @@
                         placeholder="درزن"
                         variant="outlined"
                         density="comfortable"
+                        :error-messages="unitNameError(idx)"
                       />
                     </v-col>
                     <v-col cols="6" md="2">
                       <v-text-field
                         v-model.number="u.conversionFactor"
-                        label="يعادل كم"
+                        :label="`يعادل كم ${baseUnit.name || 'قطعة'}؟`"
                         :suffix="baseUnit.name || 'قطعة'"
                         type="number"
                         min="1"
                         variant="outlined"
                         density="comfortable"
-                        :hint="`يعادل كم ${baseUnit.name || 'قطعة'}؟`"
-                        persistent-hint
+                        :error-messages="unitFactorError(u)"
                       />
                     </v-col>
                     <v-col cols="6" md="2">
                       <v-text-field
                         v-model.number="u.salePrice"
-                        label="سعر البيع للوحدة"
+                        label="سعر البيع لهذه الوحدة"
                         type="number"
                         min="0"
                         variant="outlined"
                         density="comfortable"
+                        :hint="suggestedSalePrice(u)"
+                        persistent-hint
                       />
                     </v-col>
                     <v-col cols="6" md="2">
                       <v-text-field
                         v-model.number="u.costPrice"
-                        label="سعر الكلفة للوحدة"
+                        label="سعر الكلفة لهذه الوحدة"
                         type="number"
                         min="0"
                         variant="outlined"
                         density="comfortable"
+                        hint="اختياري"
+                        persistent-hint
                       />
                     </v-col>
                     <v-col cols="6" md="2">
@@ -276,6 +306,8 @@
                         label="الباركود"
                         variant="outlined"
                         density="comfortable"
+                        hint="اختياري"
+                        persistent-hint
                       />
                     </v-col>
                     <v-col cols="12" md="1" class="d-flex justify-end">
@@ -289,17 +321,39 @@
                       />
                     </v-col>
                   </v-row>
-                </div>
-
-                <v-btn
-                  prepend-icon="mdi-plus"
-                  variant="tonal"
-                  color="primary"
-                  size="small"
-                  @click="addUnit"
-                >
-                  إضافة وحدة
-                </v-btn>
+                  <v-row dense class="mt-1">
+                    <v-col cols="12" sm="4">
+                      <v-checkbox
+                        v-model="u.isDefaultSale"
+                        density="compact"
+                        hide-details
+                        color="primary"
+                        label="افتراضي للبيع"
+                        @update:model-value="(v) => onDefaultSaleToggle(idx, v)"
+                      />
+                    </v-col>
+                    <v-col cols="12" sm="4">
+                      <v-checkbox
+                        v-model="u.isDefaultPurchase"
+                        density="compact"
+                        hide-details
+                        color="primary"
+                        label="افتراضي للشراء"
+                        @update:model-value="(v) => onDefaultPurchaseToggle(idx, v)"
+                      />
+                    </v-col>
+                    <v-col cols="12" sm="4">
+                      <v-switch
+                        v-model="u.isActive"
+                        density="compact"
+                        hide-details
+                        inset
+                        color="success"
+                        :label="u.isActive ? 'نشط' : 'غير نشط'"
+                      />
+                    </v-col>
+                  </v-row>
+                </v-card>
               </v-card>
             </v-col>
             <v-col v-if="!isEdit" cols="12">
@@ -463,7 +517,12 @@ const formData = ref({
 // conversionFactor. The form keeps them as separate refs so the UI stays
 // simple; on submit we merge them into a single `units` array on the
 // payload.
-const baseUnit = ref({ id: null, name: 'قطعة' });
+const baseUnit = ref({
+  id: null,
+  name: 'قطعة',
+  isDefaultSale: true,
+  isDefaultPurchase: true,
+});
 const extraUnits = ref([]);
 
 const addUnit = () => {
@@ -474,11 +533,70 @@ const addUnit = () => {
     salePrice: null,
     costPrice: null,
     barcode: '',
+    isDefaultSale: false,
+    isDefaultPurchase: false,
+    isActive: true,
   });
 };
 
 const removeUnit = (idx) => {
   extraUnits.value.splice(idx, 1);
+};
+
+// Mark exactly one unit as default sale. Toggling another row off-and-on
+// transfers the flag (mirrors the UX users expect from radio-style defaults
+// without giving up the convenience of a checkbox per row).
+const onDefaultSaleToggle = (idx, value) => {
+  if (!value) return;
+  baseUnit.value.isDefaultSale = false;
+  extraUnits.value.forEach((u, i) => {
+    if (i !== idx) u.isDefaultSale = false;
+  });
+};
+const onDefaultPurchaseToggle = (idx, value) => {
+  if (!value) return;
+  baseUnit.value.isDefaultPurchase = false;
+  extraUnits.value.forEach((u, i) => {
+    if (i !== idx) u.isDefaultPurchase = false;
+  });
+};
+
+// Per-row validation surfaced inline so the user sees the error next to
+// the field — keeps the form's submit button enabled but blocks save when
+// the form is invalid.
+const unitNameError = (idx) => {
+  const u = extraUnits.value[idx];
+  if (!u) return [];
+  const name = String(u.name || '').trim();
+  if (!name) return [];
+  if (name === String(baseUnit.value.name || '').trim()) {
+    return ['اسم الوحدة لا يجوز أن يساوي الوحدة الأساسية'];
+  }
+  const dup = extraUnits.value.some(
+    (other, i) => i !== idx && String(other.name || '').trim() === name
+  );
+  if (dup) return ['اسم الوحدة مكرر'];
+  return [];
+};
+
+const unitFactorError = (u) => {
+  if (u?.conversionFactor === null || u?.conversionFactor === undefined || u?.conversionFactor === '') {
+    return [];
+  }
+  const factor = Number(u.conversionFactor);
+  if (!Number.isFinite(factor) || factor <= 0) return ['يجب أن يكون أكبر من صفر'];
+  if (factor === 1) return ['عامل التحويل = 1 محجوز للوحدة الأساسية'];
+  return [];
+};
+
+// Hint shown under the salePrice field — the price the user would get if
+// they let the system fall back to base * factor.
+const suggestedSalePrice = (u) => {
+  const factor = Number(u?.conversionFactor) || 0;
+  const base = Number(formData.value.sellingPrice) || 0;
+  if (!factor || !base) return '';
+  if (u?.salePrice != null && u?.salePrice !== '') return '';
+  return `الافتراضي: ${formatNumber(base * factor)} ${formData.value.currency}`;
 };
 
 const buildUnitsPayload = () => {
@@ -489,8 +607,9 @@ const buildUnitsPayload = () => {
     name: baseName,
     conversionFactor: 1,
     isBase: true,
-    isDefaultSale: true,
-    isDefaultPurchase: true,
+    isDefaultSale: !!baseUnit.value.isDefaultSale,
+    isDefaultPurchase: !!baseUnit.value.isDefaultPurchase,
+    isActive: true,
   });
   for (const u of extraUnits.value) {
     const name = String(u.name || '').trim();
@@ -501,6 +620,9 @@ const buildUnitsPayload = () => {
       name,
       conversionFactor: factor,
       isBase: false,
+      isDefaultSale: !!u.isDefaultSale,
+      isDefaultPurchase: !!u.isDefaultPurchase,
+      isActive: u.isActive !== false,
       barcode: u.barcode ? String(u.barcode).trim() : null,
       salePrice:
         u.salePrice === '' || u.salePrice === null || u.salePrice === undefined
@@ -512,6 +634,10 @@ const buildUnitsPayload = () => {
           : Number(u.costPrice),
     });
   }
+  // Backstop: if the user didn't tick any "افتراضي للبيع/الشراء", make the
+  // base unit the default for both so the backend never rejects the payload.
+  if (!list.some((u) => u.isDefaultSale)) list[0].isDefaultSale = true;
+  if (!list.some((u) => u.isDefaultPurchase)) list[0].isDefaultPurchase = true;
   return list;
 };
 
@@ -619,6 +745,20 @@ const regenerateSKU = () => {
 const handleSubmit = async () => {
   const { valid } = await form.value.validate();
   if (!valid) return;
+
+  // Inline validation for the units section — keeps the user in the form
+  // with a precise error rather than the generic "حقل مطلوب" toast.
+  for (let i = 0; i < extraUnits.value.length; i++) {
+    if (unitNameError(i).length > 0) {
+      notification.error('راجع وحدات المنتج: ' + unitNameError(i)[0]);
+      return;
+    }
+    const fe = unitFactorError(extraUnits.value[i]);
+    if (fe.length > 0) {
+      notification.error('راجع وحدات المنتج: ' + fe[0]);
+      return;
+    }
+  }
 
   loading.value = true;
   try {
@@ -894,7 +1034,12 @@ onMounted(async () => {
       // come back with no units; we leave the default base unit in place.
       if (Array.isArray(loadedUnits) && loadedUnits.length > 0) {
         const base = loadedUnits.find((u) => u.isBase) || loadedUnits[0];
-        baseUnit.value = { id: base.id, name: base.name || 'قطعة' };
+        baseUnit.value = {
+          id: base.id,
+          name: base.name || 'قطعة',
+          isDefaultSale: !!base.isDefaultSale,
+          isDefaultPurchase: !!base.isDefaultPurchase,
+        };
         extraUnits.value = loadedUnits
           .filter((u) => !u.isBase && u.id !== base.id)
           .map((u) => ({
@@ -904,6 +1049,9 @@ onMounted(async () => {
             salePrice: u.salePrice == null ? null : Number(u.salePrice),
             costPrice: u.costPrice == null ? null : Number(u.costPrice),
             barcode: u.barcode || '',
+            isDefaultSale: !!u.isDefaultSale,
+            isDefaultPurchase: !!u.isDefaultPurchase,
+            isActive: u.isActive !== false,
           }));
       }
 

@@ -379,6 +379,9 @@ export const saleItems = pgTable('sale_items', {
     .notNull()
     .default('1'),
   baseQuantity: integer('base_quantity').notNull().default(0),
+  // Per-selected-unit cost frozen at sale time. NULL on legacy rows; reports
+  // fall back to `products.cost_price * base_quantity` in that case.
+  unitCostPrice: numeric('unit_cost_price', { precision: 18, scale: 4 }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

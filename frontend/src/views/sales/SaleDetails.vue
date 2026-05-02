@@ -276,16 +276,28 @@
                   "
                 >
                   {{ item.quantity }}
+                  <span v-if="item.unitName" class="text-caption text-medium-emphasis">
+                    {{ item.unitName }}
+                  </span>
                 </span>
               </td>
               <td v-if="hasReturns" class="text-center text-warning font-weight-bold">
                 {{ returnedQtyByItem[item.id] || 0 }}
+                <span v-if="item.unitName" class="text-caption text-medium-emphasis">
+                  {{ item.unitName }}
+                </span>
               </td>
               <td v-if="hasReturns" class="text-center font-weight-bold">
                 {{ Math.max(0, item.quantity - (returnedQtyByItem[item.id] || 0)) }}
+                <span v-if="item.unitName" class="text-caption text-medium-emphasis">
+                  {{ item.unitName }}
+                </span>
               </td>
               <td class="text-center">
                 {{ formatCurrency(item.unitPrice, sale.currency) }}
+                <div v-if="item.unitName" class="text-caption text-medium-emphasis">
+                  / {{ item.unitName }}
+                </div>
               </td>
               <td class="text-center">
                 {{ item.discount ? formatCurrency(item.discount, sale.currency) : '-' }}
@@ -561,11 +573,26 @@
             </thead>
             <tbody>
               <tr v-for="row in returnableRows" :key="row.saleItemId" class="py-3">
-                <td>{{ row.productName }}</td>
-                <td class="text-center">{{ row.sold }}</td>
+                <td>
+                  {{ row.productName }}
+                  <span v-if="row.unitName" class="text-caption text-medium-emphasis">
+                    ({{ row.unitName }})
+                  </span>
+                </td>
+                <td class="text-center">
+                  {{ row.sold }}
+                  <span v-if="row.unitName" class="text-caption text-medium-emphasis">
+                    {{ row.unitName }}
+                  </span>
+                </td>
                 <td class="text-center">{{ row.alreadyReturned }}</td>
                 <td class="text-center font-weight-bold">{{ row.maxReturnable }}</td>
-                <td class="text-center">{{ formatCurrency(row.netUnitPrice, sale.currency) }}</td>
+                <td class="text-center">
+                  {{ formatCurrency(row.netUnitPrice, sale.currency) }}
+                  <div v-if="row.unitName" class="text-caption text-medium-emphasis">
+                    / {{ row.unitName }}
+                  </div>
+                </td>
                 <td class="text-center">
                   <v-number-input
                     v-model="row.quantity"
@@ -860,6 +887,12 @@ const buildReturnableRows = () => {
       saleItemId: item.id,
       productId: item.productId,
       productName: item.productName,
+      // Unit snapshot from the original sale line — drives the "X درزن" label
+      // in the return form so the cashier returns in the same unit the
+      // customer bought in.
+      unitId: item.unitId || null,
+      unitName: item.unitName || null,
+      unitConversionFactor: Number(item.unitConversionFactor) || 1,
       sold,
       alreadyReturned,
       maxReturnable,
@@ -964,9 +997,16 @@ const closeReturnDialog = () => {
 const submitReturn = async () => {
   returnError.value = '';
   if (!canSubmitReturn.value) return;
+  // Return items in the SAME unit the customer bought in. Backend re-resolves
+  // the unit from the DB and converts to base units before restoring stock,
+  // so the cashier doesn't need to mentally convert "1 درزن = 12 قطعة" here.
   const items = returnableRows.value
     .filter((r) => Number(r.quantity) > 0)
-    .map((r) => ({ saleItemId: r.saleItemId, quantity: Number(r.quantity) }));
+    .map((r) => ({
+      saleItemId: r.saleItemId,
+      quantity: Number(r.quantity),
+      unitId: r.unitId || null,
+    }));
   if (items.length === 0) {
     returnError.value = 'حدد كمية لمنتج واحد على الأقل';
     return;

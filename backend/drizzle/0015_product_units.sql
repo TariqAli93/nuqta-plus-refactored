@@ -49,13 +49,17 @@ WHERE NOT EXISTS (
 );
 
 -- ── Sale items: snapshot of the unit used for historical accuracy ─────────
--- All four columns are nullable on purpose so legacy rows stay valid. New
+-- All five columns are nullable on purpose so legacy rows stay valid. New
 -- writes always populate them (defaulting to base when no unit is selected).
+-- `unit_cost_price` is the per-selected-unit cost frozen at sale time so
+-- profit reports stay accurate even after the catalog's unit cost override
+-- changes (or the override is removed entirely).
 ALTER TABLE sale_items
   ADD COLUMN IF NOT EXISTS unit_id integer REFERENCES product_units(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS unit_name text,
   ADD COLUMN IF NOT EXISTS unit_conversion_factor numeric(18,6) NOT NULL DEFAULT 1,
-  ADD COLUMN IF NOT EXISTS base_quantity integer NOT NULL DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS base_quantity integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS unit_cost_price numeric(18,4);
 
 -- Backfill base_quantity from quantity for existing rows so reports stay
 -- consistent when they switch to using base_quantity.

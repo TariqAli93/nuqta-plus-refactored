@@ -205,12 +205,24 @@ export async function replaceProductUnits(tx, productId, units) {
     );
   }
 
-  // Pick exactly one default sale and one default purchase. If none flagged,
-  // the base unit is the default for both.
-  const defaultSaleIdx = resolvedInputs.findIndex((u) => u.isDefaultSale);
-  const defaultPurchaseIdx = resolvedInputs.findIndex((u) => u.isDefaultPurchase);
-  if (defaultSaleIdx === -1) baseInput.isDefaultSale = true;
-  if (defaultPurchaseIdx === -1) baseInput.isDefaultPurchase = true;
+  // Exactly one default sale unit and one default purchase unit. Multiple
+  // flagged → keep the FIRST flagged and clear the rest (matches the radio-
+  // group UX the form uses, but defends against payloads built by hand).
+  // None flagged → the base unit is the default for both.
+  let sawDefaultSale = false;
+  let sawDefaultPurchase = false;
+  for (const u of resolvedInputs) {
+    if (u.isDefaultSale) {
+      if (sawDefaultSale) u.isDefaultSale = false;
+      else sawDefaultSale = true;
+    }
+    if (u.isDefaultPurchase) {
+      if (sawDefaultPurchase) u.isDefaultPurchase = false;
+      else sawDefaultPurchase = true;
+    }
+  }
+  if (!sawDefaultSale) baseInput.isDefaultSale = true;
+  if (!sawDefaultPurchase) baseInput.isDefaultPurchase = true;
 
   // Load existing rows so we can match by id or by name.
   const existing = await tx
