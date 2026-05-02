@@ -120,6 +120,13 @@
       "when": 1778500000000,
       "tag": "0016_sale_item_unit_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1777733599669,
+      "tag": "0017_square_stone_men",
+      "breakpoints": true
     }
   ]
 }
