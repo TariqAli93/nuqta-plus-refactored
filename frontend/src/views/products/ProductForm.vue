@@ -193,6 +193,115 @@
             <v-col cols="12">
               <v-textarea v-model="formData.description" label="الوصف" rows="3"></v-textarea>
             </v-col>
+
+            <!-- ─── Product units ───────────────────────────────────────── -->
+            <v-col cols="12">
+              <v-card variant="outlined" class="pa-3">
+                <div class="d-flex align-center mb-2">
+                  <v-icon class="me-2">mdi-scale-balance</v-icon>
+                  <span class="text-subtitle-1 font-weight-medium">وحدات المنتج</span>
+                </div>
+                <div class="text-caption text-medium-emphasis mb-3">
+                  يتم حفظ المخزون داخلياً حسب الوحدة الأساسية. أضف وحدات إضافية مثل
+                  درزن أو كارتون لتسهيل البيع والاستلام.
+                </div>
+
+                <v-row dense>
+                  <v-col cols="12" md="4">
+                    <v-text-field
+                      v-model="baseUnit.name"
+                      label="الوحدة الأساسية"
+                      placeholder="قطعة"
+                      variant="outlined"
+                      density="comfortable"
+                      :rules="[rules.required]"
+                    />
+                  </v-col>
+                </v-row>
+
+                <v-divider class="my-3" />
+
+                <div class="text-subtitle-2 mb-2">وحدات إضافية</div>
+                <div v-if="extraUnits.length === 0" class="text-caption text-medium-emphasis mb-3">
+                  لا توجد وحدات إضافية. اضغط "إضافة وحدة" لتعريف درزن أو كارتون.
+                </div>
+
+                <div v-for="(u, idx) in extraUnits" :key="`u-${idx}`" class="mb-3">
+                  <v-row dense align="center">
+                    <v-col cols="12" md="3">
+                      <v-text-field
+                        v-model="u.name"
+                        label="اسم الوحدة"
+                        placeholder="درزن"
+                        variant="outlined"
+                        density="comfortable"
+                      />
+                    </v-col>
+                    <v-col cols="6" md="2">
+                      <v-text-field
+                        v-model.number="u.conversionFactor"
+                        label="يعادل كم"
+                        :suffix="baseUnit.name || 'قطعة'"
+                        type="number"
+                        min="1"
+                        variant="outlined"
+                        density="comfortable"
+                        :hint="`يعادل كم ${baseUnit.name || 'قطعة'}؟`"
+                        persistent-hint
+                      />
+                    </v-col>
+                    <v-col cols="6" md="2">
+                      <v-text-field
+                        v-model.number="u.salePrice"
+                        label="سعر البيع للوحدة"
+                        type="number"
+                        min="0"
+                        variant="outlined"
+                        density="comfortable"
+                      />
+                    </v-col>
+                    <v-col cols="6" md="2">
+                      <v-text-field
+                        v-model.number="u.costPrice"
+                        label="سعر الكلفة للوحدة"
+                        type="number"
+                        min="0"
+                        variant="outlined"
+                        density="comfortable"
+                      />
+                    </v-col>
+                    <v-col cols="6" md="2">
+                      <v-text-field
+                        v-model="u.barcode"
+                        label="الباركود"
+                        variant="outlined"
+                        density="comfortable"
+                      />
+                    </v-col>
+                    <v-col cols="12" md="1" class="d-flex justify-end">
+                      <v-btn
+                        icon="mdi-delete-outline"
+                        variant="text"
+                        color="error"
+                        size="small"
+                        title="حذف الوحدة"
+                        @click="removeUnit(idx)"
+                      />
+                    </v-col>
+                  </v-row>
+                </div>
+
+                <v-btn
+                  prepend-icon="mdi-plus"
+                  variant="tonal"
+                  color="primary"
+                  size="small"
+                  @click="addUnit"
+                >
+                  إضافة وحدة
+                </v-btn>
+              </v-card>
+            </v-col>
             <v-col v-if="!isEdit" cols="12">
               <v-alert type="info" variant="tonal" density="comfortable" class="mb-0">
                 <div class="font-weight-medium">
@@ -348,6 +457,64 @@ const formData = ref({
   tracksExpiry: false,
 });
 
+// ── Product units (base + extras) ────────────────────────────────────────
+// `baseUnit` is the unit stock is stored in (e.g. قطعة). `extraUnits` are
+// derived units (درزن, كارتون …) — each maps back to baseUnit via
+// conversionFactor. The form keeps them as separate refs so the UI stays
+// simple; on submit we merge them into a single `units` array on the
+// payload.
+const baseUnit = ref({ id: null, name: 'قطعة' });
+const extraUnits = ref([]);
+
+const addUnit = () => {
+  extraUnits.value.push({
+    id: null,
+    name: '',
+    conversionFactor: null,
+    salePrice: null,
+    costPrice: null,
+    barcode: '',
+  });
+};
+
+const removeUnit = (idx) => {
+  extraUnits.value.splice(idx, 1);
+};
+
+const buildUnitsPayload = () => {
+  const list = [];
+  const baseName = String(baseUnit.value.name || '').trim() || 'قطعة';
+  list.push({
+    id: baseUnit.value.id || undefined,
+    name: baseName,
+    conversionFactor: 1,
+    isBase: true,
+    isDefaultSale: true,
+    isDefaultPurchase: true,
+  });
+  for (const u of extraUnits.value) {
+    const name = String(u.name || '').trim();
+    const factor = Number(u.conversionFactor);
+    if (!name || !factor || factor <= 0) continue;
+    list.push({
+      id: u.id || undefined,
+      name,
+      conversionFactor: factor,
+      isBase: false,
+      barcode: u.barcode ? String(u.barcode).trim() : null,
+      salePrice:
+        u.salePrice === '' || u.salePrice === null || u.salePrice === undefined
+          ? null
+          : Number(u.salePrice),
+      costPrice:
+        u.costPrice === '' || u.costPrice === null || u.costPrice === undefined
+          ? null
+          : Number(u.costPrice),
+    });
+  }
+  return list;
+};
+
 // Admin verification state
 const showAdminVerifyDialog = ref(false);
 const adminCredentials = ref({
@@ -455,11 +622,12 @@ const handleSubmit = async () => {
 
   loading.value = true;
   try {
+    const payload = { ...formData.value, units: buildUnitsPayload() };
     if (isEdit.value) {
-      await productStore.updateProduct(route.params.id, formData.value);
+      await productStore.updateProduct(route.params.id, payload);
       router.push({ name: 'Products' });
     } else {
-      const response = await productStore.createProduct(formData.value);
+      const response = await productStore.createProduct(payload);
       // The store returns the raw axios response; the product payload is at
       // `response.data` (or `response` itself when an interceptor unwraps it).
       const newProduct = response?.data?.data || response?.data || response;
@@ -711,6 +879,7 @@ onMounted(async () => {
         stockQuantity: _qty3,
         currentStock: _qty4,
         inStock: _qty5,
+        units: loadedUnits,
         ...metadataOnly
       } = productStore.currentProduct || {};
       formData.value = {
@@ -720,6 +889,23 @@ onMounted(async () => {
         unit: metadataOnly.unit || formData.value.unit,
         isActive: metadataOnly.isActive !== false,
       };
+
+      // Hydrate the units section from the loaded product. Legacy products
+      // come back with no units; we leave the default base unit in place.
+      if (Array.isArray(loadedUnits) && loadedUnits.length > 0) {
+        const base = loadedUnits.find((u) => u.isBase) || loadedUnits[0];
+        baseUnit.value = { id: base.id, name: base.name || 'قطعة' };
+        extraUnits.value = loadedUnits
+          .filter((u) => !u.isBase && u.id !== base.id)
+          .map((u) => ({
+            id: u.id,
+            name: u.name || '',
+            conversionFactor: Number(u.conversionFactor) || null,
+            salePrice: u.salePrice == null ? null : Number(u.salePrice),
+            costPrice: u.costPrice == null ? null : Number(u.costPrice),
+            barcode: u.barcode || '',
+          }));
+      }
 
       // التأكد من أن العملة المحددة متاحة
       if (!availableCurrencies.value.includes(formData.value.currency)) {

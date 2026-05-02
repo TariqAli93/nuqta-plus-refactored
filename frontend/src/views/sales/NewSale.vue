@@ -144,7 +144,7 @@
                       </v-autocomplete>
                     </v-col>
 
-                    <v-col cols="12" md="3">
+                    <v-col cols="6" md="2">
                       <v-text-field
                         v-model.number="item.quantity"
                         label="الكمية"
@@ -153,11 +153,6 @@
                         :rules="[
                           rules.required,
                           (v) => rules.positive(v),
-                          (v) => {
-                            if (!products.value || !Array.isArray(products.value)) return true;
-                            const product = products.value.find((p) => p.id === item.productId);
-                            return product ? rules.minStock(v, product.stock) : true;
-                          },
                         ]"
                         density="comfortable"
                         variant="outlined"
@@ -165,7 +160,21 @@
                       />
                     </v-col>
 
-                    <v-col cols="12" md="3">
+                    <v-col cols="6" md="2">
+                      <v-select
+                        v-model="item.unitId"
+                        :items="unitOptionsFor(item)"
+                        item-title="title"
+                        item-value="value"
+                        label="الوحدة"
+                        density="comfortable"
+                        variant="outlined"
+                        :disabled="unitOptionsFor(item).length <= 1"
+                        @update:model-value="onItemUnitChange(item)"
+                      />
+                    </v-col>
+
+                    <v-col cols="12" md="2">
                       <v-text-field
                         :model-value="formatCurrency(item.unitPrice)"
                         :suffix="sale.currency"
@@ -975,8 +984,38 @@ const saleSummary = computed(() => [
 
 /* 📦 إدارة المنتجات */
 const addItem = () =>
-  sale.value.items.push({ productId: null, quantity: 1, unitPrice: 0, discount: 0 });
+  sale.value.items.push({ productId: null, quantity: 1, unitPrice: 0, discount: 0, unitId: null });
 const removeItem = (index) => sale.value.items.splice(index, 1);
+
+/* 🧮 وحدات المنتج */
+const unitOptionsFor = (item) => {
+  if (!item?.productId || !Array.isArray(products.value)) return [];
+  const p = products.value.find((prod) => prod.id === item.productId);
+  const units = Array.isArray(p?.units) ? p.units : [];
+  if (units.length === 0) return [];
+  const baseName = units.find((u) => u.isBase)?.name || 'قطعة';
+  return units.map((u) => ({
+    value: u.id,
+    title: u.isBase
+      ? `${u.name} (الأساسية)`
+      : `${u.name} = ${Number(u.conversionFactor) || 1} ${baseName}`,
+  }));
+};
+
+const onItemUnitChange = (item) => {
+  if (!Array.isArray(products.value)) return;
+  const p = products.value.find((prod) => prod.id === item.productId);
+  if (!p) return;
+  const unit = (p.units || []).find((u) => u.id === item.unitId) || null;
+  const factor = Number(unit?.conversionFactor) || 1;
+  // Re-price using the unit's salePrice when set, otherwise base * factor.
+  const basePrice = Number(p.sellingPrice) || 0;
+  const perUnit = unit?.salePrice != null ? Number(unit.salePrice) : basePrice * factor;
+  item.unitPriceOriginal = perUnit;
+  item.originalCurrency = p.currency || 'USD';
+  item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
+};
+
 const updateProductDetails = (item) => {
   if (!products.value || !Array.isArray(products.value)) return;
   const p = products.value.find((prod) => prod.id === item.productId);
@@ -995,9 +1034,21 @@ const updateProductDetails = (item) => {
     item.quantity = available;
   }
 
-  item.unitPriceOriginal = p.sellingPrice;
+  // Default to the product's preferred sale unit (or its base unit) so the
+  // user doesn't have to pick "قطعة" every time.
+  const defaultUnit =
+    (Array.isArray(p.units) ? p.units : []).find((u) => u.isDefaultSale) ||
+    (Array.isArray(p.units) ? p.units : []).find((u) => u.isBase) ||
+    null;
+  item.unitId = defaultUnit?.id || null;
+
+  const factor = Number(defaultUnit?.conversionFactor) || 1;
+  const basePrice = Number(p.sellingPrice) || 0;
+  const perUnit = defaultUnit?.salePrice != null ? Number(defaultUnit.salePrice) : basePrice * factor;
+
+  item.unitPriceOriginal = perUnit;
   item.originalCurrency = p.currency || 'USD';
-  item.unitPrice = convertPrice(p.sellingPrice, item.originalCurrency, sale.value.currency);
+  item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
   item.discount = item.discount || 0;
   item.availableStock = available;
 };
@@ -1098,9 +1149,12 @@ const submitSale = async () => {
       return;
     }
     const available = availableStockOf(product);
-    if (available < item.quantity) {
+    const unit = (product.units || []).find((u) => u.id === item.unitId) || null;
+    const factor = Number(unit?.conversionFactor) || 1;
+    const baseRequested = Number(item.quantity || 0) * factor;
+    if (available < baseRequested) {
       notify.error(
-        `❌ الكمية المطلوبة من "${product.name}" (${item.quantity}) أكبر من المتوفر في المخزون (${available})`
+        `❌ الكمية المطلوبة من "${product.name}" غير متوفرة بالمخزون`
       );
       return;
     }

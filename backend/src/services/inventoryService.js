@@ -14,6 +14,7 @@ import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
+import { resolveUnitSnapshot } from './productUnitService.js';
 
 /**
  * Simple multi-branch / multi-warehouse inventory service.
@@ -83,13 +84,17 @@ async function applyStockChangeTx(
   {
     productId,
     warehouseId,
-    quantityChange, // positive = in, negative = out
+    quantityChange, // positive = in, negative = out — ALWAYS in base units
     movementType,
     referenceType = null,
     referenceId = null,
     notes = null,
     userId = null,
     allowNegative = false,
+    // Optional unit snapshot — recorded on the movement row for display only.
+    unitId = null,
+    unitName = null,
+    unitQuantity = null,
   }
 ) {
   if (!productId || !warehouseId) {
@@ -128,6 +133,9 @@ async function applyStockChangeTx(
     quantityAfter,
     referenceType,
     referenceId,
+    unitId: unitId || null,
+    unitName: unitName || null,
+    unitQuantity: unitQuantity == null ? null : String(unitQuantity),
     notes: notes || null,
     createdBy: userId || null,
   });
@@ -248,6 +256,7 @@ export class InventoryService {
       productId,
       warehouseId,
       quantityChange,
+      unitId = null,
       movementType,
       reason,
       costPrice,
@@ -260,7 +269,7 @@ export class InventoryService {
       throw new ValidationError('Adjustment reason is required');
     }
     if (!Number.isInteger(quantityChange) || quantityChange <= 0) {
-      throw new ValidationError('Quantity change must be a positive integer');
+      throw new ValidationError('الكمية يجب أن تكون أكبر من صفر');
     }
     const increaseTypes = new Set([
       'opening_balance',
@@ -279,39 +288,62 @@ export class InventoryService {
     if (!increaseTypes.has(movementType) && !decreaseTypes.has(movementType)) {
       throw new ValidationError('نوع حركة المخزون غير صالح');
     }
-    const signedQuantity = increaseTypes.has(movementType) ? quantityChange : -quantityChange;
 
-    const result = await withTransaction((tx) =>
-      applyStockChangeTx(tx, {
+    const result = await withTransaction(async (tx) => {
+      // Resolve unit (defaults to base when unitId is null) so the user can
+      // type "5 كارتون" in the UI and we still write the correct base count.
+      const unit = await resolveUnitSnapshot(tx, productId, unitId);
+      const baseQuantity = Math.round(quantityChange * unit.conversionFactor);
+      if (!Number.isInteger(baseQuantity) || baseQuantity <= 0) {
+        throw new ValidationError('الكمية المحوّلة للوحدة الأساسية غير صالحة');
+      }
+      const signedBase = increaseTypes.has(movementType) ? baseQuantity : -baseQuantity;
+
+      const movementResult = await applyStockChangeTx(tx, {
         productId,
         warehouseId,
-        quantityChange: signedQuantity,
+        quantityChange: signedBase,
         movementType,
         referenceType: 'adjustment',
         notes: reason.trim(),
         userId,
         allowNegative,
-      }).then(async (movementResult) => {
-        if (signedQuantity > 0) {
-          const [product] = await tx
-            .select({ costPrice: products.costPrice })
-            .from(products)
-            .where(eq(products.id, productId))
-            .limit(1);
-          await tx.insert(productStockEntries).values({
-            productId,
-            warehouseId,
-            quantity: signedQuantity,
-            remainingQuantity: signedQuantity,
-            costPrice: String(costPrice || product?.costPrice || 0),
-            expiryDate: expiryDate || null,
-            status: 'active',
-            createdBy: userId || null,
-          });
+        unitId: unit.id,
+        unitName: unit.name,
+        unitQuantity: quantityChange,
+      });
+
+      if (signedBase > 0) {
+        // The user can enter cost price either per selected unit (e.g. carton
+        // cost) or per base unit. We accept either interpretation: when a
+        // costPrice is supplied AND the conversionFactor > 1, we treat it as
+        // per-unit and divide. Per-base cost (unitId omitted, factor = 1) is
+        // unchanged.
+        const [product] = await tx
+          .select({ costPrice: products.costPrice })
+          .from(products)
+          .where(eq(products.id, productId))
+          .limit(1);
+        let perBaseCost;
+        if (costPrice != null && costPrice !== '' && Number.isFinite(Number(costPrice))) {
+          const cp = Number(costPrice);
+          perBaseCost = unit.conversionFactor > 1 ? cp / unit.conversionFactor : cp;
+        } else {
+          perBaseCost = Number(product?.costPrice || 0);
         }
-        return movementResult;
-      })
-    );
+        await tx.insert(productStockEntries).values({
+          productId,
+          warehouseId,
+          quantity: signedBase,
+          remainingQuantity: signedBase,
+          costPrice: String(perBaseCost || 0),
+          expiryDate: expiryDate || null,
+          status: 'active',
+          createdBy: userId || null,
+        });
+      }
+      return movementResult;
+    });
 
     alertBus.emit('alerts.changed', 'inventory.adjusted');
     return result;
@@ -321,7 +353,7 @@ export class InventoryService {
    * Transfer between warehouses in the same transaction.
    * Emits transfer_out + transfer_in movements linked by the same referenceId.
    */
-  async transferStock({ fromWarehouseId, toWarehouseId, productId, quantity, notes, userId }) {
+  async transferStock({ fromWarehouseId, toWarehouseId, productId, quantity, unitId = null, notes, userId }) {
     if (!fromWarehouseId || !toWarehouseId) {
       throw new ValidationError('Both source and destination warehouses are required');
     }
@@ -329,10 +361,15 @@ export class InventoryService {
       throw new ValidationError('Source and destination warehouses must differ');
     }
     if (!Number.isInteger(quantity) || quantity <= 0) {
-      throw new ValidationError('Transfer quantity must be a positive integer');
+      throw new ValidationError('الكمية يجب أن تكون أكبر من صفر');
     }
 
     return withTransaction(async (tx) => {
+      const unit = await resolveUnitSnapshot(tx, productId, unitId);
+      const baseQuantity = Math.round(quantity * unit.conversionFactor);
+      if (!Number.isInteger(baseQuantity) || baseQuantity <= 0) {
+        throw new ValidationError('الكمية المحوّلة للوحدة الأساسية غير صالحة');
+      }
       // Deterministic lock order by warehouse id to avoid deadlocks
       const [firstId, secondId] = [fromWarehouseId, toWarehouseId].sort((a, b) => a - b);
       await lockOrCreateStockRow(tx, productId, firstId);
@@ -345,28 +382,34 @@ export class InventoryService {
       const out = await applyStockChangeTx(tx, {
         productId,
         warehouseId: fromWarehouseId,
-        quantityChange: -quantity,
+        quantityChange: -baseQuantity,
         movementType: 'transfer_out',
         referenceType: 'transfer',
         referenceId,
         notes: notes || null,
         userId,
+        unitId: unit.id,
+        unitName: unit.name,
+        unitQuantity: quantity,
       });
       const incoming = await applyStockChangeTx(tx, {
         productId,
         warehouseId: toWarehouseId,
-        quantityChange: quantity,
+        quantityChange: baseQuantity,
         movementType: 'transfer_in',
         referenceType: 'transfer',
         referenceId,
         notes: notes || null,
         userId,
+        unitId: unit.id,
+        unitName: unit.name,
+        unitQuantity: quantity,
       });
       await InventoryService.moveStockEntriesTx(tx, {
         productId,
         fromWarehouseId,
         toWarehouseId,
-        quantity,
+        quantity: baseQuantity,
         userId,
       });
 
@@ -463,6 +506,9 @@ export class InventoryService {
         referenceId: saleId,
         notes: null,
         userId,
+        unitId: item.unitId || null,
+        unitName: item.unitName || null,
+        unitQuantity: item.unitQuantity == null ? null : item.unitQuantity,
       });
     }
   }
@@ -497,7 +543,7 @@ export class InventoryService {
       .filter((r) => !status || r.status === status);
   }
 
-  /** Restore stock from a cancelled or returned sale. */
+  /** Restore stock from a cancelled or returned sale. Quantities are in base units. */
   static async restoreSaleStockMovement(
     tx,
     { saleId, warehouseId, items, userId, movementType = 'sale_cancel' }
@@ -515,6 +561,9 @@ export class InventoryService {
         notes: null,
         userId,
         allowNegative: true, // restoring never fails on availability
+        unitId: item.unitId || null,
+        unitName: item.unitName || null,
+        unitQuantity: item.unitQuantity == null ? null : item.unitQuantity,
       });
     }
   }
@@ -603,6 +652,9 @@ export class InventoryService {
         quantityChange: stockMovements.quantityChange,
         quantityBefore: stockMovements.quantityBefore,
         quantityAfter: stockMovements.quantityAfter,
+        unitId: stockMovements.unitId,
+        unitName: stockMovements.unitName,
+        unitQuantity: stockMovements.unitQuantity,
         referenceType: stockMovements.referenceType,
         referenceId: stockMovements.referenceId,
         notes: stockMovements.notes,

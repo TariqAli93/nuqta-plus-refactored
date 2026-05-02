@@ -66,6 +66,28 @@ export const customerSchema = z.object({
   allowDuplicatePhone: z.boolean().optional(),
 });
 
+// ── Product units ─────────────────────────────────────────────────────────
+// One product has exactly one base unit (conversion_factor = 1) and any
+// number of additional units (درزن, كارتون …) that map back to it via
+// `conversionFactor`. The product create/update endpoint accepts an
+// optional `units` array — when present we replace the product's units in a
+// single transaction. Validation here only checks shape; the service enforces
+// "exactly one base unit" / "duplicate names" / etc. with Arabic messages.
+export const productUnitInputSchema = z.object({
+  id: z.number().int().positive().optional(),
+  name: z.string().trim().min(1, 'اسم الوحدة مطلوب').max(40),
+  conversionFactor: z.coerce
+    .number()
+    .positive('عامل التحويل يجب أن يكون أكبر من صفر'),
+  isBase: z.boolean().optional(),
+  isDefaultSale: z.boolean().optional(),
+  isDefaultPurchase: z.boolean().optional(),
+  barcode: z.string().trim().max(120).nullable().optional(),
+  salePrice: z.coerce.number().nonnegative().nullable().optional(),
+  costPrice: z.coerce.number().nonnegative().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
 // Product schemas
 //
 // Stock quantity is intentionally NOT part of this schema. All stock changes
@@ -93,6 +115,11 @@ export const productSchema = z.object({
   tracksExpiry: z.boolean().optional(),
   isActive: z.boolean().optional(),
   status: z.enum(['available', 'out_of_stock', 'discontinued']).optional(),
+  // Optional units payload. When present, the product service replaces the
+  // product's units atomically — the first item with `isBase = true` (or, if
+  // none is flagged, the entry with `conversionFactor === 1`) becomes the
+  // base unit. Sending an empty array clears all non-base units.
+  units: z.array(productUnitInputSchema).optional(),
 });
 
 // Quantity-like keys that must never be accepted on product create/update.
@@ -135,7 +162,11 @@ export const warehouseSchema = z.object({
 export const stockAdjustmentSchema = z.object({
   productId: z.number().int().positive(),
   warehouseId: z.number().int().positive(),
-  quantityChange: z.number().int().positive('Quantity must be positive'),
+  // Quantity is in the *selected unit*. The service multiplies it by the
+  // unit's conversionFactor before it touches `product_stock`. unitId is
+  // optional — when omitted we use the product's base unit (factor 1).
+  quantityChange: z.number().int().positive('الكمية يجب أن تكون أكبر من صفر'),
+  unitId: z.number().int().positive().nullable().optional(),
   movementType: z.enum([
     'opening_balance',
     'stock_in',
@@ -164,6 +195,7 @@ export const stockTransferSchema = z
     toWarehouseId: z.number().int().positive(),
     productId: z.number().int().positive(),
     quantity: z.number().int().positive(),
+    unitId: z.number().int().positive().nullable().optional(),
     notes: z.string().nullable().optional(),
   })
   .refine((d) => d.fromWarehouseId !== d.toWarehouseId, {
@@ -178,11 +210,17 @@ export const categorySchema = z.object({
 });
 
 // Sale schemas
+//
+// `quantity` is expressed in the SELECTED unit (e.g. 2 درزن). The service
+// resolves the unit and multiplies by `conversionFactor` to derive the
+// `baseQuantity` that actually deducts stock. When `unitId` is omitted the
+// product's base unit is used (factor 1), so legacy callers stay valid.
 export const saleItemSchema = z.object({
   productId: z.number().int().positive('Product ID must be a positive integer'),
   quantity: z.number().int().positive('Quantity must be at least 1'),
   unitPrice: z.coerce.number().positive('Unit price must be positive'),
   discount: z.coerce.number().nonnegative('Discount cannot be negative').optional(),
+  unitId: z.number().int().positive().nullable().optional(),
 });
 
 export const saleSchema = z
@@ -297,7 +335,11 @@ export const saleReturnItemSchema = z
   .object({
     saleItemId: z.number().int().positive().optional(),
     productId: z.number().int().positive().optional(),
-    quantity: z.number().int().positive('Returned quantity must be at least 1'),
+    // Quantity is in the original sale-item's unit. When the caller passes a
+    // different unitId, the service converts to base units before checking
+    // the remaining returnable amount.
+    quantity: z.number().int().positive('الكمية المرتجعة يجب أن تكون أكبر من صفر'),
+    unitId: z.number().int().positive().nullable().optional(),
   })
   .refine((d) => d.saleItemId || d.productId, {
     message: 'Each return item needs either saleItemId or productId',

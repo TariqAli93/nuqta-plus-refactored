@@ -34,6 +34,7 @@ import {
   customers,
   categories,
   products,
+  productUnits,
   sales,
   saleItems,
   payments,
@@ -395,41 +396,101 @@ const PRODUCT_DEFS = [
   { sku: 'NET-RTRTP',   name: 'راوتر TP-Link',            cat: 'أجهزة كهربائية',   cost:    35_000, price:    55_000, profile: 'zero' },
 ];
 
+// Realistic Iraqi accessory packaging — pieces inside a dozen (درزن) and a
+// carton. Phones / laptops / large items are sold piece-by-piece so they
+// only get the base unit.
+const PRODUCT_UNIT_DEFS = {
+  'ACC-CHRTC':  [ { name: 'درزن', factor: 12 }, { name: 'كارتون', factor: 48 } ],
+  'ACC-CBLTC':  [ { name: 'درزن', factor: 12 } ],
+  'ACC-CASEIP': [ { name: 'درزن', factor: 12 }, { name: 'كارتون', factor: 100 } ],
+  'ACC-GLASS':  [ { name: 'درزن', factor: 12 }, { name: 'كارتون', factor: 100 } ],
+  'ACC-PWRBNK': [ { name: 'كارتون', factor: 24 } ],
+  'ACC-AIRPDS': [ { name: 'كارتون', factor: 12 } ],
+  'ACC-BTHEAD': [ { name: 'كارتون', factor: 12 } ],
+};
+
 async function seedProducts(db, catMap, adminId) {
   const result = {};
   let inserted = 0;
+  let unitsInserted = 0;
   for (let i = 0; i < PRODUCT_DEFS.length; i++) {
     const def = PRODUCT_DEFS[i];
     const cat = catMap[def.cat];
     const existing = await findOne(db, products, eq(products.sku, def.sku));
+    let row = existing;
     if (existing) {
       result[def.sku] = { ...existing, _profile: def.profile };
-      continue;
+    } else {
+      [row] = await db
+        .insert(products)
+        .values({
+          name: def.name,
+          sku: def.sku,
+          barcode: String(6_290_000_000_000 + i),
+          categoryId: cat?.id || null,
+          description: `${def.name} - منتج معتمد للسوق العراقي`,
+          costPrice: D(def.cost),
+          sellingPrice: D(def.price),
+          currency: IQD,
+          stock: 0, // populated via distributeStock
+          minStock: 3,
+          unit: 'piece',
+          status: 'available',
+          lowStockThreshold: 5,
+          isActive: true,
+          createdBy: adminId,
+        })
+        .returning();
+      result[def.sku] = { ...row, _profile: def.profile };
+      inserted++;
     }
-    const [row] = await db
-      .insert(products)
-      .values({
-        name: def.name,
-        sku: def.sku,
-        barcode: String(6_290_000_000_000 + i),
-        categoryId: cat?.id || null,
-        description: `${def.name} - منتج معتمد للسوق العراقي`,
-        costPrice: D(def.cost),
-        sellingPrice: D(def.price),
-        currency: IQD,
-        stock: 0, // populated via distributeStock
-        minStock: 3,
-        unit: 'piece',
-        status: 'available',
-        lowStockThreshold: 5,
+
+    // Ensure the base unit exists for every product (idempotent).
+    const baseExisting = (await db
+      .select()
+      .from(productUnits)
+      .where(and(eq(productUnits.productId, row.id), eq(productUnits.isBase, true)))
+      .limit(1))[0];
+    if (!baseExisting) {
+      await db.insert(productUnits).values({
+        productId: row.id,
+        name: 'قطعة',
+        conversionFactor: '1',
+        isBase: true,
+        isDefaultSale: true,
+        isDefaultPurchase: true,
         isActive: true,
-        createdBy: adminId,
-      })
-      .returning();
-    result[def.sku] = { ...row, _profile: def.profile };
-    inserted++;
+      });
+      unitsInserted++;
+    }
+
+    // Add packaging units for accessories. Each entry doubles as a small
+    // wholesale price hint: per-piece price * factor with a 5–10% discount
+    // so wholesale buyers see savings.
+    const extraUnits = PRODUCT_UNIT_DEFS[def.sku] || [];
+    for (const eu of extraUnits) {
+      const dup = (await db
+        .select()
+        .from(productUnits)
+        .where(and(eq(productUnits.productId, row.id), eq(productUnits.name, eu.name)))
+        .limit(1))[0];
+      if (dup) continue;
+      const wholesaleDiscount = eu.factor >= 24 ? 0.92 : 0.95;
+      await db.insert(productUnits).values({
+        productId: row.id,
+        name: eu.name,
+        conversionFactor: String(eu.factor),
+        isBase: false,
+        isDefaultSale: false,
+        isDefaultPurchase: false,
+        salePrice: D(Math.round(def.price * eu.factor * wholesaleDiscount)),
+        costPrice: D(def.cost * eu.factor),
+        isActive: true,
+      });
+      unitsInserted++;
+    }
   }
-  log.ok(`products (${inserted} new)`);
+  log.ok(`products (${inserted} new, ${unitsInserted} unit rows)`);
   return result;
 }
 

@@ -64,42 +64,117 @@ export function usePosCart() {
   const nextId = (productId) =>
     `${productId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
+  // ── Unit helpers ─────────────────────────────────────────────────────────
+  const resolveUnits = (p) => (Array.isArray(p?.units) ? p.units : []);
+
+  const pickDefaultUnit = (units) => {
+    if (!Array.isArray(units) || units.length === 0) return null;
+    return (
+      units.find((u) => u.isDefaultSale) ||
+      units.find((u) => u.isBase) ||
+      units[0] ||
+      null
+    );
+  };
+
+  /**
+   * Compute the per-unit sale price for a given product/unit combination.
+   * Falls back to base * conversionFactor when the unit has no explicit
+   * salePrice. Lets wholesale pricing (carton cheaper than 48 pieces) work
+   * out of the box without forcing a price on every unit.
+   */
+  const priceForUnit = (product, unit) => {
+    if (!unit) return Number(product?.sellingPrice) || 0;
+    if (unit.salePrice != null) return Number(unit.salePrice) || 0;
+    const factor = Number(unit?.conversionFactor) || 1;
+    return (Number(product?.sellingPrice) || 0) * factor;
+  };
+
   // ── Cart actions ─────────────────────────────────────────────────────────
-  const addItem = (product, qty = 1) => {
+  /**
+   * Add a product to the cart, optionally pre-selecting a unit (e.g. when a
+   * carton barcode was scanned). Stock is always tracked in base units —
+   * `availableStock` is the warehouse base count; the per-unit available
+   * (e.g. كم درزن متبقي) is derived on the fly via the unit's
+   * conversionFactor.
+   */
+  const addItem = (product, qty = 1, unitOverride = null) => {
     if (!product?.id) return;
-    const available = resolveStock(product);
-    if (available <= 0) {
+    const baseAvailable = resolveStock(product);
+    if (baseAvailable <= 0) {
       notify.warning(`"${product.name}" غير متوفر`);
       return;
     }
 
-    const existing = items.find((i) => i.productId === product.id);
+    const units = resolveUnits(product);
+    const selectedUnit = unitOverride || pickDefaultUnit(units);
+    const factor = Number(selectedUnit?.conversionFactor) || 1;
+    const unitAvailable = Math.floor(baseAvailable / factor);
+
+    const existing = items.find(
+      (i) => i.productId === product.id && (i.unitId || null) === (selectedUnit?.id || null)
+    );
     if (existing) {
       const nextQty = existing.qty + qty;
-      if (nextQty > available) {
-        existing.qty = available;
-        notify.warning(`المتاح من "${product.name}" هو ${available}`);
+      if (unitAvailable > 0 && nextQty > unitAvailable) {
+        existing.qty = unitAvailable;
+        notify.warning(`المتاح من "${product.name}" هو ${unitAvailable} ${selectedUnit?.name || ''}`.trim());
         return;
       }
       existing.qty = nextQty;
       return;
     }
 
+    const unitPrice = priceForUnit(product, selectedUnit);
     items.push({
       id: nextId(product.id),
       productId: product.id,
       name: product.name,
       sku: product.sku || null,
       barcode: product.barcode || null,
-      price: Number(product.sellingPrice) || 0,
-      originalPrice: Number(product.sellingPrice) || 0,
+      price: unitPrice,
+      originalPrice: unitPrice,
       originalCurrency: product.currency || currency.value,
-      qty: Math.min(qty, available),
+      qty: Math.min(qty, unitAvailable > 0 ? unitAvailable : qty),
       discount: 0,
       note: '',
       currency: currency.value,
-      availableStock: available,
+      availableStock: unitAvailable,
+      baseAvailableStock: baseAvailable,
+      // Unit snapshot — used to render the unit chip and to drive the
+      // per-line unit picker without touching the product cache again.
+      unitId: selectedUnit?.id || null,
+      unitName: selectedUnit?.name || null,
+      unitConversionFactor: factor,
+      units, // available units for this product (for the picker dropdown)
     });
+  };
+
+  /** Switch the unit on a cart line and recompute price / stock cap. */
+  const updateLineUnit = (id, newUnitId) => {
+    const row = findItem(id);
+    if (!row) return;
+    const newUnit = (row.units || []).find((u) => u.id === newUnitId) || null;
+    const factor = Number(newUnit?.conversionFactor) || 1;
+    row.unitId = newUnit?.id || null;
+    row.unitName = newUnit?.name || null;
+    row.unitConversionFactor = factor;
+    const productLike = { sellingPrice: row.originalPrice / (row.unitConversionFactor || 1) };
+    // Re-price using the unit's salePrice when present, otherwise fall back
+    // to base price * conversionFactor (preserves the original behaviour for
+    // products without explicit unit prices).
+    if (newUnit && newUnit.salePrice != null) {
+      row.price = Number(newUnit.salePrice) || 0;
+      row.originalPrice = row.price;
+    } else {
+      row.price = priceForUnit(productLike, newUnit);
+      row.originalPrice = row.price;
+    }
+    const baseAvailable = Number(row.baseAvailableStock || row.availableStock * factor) || 0;
+    row.availableStock = Math.floor(baseAvailable / factor);
+    if (row.availableStock > 0 && row.qty > row.availableStock) {
+      row.qty = row.availableStock;
+    }
   };
 
   const removeItem = (id) => {
@@ -250,6 +325,7 @@ export function usePosCart() {
         quantity: i.qty,
         unitPrice: Number(i.price) || 0,
         discount: Number(i.discount) || 0,
+        unitId: i.unitId || null,
       })),
       discount: discountValue.value,
       tax: taxPercent,
@@ -387,6 +463,7 @@ export function usePosCart() {
     updatePrice,
     updateLineDiscount,
     updateLineNote,
+    updateLineUnit,
     clear,
     applyExact,
     addToPaid,

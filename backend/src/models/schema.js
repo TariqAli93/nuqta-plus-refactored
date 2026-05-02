@@ -93,6 +93,32 @@ export const products = pgTable('products', {
 });
 
 
+// ── Product Units ─────────────────────────────────────────────────────────
+// Multi-unit support: every product has exactly one base unit (factor=1) and
+// may declare additional units (درزن, كارتون, …) that map back to it via
+// `conversionFactor`. Inventory is stored in the base unit; the unit on a
+// sale or stock movement is multiplied by `conversionFactor` before it
+// touches stock.
+export const productUnits = pgTable('product_units', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id')
+    .notNull()
+    .references(() => products.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  conversionFactor: numeric('conversion_factor', { precision: 18, scale: 6 })
+    .notNull()
+    .default('1'),
+  isBase: boolean('is_base').notNull().default(false),
+  isDefaultSale: boolean('is_default_sale').notNull().default(false),
+  isDefaultPurchase: boolean('is_default_purchase').notNull().default(false),
+  barcode: text('barcode'),
+  salePrice: numeric('sale_price', { precision: 18, scale: 4 }),
+  costPrice: numeric('cost_price', { precision: 18, scale: 4 }),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 // ── Branches ──────────────────────────────────────────────────────────────
 export const branches = pgTable('branches', {
   id: serial('id').primaryKey(),
@@ -190,6 +216,11 @@ export const stockMovements = pgTable(
     quantityAfter: integer('quantity_after').notNull(),
     referenceType: text('reference_type'), // 'sale' | 'transfer' | 'adjustment' | null
     referenceId: integer('reference_id'),
+    // Unit snapshot — display only. quantityChange/Before/After always remain
+    // in the base unit so reports and totals never need to read the unit.
+    unitId: integer('unit_id').references(() => productUnits.id, { onDelete: 'set null' }),
+    unitName: text('unit_name'),
+    unitQuantity: numeric('unit_quantity', { precision: 18, scale: 6 }),
     notes: text('notes'),
     createdAt: timestamp('created_at').defaultNow(),
     createdBy: integer('created_by').references(() => users.id),
@@ -324,6 +355,13 @@ export const invoiceSequences = pgTable(
 );
 
 // ── Sale Items ────────────────────────────────────────────────────────────
+//
+// Unit snapshot fields (`unitId`, `unitName`, `unitConversionFactor`,
+// `baseQuantity`) are written on every new sale so the invoice keeps the
+// human-readable unit (2 درزن × 110,000) while reports and stock math always
+// rely on `baseQuantity`. Legacy rows that pre-date the unit feature have
+// `unitConversionFactor = 1` and `baseQuantity = quantity` after the backfill
+// migration.
 export const saleItems = pgTable('sale_items', {
   id: serial('id').primaryKey(),
   saleId: integer('sale_id')
@@ -335,6 +373,12 @@ export const saleItems = pgTable('sale_items', {
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
+  unitId: integer('unit_id').references(() => productUnits.id, { onDelete: 'set null' }),
+  unitName: text('unit_name'),
+  unitConversionFactor: numeric('unit_conversion_factor', { precision: 18, scale: 6 })
+    .notNull()
+    .default('1'),
+  baseQuantity: integer('base_quantity').notNull().default(0),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -446,6 +490,12 @@ export const saleReturnItems = pgTable(
     quantity: integer('quantity').notNull(),
     unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
     subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
+    unitId: integer('unit_id').references(() => productUnits.id, { onDelete: 'set null' }),
+    unitName: text('unit_name'),
+    unitConversionFactor: numeric('unit_conversion_factor', { precision: 18, scale: 6 })
+      .notNull()
+      .default('1'),
+    baseQuantity: integer('base_quantity').notNull().default(0),
     createdAt: timestamp('created_at').defaultNow(),
   },
   (t) => ({
