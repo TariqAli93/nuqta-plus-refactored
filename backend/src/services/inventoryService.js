@@ -441,20 +441,28 @@ export class InventoryService {
         .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
         .for('update');
       if (entries.length === 0) {
+        // Postgres rejects FOR UPDATE on the nullable side of a LEFT JOIN
+        // (errcode 0A000), so split the lock acquisition from the catalog
+        // lookup: lock the legacy aggregate row alone, then fetch the
+        // product's current base cost in a second non-locking read.
         const [legacy] = await tx
-          .select({ quantity: productStock.quantity, costPrice: products.costPrice })
+          .select({ quantity: productStock.quantity })
           .from(productStock)
-          .leftJoin(products, eq(productStock.productId, products.id))
           .where(and(eq(productStock.productId, item.productId), eq(productStock.warehouseId, warehouseId)))
           .limit(1)
           .for('update');
         if (legacy && Number(legacy.quantity) > 0) {
+          const [productRow] = await tx
+            .select({ costPrice: products.costPrice })
+            .from(products)
+            .where(eq(products.id, item.productId))
+            .limit(1);
           await tx.insert(productStockEntries).values({
             productId: item.productId,
             warehouseId,
             quantity: Number(legacy.quantity),
             remainingQuantity: Number(legacy.quantity),
-            costPrice: String(legacy.costPrice || 0),
+            costPrice: String(productRow?.costPrice || 0),
             expiryDate: null,
             status: 'active',
             createdBy: userId || null,
