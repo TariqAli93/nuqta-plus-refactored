@@ -165,6 +165,25 @@ async function seed() {
     const insertedProducts = await db.insert(products).values(generateProducts(catMap)).returning();
     console.log(`✓ Inserted ${insertedProducts.length} products`);
 
+    // 2b. Base unit per product (required so the unit-aware sale flow can
+    //     resolve a conversion factor without falling back to legacy paths).
+    const productUnits = (await import('./models/index.js')).productUnits;
+    if (insertedProducts.length > 0) {
+      await db
+        .insert(productUnits)
+        .values(
+          insertedProducts.map((p) => ({
+            productId: p.id,
+            name: 'قطعة',
+            conversionFactor: '1',
+            isBase: true,
+            isDefaultSale: true,
+            isDefaultPurchase: true,
+            isActive: true,
+          }))
+        );
+    }
+
     // 3. Customers
     console.log('→ Inserting customers...');
     const insertedCustomers = await db.insert(customers).values(generateCustomers()).returning();
@@ -204,6 +223,8 @@ async function seed() {
             productId: p.id,
             productName: p.name,
             quantity: qty,
+            baseQuantity: qty,
+            unitConversionFactor: '1',
             unitPrice: p.sellingPrice,
             subtotal: lineTotal,
             discount: 0,

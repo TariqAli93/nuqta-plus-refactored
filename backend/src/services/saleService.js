@@ -30,6 +30,7 @@ import { hasPermission } from '../auth/permissionMatrix.js';
 import { getCustomerCreditSnapshot, canCreateInstallmentSale } from './creditScoringService.js';
 import auditService from './auditService.js';
 import { InventoryService } from './inventoryService.js';
+import { resolveUnitSnapshot, listProductUnits } from './productUnitService.js';
 import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
 import cashSessionService from './cashSessionService.js';
@@ -469,8 +470,22 @@ export class SaleService {
           throw new NotFoundError(`Product with ID ${item.productId} not found`);
         }
 
+        // Resolve the chosen unit (defaults to base when unitId is null) so
+        // we can store a snapshot AND deduct the correct base-unit quantity.
+        const unit = await resolveUnitSnapshot(tx, item.productId, item.unitId || null);
+        const baseQty = Math.round(Number(item.quantity || 0) * unit.conversionFactor);
+        if (!Number.isInteger(baseQty) || baseQty <= 0) {
+          throw new ValidationError('الكمية المحوّلة للوحدة الأساسية غير صالحة');
+        }
+
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
+
+        // Snapshot the per-unit cost so reports stay correct after the
+        // catalog's unit cost changes. Override → that override; otherwise
+        // base cost × factor.
+        const baseCost = Number(product.costPrice) || 0;
+        const perUnitCost = unit.costPrice != null ? Number(unit.costPrice) : baseCost * unit.conversionFactor;
 
         const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: newSale.id,
@@ -480,9 +495,21 @@ export class SaleService {
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
+          unitId: unit.id,
+          unitName: unit.name,
+          unitConversionFactor: String(unit.conversionFactor),
+          baseQuantity: baseQty,
+          unitCostPrice: String(perUnitCost || 0),
         }).returning({ id: saleItems.id });
 
-        stockItems.push({ productId: item.productId, quantity: item.quantity, saleItemId: insertedSaleItem.id });
+        stockItems.push({
+          productId: item.productId,
+          quantity: baseQty,
+          saleItemId: insertedSaleItem.id,
+          unitId: unit.id,
+          unitName: unit.name,
+          unitQuantity: item.quantity,
+        });
       }
 
       // Per-warehouse stock deduction via inventoryService.
@@ -732,6 +759,13 @@ export class SaleService {
         unitPrice: saleItems.unitPrice,
         discount: saleItems.discount,
         subtotal: saleItems.subtotal,
+        unitId: saleItems.unitId,
+        unitName: saleItems.unitName,
+        unitConversionFactor: saleItems.unitConversionFactor,
+        baseQuantity: saleItems.baseQuantity,
+        // Frozen per-unit cost (NULL on legacy rows — falls back to current
+        // products.cost_price * baseQuantity).
+        unitCostPrice: saleItems.unitCostPrice,
         // Profit visibility — uses the product's current cost_price. Returns
         // null when the product was deleted so the UI can render "n/a".
         costPrice: products.costPrice,
@@ -756,17 +790,31 @@ export class SaleService {
     // Compute per-item + sale-level profit. profit=null on any item with a
     // missing cost (deleted product) so the UI can show "n/a" instead of
     // a misleading number. The sale-level total is null in that case too.
+    // Profit prefers the per-unit cost frozen at sale time (so reports stay
+    // correct even if the catalog's unit cost is changed later). Falls back
+    // to the product's current base cost × baseQuantity for legacy rows
+    // recorded before the unit-cost snapshot column existed.
     const enrichedItems = items.map((item) => {
-      const cost = item.costPrice == null ? null : Number(item.costPrice);
+      const baseCost = item.costPrice == null ? null : Number(item.costPrice);
       const qty = Number(item.quantity) || 0;
-      const profit =
-        cost == null ? null : Number(item.unitPrice) * qty - n(item.discount) - cost * qty;
+      const factor = Number(item.unitConversionFactor) || 1;
+      const baseQty = Number(item.baseQuantity) || qty * factor;
+      const unitCost = item.unitCostPrice == null ? null : Number(item.unitCostPrice);
+      let profit = null;
+      if (unitCost != null) {
+        profit = Number(item.unitPrice) * qty - n(item.discount) - unitCost * qty;
+      } else if (baseCost != null) {
+        profit = Number(item.unitPrice) * qty - n(item.discount) - baseCost * baseQty;
+      }
       return {
         ...item,
         unitPrice: n(item.unitPrice),
         discount: n(item.discount),
         subtotal: n(item.subtotal),
-        costPrice: cost,
+        unitConversionFactor: factor,
+        baseQuantity: baseQty,
+        unitCostPrice: unitCost,
+        costPrice: baseCost,
         profit,
       };
     });
@@ -942,10 +990,20 @@ export class SaleService {
     const result = await withTransaction(async (tx) => {
       // Per-warehouse stock restore via inventoryService (records sale_cancel
       // movement). Legacy sales with no warehouseId are skipped safely.
+      // We restore in base units so unit-aware sales unwind correctly even
+      // though the user originally bought 2 درزن.
       await InventoryService.restoreSaleStockMovement(tx, {
         saleId: sale.id,
         warehouseId: sale.warehouseId,
-        items: sale.items.filter((i) => i.productId),
+        items: sale.items
+          .filter((i) => i.productId)
+          .map((i) => ({
+            productId: i.productId,
+            quantity: Number(i.baseQuantity || i.quantity) || 0,
+            unitId: i.unitId || null,
+            unitName: i.unitName || null,
+            unitQuantity: i.quantity,
+          })),
         userId,
         movementType: 'sale_cancel',
       });
@@ -1029,6 +1087,9 @@ export class SaleService {
           unitPrice: saleItems.unitPrice,
           discount: saleItems.discount,
           subtotal: saleItems.subtotal,
+          unitConversionFactor: saleItems.unitConversionFactor,
+          baseQuantity: saleItems.baseQuantity,
+          unitCostPrice: saleItems.unitCostPrice,
           productId: saleItems.productId,
           productCost: products.costPrice,
           currency: sales.currency,
@@ -1075,9 +1136,18 @@ export class SaleService {
       const c = item.currency || 'USD';
       if (!item.quantity || item.quantity <= 0) continue;
       const itemDiscount = n(item.discount);
-      const netUnitPrice = n(item.unitPrice) - itemDiscount / item.quantity;
-      const costPrice = n(item.productCost);
-      const profit = (netUnitPrice - costPrice) * item.quantity;
+      const factor = Number(item.unitConversionFactor) || 1;
+      const baseQty = Number(item.baseQuantity) || item.quantity * factor;
+      const lineRevenue = n(item.unitPrice) * item.quantity - itemDiscount;
+      // Prefer the snapshotted per-unit cost so a unit-cost override
+      // remains in effect for historical sales after a catalog edit. Falls
+      // back to the product's current base cost × baseQuantity (the
+      // legacy/no-snapshot path).
+      const unitCost = item.unitCostPrice == null ? null : Number(item.unitCostPrice);
+      const baseCost = n(item.productCost);
+      const profit = unitCost != null
+        ? lineRevenue - unitCost * item.quantity
+        : lineRevenue - baseCost * baseQty;
       if (byCur[c]) byCur[c].totalProfit += profit;
     }
 
@@ -1214,7 +1284,13 @@ export class SaleService {
           warehouseId: sale.warehouseId,
           items: sale.items
             .filter((i) => i.productId)
-            .map((i) => ({ productId: i.productId, quantity: i.quantity })),
+            .map((i) => ({
+              productId: i.productId,
+              quantity: Number(i.baseQuantity || i.quantity) || 0,
+              unitId: i.unitId || null,
+              unitName: i.unitName || null,
+              unitQuantity: i.quantity,
+            })),
           userId,
         });
       }
@@ -1282,6 +1358,8 @@ export class SaleService {
         ...it,
         unitPrice: n(it.unitPrice),
         subtotal: n(it.subtotal),
+        unitConversionFactor: Number(it.unitConversionFactor) || 1,
+        baseQuantity: Number(it.baseQuantity) || it.quantity,
       });
     }
 
@@ -1347,17 +1425,20 @@ export class SaleService {
 
     const currency = sale.currency || 'USD';
 
-    // Sum prior-returned quantity per saleItemId so we can enforce
-    // (returnedQty + priorReturns) <= soldQty.
+    // Sum prior-returned base quantity per saleItemId so we can enforce
+    // (returnedBase + priorReturnsBase) <= soldBase. Returns are tracked in
+    // base units so a customer who bought 2 درزن (= 24 قطعة) and returns 1
+    // درزن still has 12 قطعة of headroom for further partial returns.
     const priorReturns = await this.getReturnsForSale(saleId);
     const priorByItemId = new Map();
     for (const r of priorReturns) {
       for (const it of r.items) {
         if (!it.saleItemId) continue;
-        priorByItemId.set(it.saleItemId, (priorByItemId.get(it.saleItemId) || 0) + it.quantity);
+        const itBase = Number(it.baseQuantity) || Number(it.quantity) || 0;
+        priorByItemId.set(it.saleItemId, (priorByItemId.get(it.saleItemId) || 0) + itBase);
       }
     }
-    // Snapshot of quantities returned before this request. Used later to
+    // Snapshot of base quantities returned before this request. Used later to
     // restore stock-entry quantities without mutating sale_item_stock_entries.
     const previouslyReturnedByItem = new Map(priorByItemId);
 
@@ -1377,7 +1458,7 @@ export class SaleService {
     for (const req of returnData.items) {
       const qty = Number(req.quantity);
       if (!Number.isInteger(qty) || qty <= 0) {
-        throw new ValidationError('Returned quantity must be a positive integer');
+        throw new ValidationError('الكمية المرتجعة يجب أن تكون أكبر من صفر');
       }
 
       let target = null;
@@ -1392,7 +1473,8 @@ export class SaleService {
         const candidates = saleItemsByProduct.get(req.productId) || [];
         target = candidates.find((c) => {
           const prior = priorByItemId.get(c.id) || 0;
-          return c.quantity - prior > 0;
+          const baseSold = Number(c.baseQuantity) || c.quantity;
+          return baseSold - prior > 0;
         });
         if (!target) {
           throw new ValidationError(
@@ -1403,9 +1485,44 @@ export class SaleService {
         throw new ValidationError('Each return item needs saleItemId or productId');
       }
 
+      // Resolve the unit chosen for the return. When the caller passes no
+      // unitId we default to the unit used on the original sale line so the
+      // numbers on the receipt match up.
+      let returnUnit;
+      if (req.unitId) {
+        returnUnit = await (async () => {
+          const db = await getDb();
+          const [u] = await db
+            .select()
+            .from(schema.productUnits)
+            .where(and(eq(schema.productUnits.id, req.unitId), eq(schema.productUnits.productId, target.productId)))
+            .limit(1);
+          if (!u) {
+            throw new ValidationError('الوحدة غير صالحة لهذا المنتج', 'INVALID_PRODUCT_UNIT');
+          }
+          return {
+            id: u.id,
+            name: u.name,
+            conversionFactor: Number(u.conversionFactor) || 1,
+          };
+        })();
+      } else {
+        returnUnit = {
+          id: target.unitId || null,
+          name: target.unitName || null,
+          conversionFactor: Number(target.unitConversionFactor) || 1,
+        };
+      }
+
+      const baseQty = Math.round(qty * (returnUnit.conversionFactor || 1));
+      if (!Number.isInteger(baseQty) || baseQty <= 0) {
+        throw new ValidationError('الكمية المحوّلة للوحدة الأساسية غير صالحة');
+      }
+
       const prior = priorByItemId.get(target.id) || 0;
-      const remainingQty = target.quantity - prior;
-      if (qty > remainingQty) {
+      const baseSold = Number(target.baseQuantity) || target.quantity;
+      const remainingBase = baseSold - prior;
+      if (baseQty > remainingBase) {
         throw new ValidationError(
           'لا يمكن استرجاع كمية أكبر من الكمية المباعة أو الكمية المتبقية للاسترجاع'
         );
@@ -1416,17 +1533,27 @@ export class SaleService {
       // discount, so subtotal/quantity is the post-discount unit price.
       // Keep raw (unrounded) — per-line ceil rounding amplifies float noise
       // past the actual paid amount on IQD (250-bucket) sales.
-      const netUnit = target.quantity > 0 ? target.subtotal / target.quantity : Number(target.unitPrice);
-      const lineSubtotal = netUnit * qty;
+      const originalFactor = Number(target.unitConversionFactor) || 1;
+      // Per-base price on the original sale line — used to value the return
+      // even when the customer brings the carton back as loose pieces.
+      const perBaseNet = target.quantity > 0
+        ? (target.subtotal / target.quantity) / originalFactor
+        : Number(target.unitPrice) / originalFactor;
+      const lineSubtotal = perBaseNet * baseQty;
+      const returnUnitPrice = perBaseNet * (returnUnit.conversionFactor || 1);
 
       // Reserve capacity so two requests in the same payload that target the
       // same sale_item don't both pass validation.
-      priorByItemId.set(target.id, prior + qty);
+      priorByItemId.set(target.id, prior + baseQty);
 
       resolvedItems.push({
         saleItem: target,
         quantity: qty,
-        unitPrice: netUnit,
+        baseQuantity: baseQty,
+        unitId: returnUnit.id,
+        unitName: returnUnit.name,
+        unitConversionFactor: returnUnit.conversionFactor,
+        unitPrice: returnUnitPrice,
         subtotal: lineSubtotal,
       });
     }
@@ -1542,6 +1669,10 @@ export class SaleService {
           quantity: it.quantity,
           unitPrice: String(it.unitPrice),
           subtotal: String(it.subtotal),
+          unitId: it.unitId || null,
+          unitName: it.unitName || null,
+          unitConversionFactor: String(it.unitConversionFactor || 1),
+          baseQuantity: it.baseQuantity,
         });
       }
 
@@ -1553,9 +1684,15 @@ export class SaleService {
         const stockItems = [];
         for (const it of resolvedItems) {
           if (!it.saleItem?.id || !it.saleItem?.productId) continue;
-          let remaining = Number(it.quantity) || 0;
+          let remaining = Number(it.baseQuantity) || 0;
           if (remaining <= 0) continue;
-          stockItems.push({ productId: it.saleItem.productId, quantity: remaining });
+          stockItems.push({
+            productId: it.saleItem.productId,
+            quantity: remaining,
+            unitId: it.unitId || null,
+            unitName: it.unitName || null,
+            unitQuantity: it.quantity,
+          });
           const previousReturned = Number(previouslyReturnedByItem.get(it.saleItem.id) || 0);
           const restoreWindowStart = Math.max(0, previousReturned);
           const restoreWindowEnd = Math.max(restoreWindowStart, previousReturned + remaining);
@@ -1928,10 +2065,22 @@ export class SaleService {
           throw new ValidationError(`Product with ID ${item.productId} not found`);
         }
 
+        const unit = await resolveUnitSnapshot(tx, item.productId, item.unitId || null);
+        const baseQty = Math.round(Number(item.quantity || 0) * unit.conversionFactor);
+        if (!Number.isInteger(baseQty) || baseQty <= 0) {
+          throw new ValidationError('الكمية المحوّلة للوحدة الأساسية غير صالحة');
+        }
+
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
-        await tx.insert(saleItems).values({
+        // Snapshot per-unit cost so completed-draft sales record the same
+        // information a normal create() flow does — keeps profit reports
+        // accurate and immune to later catalog edits.
+        const baseCost = Number(product.costPrice) || 0;
+        const perUnitCost = unit.costPrice != null ? Number(unit.costPrice) : baseCost * unit.conversionFactor;
+
+        const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: updatedSale.id,
           productId: item.productId,
           productName: product.name,
@@ -1939,9 +2088,21 @@ export class SaleService {
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
-        });
+          unitId: unit.id,
+          unitName: unit.name,
+          unitConversionFactor: String(unit.conversionFactor),
+          baseQuantity: baseQty,
+          unitCostPrice: String(perUnitCost || 0),
+        }).returning({ id: saleItems.id });
 
-        stockItems.push({ productId: item.productId, quantity: item.quantity });
+        stockItems.push({
+          productId: item.productId,
+          quantity: baseQty,
+          saleItemId: insertedSaleItem.id,
+          unitId: unit.id,
+          unitName: unit.name,
+          unitQuantity: item.quantity,
+        });
       }
 
       await InventoryService.applySaleStockMovement(tx, {

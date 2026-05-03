@@ -106,6 +106,34 @@
       "when": 1778300000000,
       "tag": "0014_expiry_support",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1778400000000,
+      "tag": "0015_product_units",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0016_sale_item_unit_cost",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1777733599669,
+      "tag": "0017_square_stone_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0018_sale_return_statuses",
+      "breakpoints": true
     }
   ]
 }

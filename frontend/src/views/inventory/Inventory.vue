@@ -167,7 +167,7 @@
                 density="comfortable"
               />
             </v-col>
-            <v-col cols="12" sm="6">
+            <v-col cols="12" sm="3">
               <v-text-field
                 v-model.number="adjustForm.quantity"
                 label="الكمية"
@@ -175,9 +175,26 @@
                 min="1"
                 variant="outlined"
                 density="comfortable"
-                hint="أدخل الكمية كرقم موجب، وسيحدد نوع الحركة هل هي زيادة أو نقصان."
-                persistent-hint
               />
+            </v-col>
+            <v-col cols="12" sm="3">
+              <v-select
+                v-model="adjustForm.unitId"
+                :items="unitOptionsForSelected"
+                item-title="title"
+                item-value="value"
+                label="الوحدة"
+                variant="outlined"
+                density="comfortable"
+                :disabled="unitOptionsForSelected.length <= 1"
+              />
+            </v-col>
+            <v-col cols="12" class="text-caption text-medium-emphasis">
+              {{
+                adjustForm.unitId && conversionForSelected > 1
+                  ? `سيتم تحويل ${adjustForm.quantity || 0} × ${conversionForSelected} = ${(Number(adjustForm.quantity || 0) * conversionForSelected) || 0} ${baseUnitNameForSelected}`
+                  : 'سيتم حفظ الكمية كما هي.'
+              }}
             </v-col>
           </v-row>
           <v-textarea
@@ -225,6 +242,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
+import { useProductStore } from '@/stores/product';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import {
@@ -235,6 +253,7 @@ import {
 const inventoryStore = useInventoryStore();
 const notificationStore = useNotificationStore();
 const authStore = useAuthStore();
+const productStore = useProductStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -324,7 +343,49 @@ const maybeOpenAdjustFromRoute = async () => {
 const adjustDialog = ref(false);
 const adjusting = ref(false);
 const preselectedProduct = ref(null);
-const adjustForm = ref({ productId: null, quantity: 1, movementType: 'stock_in', reason: '', expiryDate: '', costPrice: null });
+const adjustForm = ref({ productId: null, unitId: null, quantity: 1, movementType: 'stock_in', reason: '', expiryDate: '', costPrice: null });
+const productUnitsCache = ref(new Map());
+
+const fetchUnitsFor = async (productId) => {
+  if (!productId) return [];
+  if (productUnitsCache.value.has(productId)) return productUnitsCache.value.get(productId);
+  try {
+    // Reuse the product detail endpoint — it already returns units in the
+    // same payload as the product, so we don't need a dedicated unit route.
+    await productStore.fetchProduct(productId);
+    const product = productStore.currentProduct || {};
+    const units = Array.isArray(product?.units) ? product.units : [];
+    productUnitsCache.value.set(productId, units);
+    return units;
+  } catch {
+    productUnitsCache.value.set(productId, []);
+    return [];
+  }
+};
+
+const unitOptionsForSelected = computed(() => {
+  const units = productUnitsCache.value.get(adjustForm.value.productId) || [];
+  if (units.length === 0) {
+    return [{ value: null, title: 'قطعة' }];
+  }
+  return units.map((u) => ({
+    value: u.id,
+    title: u.isBase
+      ? `${u.name} (الأساسية)`
+      : `${u.name} = ${Number(u.conversionFactor) || 1} ${(units.find((b) => b.isBase)?.name) || ''}`.trim(),
+  }));
+});
+
+const conversionForSelected = computed(() => {
+  const units = productUnitsCache.value.get(adjustForm.value.productId) || [];
+  const u = units.find((x) => x.id === adjustForm.value.unitId);
+  return Number(u?.conversionFactor) || 1;
+});
+
+const baseUnitNameForSelected = computed(() => {
+  const units = productUnitsCache.value.get(adjustForm.value.productId) || [];
+  return units.find((u) => u.isBase)?.name || 'قطعة';
+});
 const movementTypeOptions = manualInventoryMovementTypes.map((value) => ({
   value,
   title: getInventoryMovementTypeLabel(value),
@@ -337,10 +398,11 @@ const selectedProductTracksExpiry = computed(() => {
   return !!row?.tracksExpiry;
 });
 
-const openAdjustDialog = (row) => {
+const openAdjustDialog = async (row) => {
   preselectedProduct.value = row;
   adjustForm.value = {
     productId: row ? row.productId : null,
+    unitId: null,
     quantity: 1,
     movementType: 'stock_in',
     reason: '',
@@ -348,10 +410,24 @@ const openAdjustDialog = (row) => {
     costPrice: null,
   };
   adjustDialog.value = true;
+  if (row?.productId) {
+    const units = await fetchUnitsFor(row.productId);
+    const baseUnit = units.find((u) => u.isBase) || units[0] || null;
+    adjustForm.value.unitId = baseUnit?.id || null;
+  }
 };
 
+watch(() => adjustForm.value.productId, async (productId) => {
+  if (!productId) return;
+  const units = await fetchUnitsFor(productId);
+  const baseUnit = units.find((u) => u.isBase) || units[0] || null;
+  if (!adjustForm.value.unitId) {
+    adjustForm.value.unitId = baseUnit?.id || null;
+  }
+});
+
 const submitAdjust = async () => {
-  const { productId, quantity, movementType, reason, expiryDate, costPrice } = adjustForm.value;
+  const { productId, unitId, quantity, movementType, reason, expiryDate, costPrice } = adjustForm.value;
   if (!productId || !quantity || !reason.trim()) {
     notificationStore.error('أكمل بيانات التعديل قبل الحفظ');
     return;
@@ -362,6 +438,7 @@ const submitAdjust = async () => {
       productId,
       warehouseId: inventoryStore.selectedWarehouseId,
       quantityChange: quantity,
+      unitId: unitId || undefined,
       movementType,
       reason: reason.trim(),
       expiryDate: isIncreaseMovement.value && selectedProductTracksExpiry.value && expiryDate ? expiryDate : null,

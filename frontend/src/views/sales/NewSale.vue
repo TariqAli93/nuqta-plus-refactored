@@ -144,7 +144,7 @@
                       </v-autocomplete>
                     </v-col>
 
-                    <v-col cols="12" md="3">
+                    <v-col cols="6" md="2">
                       <v-text-field
                         v-model.number="item.quantity"
                         label="الكمية"
@@ -153,11 +153,6 @@
                         :rules="[
                           rules.required,
                           (v) => rules.positive(v),
-                          (v) => {
-                            if (!products.value || !Array.isArray(products.value)) return true;
-                            const product = products.value.find((p) => p.id === item.productId);
-                            return product ? rules.minStock(v, product.stock) : true;
-                          },
                         ]"
                         density="comfortable"
                         variant="outlined"
@@ -165,7 +160,21 @@
                       />
                     </v-col>
 
-                    <v-col cols="12" md="3">
+                    <v-col cols="6" md="2">
+                      <v-select
+                        v-model="item.unitId"
+                        :items="unitOptionsFor(item)"
+                        item-title="title"
+                        item-value="value"
+                        label="الوحدة"
+                        density="comfortable"
+                        variant="outlined"
+                        :disabled="unitOptionsFor(item).length <= 1"
+                        @update:model-value="onItemUnitChange(item)"
+                      />
+                    </v-col>
+
+                    <v-col cols="12" md="2">
                       <v-text-field
                         :model-value="formatCurrency(item.unitPrice)"
                         :suffix="sale.currency"
@@ -586,6 +595,14 @@ import { useKeyboardShortcuts, createPageShortcuts } from '@/composables/useKeyb
 import FormFieldHelp from '@/components/FormFieldHelp.vue';
 import { SALE_SOURCE_NEW_SALE, SALE_TYPE_INSTALLMENT, SALE_TYPE_CASH } from '@/constants/sales';
 import api from '@/plugins/axios';
+import {
+  getProductUnits,
+  getDefaultSaleUnit,
+  getUnitConversionFactor,
+  getUnitSalePrice,
+  getUnitAvailableStock,
+  toBaseQuantity,
+} from '@/utils/productUnits';
 
 const router = useRouter();
 const route = useRoute();
@@ -975,42 +992,110 @@ const saleSummary = computed(() => [
 
 /* 📦 إدارة المنتجات */
 const addItem = () =>
-  sale.value.items.push({ productId: null, quantity: 1, unitPrice: 0, discount: 0 });
+  sale.value.items.push({ productId: null, quantity: 1, unitPrice: 0, discount: 0, unitId: null });
 const removeItem = (index) => sale.value.items.splice(index, 1);
+
+/* 🧮 وحدات المنتج */
+// Re-priced with helpers so POS / NewSale / inventory all agree on the same
+// rule (override → base × factor) and a unit switch propagates everywhere.
+const productOf = (item) =>
+  Array.isArray(products.value)
+    ? products.value.find((prod) => prod.id === item?.productId) || null
+    : null;
+
+const unitOptionsFor = (item) => {
+  const p = productOf(item);
+  if (!p) return [];
+  const units = getProductUnits(p);
+  if (units.length === 0) return [];
+  const baseName = units.find((u) => u.isBase)?.name || 'قطعة';
+  return units
+    .filter((u) => u.isActive !== false)
+    .map((u) => ({
+      value: u.id,
+      title: u.isBase
+        ? `${u.name} (الأساسية)`
+        : `${u.name} = ${Number(u.conversionFactor) || 1} ${baseName}`,
+    }));
+};
+
+/** Per-unit available count, e.g. "كم درزن متوفر?". */
+const availableInUnit = (item) => {
+  const p = productOf(item);
+  if (!p) return 0;
+  const baseAvailable = availableStockOf(p);
+  const unit = getProductUnits(p).find((u) => u.id === item.unitId) || null;
+  return getUnitAvailableStock(baseAvailable, unit);
+};
+
+const onItemUnitChange = (item) => {
+  const p = productOf(item);
+  if (!p) return;
+  const unit = getProductUnits(p).find((u) => u.id === item.unitId) || null;
+  // Reset discount: a discount expressed for the previous unit no longer
+  // matches the new unit's price. Forcing a re-entry is safer than silently
+  // applying a stale number.
+  item.discount = 0;
+  const perUnit = getUnitSalePrice(p, unit);
+  item.unitPriceOriginal = perUnit;
+  item.originalCurrency = p.currency || 'USD';
+  item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
+  // Clamp qty to the new per-unit available count.
+  const cap = availableInUnit(item);
+  if (cap > 0 && item.quantity > cap) {
+    item.quantity = cap;
+    notify.warning(
+      `الكمية المتوفرة غير كافية لهذه الوحدة. المتاح: ${cap} ${unit?.name || ''}`.trim()
+    );
+  }
+};
+
 const updateProductDetails = (item) => {
-  if (!products.value || !Array.isArray(products.value)) return;
-  const p = products.value.find((prod) => prod.id === item.productId);
+  const p = productOf(item);
   if (!p) return;
 
-  const available = availableStockOf(p);
-
-  if (available <= 0) {
+  const baseAvailable = availableStockOf(p);
+  if (baseAvailable <= 0) {
     notify.error('❌ المنتج غير متوفر في المخزون');
     item.productId = null;
     return;
   }
 
-  if (item.quantity > available) {
-    notify.error(`❌ الكمية المطلوبة (${item.quantity}) أكبر من المتوفر في المخزون (${available})`);
-    item.quantity = available;
+  // Default to the product's preferred sale unit (or its base unit) so the
+  // user doesn't have to pick "قطعة" every time.
+  const defaultUnit = getDefaultSaleUnit(p);
+  item.unitId = defaultUnit?.id || null;
+  item.unitName = defaultUnit?.name || null;
+  item.unitConversionFactor = getUnitConversionFactor(defaultUnit);
+
+  const cap = getUnitAvailableStock(baseAvailable, defaultUnit);
+  if (item.quantity > cap) {
+    notify.warning(
+      `الكمية المتوفرة غير كافية لهذه الوحدة. المتاح: ${cap} ${defaultUnit?.name || ''}`.trim()
+    );
+    item.quantity = cap;
   }
 
-  item.unitPriceOriginal = p.sellingPrice;
+  const perUnit = getUnitSalePrice(p, defaultUnit);
+  item.unitPriceOriginal = perUnit;
   item.originalCurrency = p.currency || 'USD';
-  item.unitPrice = convertPrice(p.sellingPrice, item.originalCurrency, sale.value.currency);
+  item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
   item.discount = item.discount || 0;
-  item.availableStock = available;
+  item.availableStock = cap;
+  item.baseAvailableStock = baseAvailable;
 };
 
 /* 🔍 التحقق من الكمية */
+// Validates against the per-selected-unit cap so changing the unit reflects
+// instantly: 100 قطعة might be plenty for قطعة but only 8 درزن.
 const getQuantityError = (item) => {
   if (!item.productId) return [];
-  if (!products.value || !Array.isArray(products.value)) return [];
-  const product = products.value.find((p) => p.id === item.productId);
-  if (!product) return [];
-  const available = availableStockOf(product);
-  if (item.quantity > available) {
-    return [`الكمية المتاحة: ${available}`];
+  const cap = availableInUnit(item);
+  if (cap === 0) return [];
+  if (Number(item.quantity || 0) > cap) {
+    const product = productOf(item);
+    const unit = getProductUnits(product).find((u) => u.id === item.unitId) || null;
+    return [`الكمية المتوفرة غير كافية لهذه الوحدة. المتاح: ${cap} ${unit?.name || ''}`.trim()];
   }
   return [];
 };
@@ -1032,30 +1117,56 @@ const handleBarcodeScan = () => {
   if (!products.value || !Array.isArray(products.value)) {
     return notify.error('❌ قائمة المنتجات غير متاحة');
   }
-  const product = products.value.find((p) => p.barcode === code);
+  // First match a unit-level barcode (carton barcode → carton unit) so the
+  // cashier doesn't have to switch the unit dropdown after the scan. Falls
+  // back to the product's primary barcode for legacy products.
+  let scannedUnit = null;
+  let product = products.value.find((p) => {
+    const u = getProductUnits(p).find((unit) => unit.barcode && unit.barcode === code);
+    if (u) {
+      scannedUnit = u;
+      return true;
+    }
+    return false;
+  });
+  if (!product) {
+    product = products.value.find((p) => p.barcode === code);
+  }
   if (!product) return notify.error('❌ المنتج غير موجود');
-  const available = availableStockOf(product);
-  if (available <= 0) return notify.error('❌ المنتج غير متوفر في المخزون');
+  const baseAvailable = availableStockOf(product);
+  if (baseAvailable <= 0) return notify.error('❌ المنتج غير متوفر في المخزون');
 
-  const existing = sale.value.items.find((i) => i.productId === product.id);
+  // The scanned barcode may belong to a specific unit (e.g. carton) — pick
+  // it; otherwise default to the product's preferred sale unit.
+  const chosenUnit = scannedUnit || getDefaultSaleUnit(product) || null;
+  const cap = getUnitAvailableStock(baseAvailable, chosenUnit);
+
+  const existing = sale.value.items.find(
+    (i) => i.productId === product.id && (i.unitId || null) === (chosenUnit?.id || null)
+  );
 
   if (existing) {
     const newQuantity = existing.quantity + 1;
-    if (newQuantity > available) {
+    if (cap > 0 && newQuantity > cap) {
       return notify.error(
-        `❌ الكمية المطلوبة (${newQuantity}) أكبر من المتوفر في المخزون (${available})`
+        `الكمية المتوفرة غير كافية لهذه الوحدة. المتاح: ${cap} ${chosenUnit?.name || ''}`.trim()
       );
     }
     existing.quantity = newQuantity;
   } else {
+    const perUnit = getUnitSalePrice(product, chosenUnit);
     sale.value.items.push({
       productId: product.id,
       quantity: 1,
-      unitPriceOriginal: product.sellingPrice,
+      unitId: chosenUnit?.id || null,
+      unitName: chosenUnit?.name || null,
+      unitConversionFactor: getUnitConversionFactor(chosenUnit),
+      unitPriceOriginal: perUnit,
       originalCurrency: product.currency || 'USD',
-      unitPrice: convertPrice(product.sellingPrice, product.currency || 'USD', sale.value.currency),
+      unitPrice: convertPrice(perUnit, product.currency || 'USD', sale.value.currency),
       discount: 0,
-      availableStock: available,
+      availableStock: cap,
+      baseAvailableStock: baseAvailable,
     });
   }
 
@@ -1098,9 +1209,12 @@ const submitSale = async () => {
       return;
     }
     const available = availableStockOf(product);
-    if (available < item.quantity) {
+    const unit = (product.units || []).find((u) => u.id === item.unitId) || null;
+    const factor = Number(unit?.conversionFactor) || 1;
+    const baseRequested = Number(item.quantity || 0) * factor;
+    if (available < baseRequested) {
       notify.error(
-        `❌ الكمية المطلوبة من "${product.name}" (${item.quantity}) أكبر من المتوفر في المخزون (${available})`
+        `❌ الكمية المطلوبة من "${product.name}" غير متوفرة بالمخزون`
       );
       return;
     }
@@ -1121,6 +1235,22 @@ const submitSale = async () => {
       // ────────────────────────────────────────────────────────────────────
       branchId: inventoryStore.selectedBranchId || undefined,
       warehouseId: inventoryStore.selectedWarehouseId || undefined,
+      // Strip transient UI fields and add the unit snapshot the API contract
+      // expects. The backend re-validates the conversion factor from the DB
+      // (so a tampered baseQuantity is ignored) — these fields just make the
+      // payload self-describing for logging and API consumers.
+      items: sale.value.items.map((it) => ({
+        productId: it.productId,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        discount: it.discount || 0,
+        unitId: it.unitId || null,
+        unitName: it.unitName || null,
+        unitConversionFactor: Number(it.unitConversionFactor) || 1,
+        baseQuantity: toBaseQuantity(it.quantity, {
+          conversionFactor: Number(it.unitConversionFactor) || 1,
+        }),
+      })),
     };
 
     // إذا كانت هناك مسودة، أكملها بدلاً من إنشاء بيع جديد

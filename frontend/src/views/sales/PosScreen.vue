@@ -410,7 +410,46 @@
                   {{ formatMoney(Math.max(0, item.price - item.discount), currency) }}
                 </span>
                 <span class="line__sep">·</span>
-                <span class="line__unit-label">للوحدة</span>
+                <span class="line__unit-label">
+                  {{ item.unitName ? `سعر ${item.unitName}` : 'للوحدة' }}
+                </span>
+                <v-menu
+                  v-if="item.units && item.units.length > 1"
+                  location="bottom start"
+                >
+                  <template #activator="{ props: menuProps }">
+                    <v-btn
+                      v-bind="menuProps"
+                      size="x-small"
+                      variant="tonal"
+                      color="primary"
+                      class="line__unit-picker"
+                      @click.stop
+                    >
+                      <v-icon size="14" start>mdi-swap-horizontal</v-icon>
+                      {{ item.unitName || 'الوحدة' }}
+                    </v-btn>
+                  </template>
+                  <v-list density="compact">
+                    <v-list-item
+                      v-for="u in item.units"
+                      :key="u.id"
+                      :active="u.id === item.unitId"
+                      :disabled="u.isActive === false"
+                      @click="updateLineUnit(item.id, u.id)"
+                    >
+                      <v-list-item-title>
+                        {{ u.name }}
+                        <span
+                          v-if="!u.isBase"
+                          class="text-caption text-medium-emphasis"
+                        >
+                          (يعادل {{ Number(u.conversionFactor) || 1 }})
+                        </span>
+                      </v-list-item-title>
+                    </v-list-item>
+                  </v-list>
+                </v-menu>
                 <span v-if="item.discount > 0" class="line__chip line__chip--warning">
                   <v-icon size="10">mdi-tag-outline</v-icon>
                   خصم
@@ -895,6 +934,7 @@ const {
   decQty,
   updateLineDiscount,
   updateLineNote,
+  updateLineUnit,
   clear,
   applyExact,
   addToPaid,
@@ -1246,12 +1286,24 @@ const commitQty = (id, raw) => {
 const onBarcode = () => {
   const code = barcode.value.trim();
   if (!code) return;
-  const match = products.value.find((p) => p.barcode === code || p.sku === code);
+  // First try a unit-level barcode (each unit can carry its own barcode so
+  // scanning a carton picks the carton unit automatically). Falls back to
+  // product.barcode / sku for legacy products.
+  let unitMatch = null;
+  const productByUnitBarcode = products.value.find((p) => {
+    const unit = (p.units || []).find((u) => u.barcode && u.barcode === code);
+    if (unit) {
+      unitMatch = unit;
+      return true;
+    }
+    return false;
+  });
+  const match = productByUnitBarcode || products.value.find((p) => p.barcode === code || p.sku === code);
   if (!match) {
     notify.error('لا يوجد منتج بهذا الرمز');
     return;
   }
-  addItem(match, 1);
+  addItem(match, 1, unitMatch || null);
   barcode.value = '';
   nextTick(() => barcodeRef.value?.focus?.());
 };

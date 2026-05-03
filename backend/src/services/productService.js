@@ -1,9 +1,33 @@
-import { getDb, saveDatabase } from '../db.js';
-import { products, categories, productStock } from '../models/index.js';
+import { getDb, getPool, saveDatabase } from '../db.js';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { products, categories, productStock, productUnits } from '../models/index.js';
+import * as schema from '../models/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
 import { eq, like, or, and, desc, sql } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
 import inventoryService from './inventoryService.js';
+import {
+  replaceProductUnits,
+  ensureBaseUnit,
+  listProductUnits,
+} from './productUnitService.js';
+
+async function withTransaction(callback) {
+  const pool = await getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const txDb = drizzle(client, { schema });
+    const result = await callback(txDb);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 
 export class ProductService {
   async create(productData, userId) {
@@ -21,17 +45,32 @@ export class ProductService {
       }
     }
 
+    // Pull units off the payload — they get persisted in product_units, not
+    // on the products row itself.
+    const { units: unitsInput, ...productOnly } = productData || {};
+
     // Stock quantity is intentionally NOT written here — opening balance must
     // be entered via the inventory movement API (`/inventory/adjust`) so an
     // auditable movement record is created. The frontend redirects the user to
     // that flow after a successful product create.
-    const [newProduct] = await db
-      .insert(products)
-      .values({
-        ...productData,
-        createdBy: userId,
-      })
-      .returning();
+    const newProduct = await withTransaction(async (tx) => {
+      const [created] = await tx
+        .insert(products)
+        .values({
+          ...productOnly,
+          createdBy: userId,
+        })
+        .returning();
+
+      if (Array.isArray(unitsInput) && unitsInput.length > 0) {
+        await replaceProductUnits(tx, created.id, unitsInput);
+      } else {
+        // No units supplied — guarantee a base unit so downstream flows
+        // (inventory, sale, return) can always resolve a conversionFactor.
+        await ensureBaseUnit(tx, created.id, productOnly.unit && productOnly.unit !== 'piece' ? productOnly.unit : 'قطعة');
+      }
+      return created;
+    });
 
     // Pre-create per-warehouse stock rows (quantity 0). Inventory movements
     // own all subsequent updates to those rows.
@@ -40,7 +79,10 @@ export class ProductService {
     saveDatabase();
     alertBus.emit('alerts.changed', 'product.created');
 
-    return newProduct;
+    // Hydrate units onto the response so the frontend can show them right
+    // after create.
+    const units = await listProductUnits(newProduct.id);
+    return { ...newProduct, units };
   }
 
   async getAll(filters = {}) {
@@ -144,8 +186,43 @@ export class ProductService {
       .limit(limit)
       .offset(offset);
 
+    // Hydrate units in a single round-trip so the catalogue can render unit
+    // pickers without per-row API calls.
+    const productIds = results.map((r) => r.id);
+    let unitsByProduct = new Map();
+    if (productIds.length > 0) {
+      const unitRows = await db
+        .select()
+        .from(productUnits)
+        .where(sql`${productUnits.productId} IN (${sql.join(productIds.map((id) => sql`${id}`), sql`, `)})`);
+      for (const u of unitRows) {
+        const list = unitsByProduct.get(u.productId) || [];
+        list.push({
+          id: u.id,
+          productId: u.productId,
+          name: u.name,
+          conversionFactor: Number(u.conversionFactor) || 1,
+          isBase: !!u.isBase,
+          isDefaultSale: !!u.isDefaultSale,
+          isDefaultPurchase: !!u.isDefaultPurchase,
+          barcode: u.barcode || null,
+          salePrice: u.salePrice == null ? null : Number(u.salePrice),
+          costPrice: u.costPrice == null ? null : Number(u.costPrice),
+          isActive: u.isActive !== false,
+        });
+        unitsByProduct.set(u.productId, list);
+      }
+      for (const list of unitsByProduct.values()) {
+        list.sort((a, b) => {
+          if (a.isBase && !b.isBase) return -1;
+          if (!a.isBase && b.isBase) return 1;
+          return (a.id || 0) - (b.id || 0);
+        });
+      }
+    }
+
     return {
-      data: results,
+      data: results.map((r) => ({ ...r, units: unitsByProduct.get(r.id) || [] })),
       meta: {
         total: total || 0,
         page,
@@ -194,17 +271,19 @@ export class ProductService {
       throw new NotFoundError('Product');
     }
 
+    const units = await listProductUnits(id);
+
     return {
       ...product,
       costPrice: Number(product.costPrice) || 0,
       sellingPrice: Number(product.sellingPrice) || 0,
       stock: Number(product.stock) || 0,
       totalStock: Number(product.totalStock) || 0,
+      units,
     };
   }
 
   async update(id, productData) {
-    const db = await getDb();
     // Defensive scrub: even though the controller already rejects
     // quantity-like keys, never let them reach the products row from any
     // future caller path (internal jobs, scripts, etc.).
@@ -217,26 +296,37 @@ export class ProductService {
       inStock: _inStock,
       openingStock: _openingStock,
       openingWarehouseId: _openingWarehouseId,
+      units: unitsInput,
       ...safeUpdate
     } = productData || {};
 
-    const [updated] = await db
-      .update(products)
-      .set({
-        ...safeUpdate,
-        updatedAt: new Date(),
-      })
-      .where(eq(products.id, id))
-      .returning();
+    const updated = await withTransaction(async (tx) => {
+      const [row] = await tx
+        .update(products)
+        .set({
+          ...safeUpdate,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, id))
+        .returning();
 
-    if (!updated) {
-      throw new NotFoundError('Product');
-    }
+      if (!row) {
+        throw new NotFoundError('Product');
+      }
+
+      if (Array.isArray(unitsInput)) {
+        await replaceProductUnits(tx, row.id, unitsInput);
+      } else {
+        await ensureBaseUnit(tx, row.id, safeUpdate.unit && safeUpdate.unit !== 'piece' ? safeUpdate.unit : 'قطعة');
+      }
+      return row;
+    });
 
     saveDatabase();
     alertBus.emit('alerts.changed', 'product.updated');
 
-    return updated;
+    const units = await listProductUnits(updated.id);
+    return { ...updated, units };
   }
 
   async delete(id) {
