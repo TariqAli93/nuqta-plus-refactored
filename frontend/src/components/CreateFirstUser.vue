@@ -177,22 +177,27 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
-import { useSettingsStore } from '@/stores/settings';
 import { useNotificationStore } from '@/stores/notification';
+import { useBackendStateStore } from '@/stores/backendState';
+import { useConnectionStore } from '@/stores/connection';
+import api from '@/plugins/axios';
 
 // Stores
 const authStore = useAuthStore();
-const settingsStore = useSettingsStore();
 const notification = useNotificationStore();
+const backendStore = useBackendStateStore();
+const connectionStore = useConnectionStore();
 
 // State
 const isFirstRunDialog = ref(false);
 const step = ref(1);
 const loadingUser = ref(false);
 const loadingCompany = ref(false);
-const tempToken = ref(null);
+// Cache the user-step values so the company step can submit them in a single
+// /api/setup/first-run call (the backend creates user + company atomically).
+const pendingUser = ref(null);
 
 // Forms
 const userFormRef = ref(null);
@@ -226,40 +231,47 @@ const companyData = ref({
   invoiceType: invoiceTypes[0].value,
 });
 
-// Setup info
-const setupInfo = ref(null);
-
-// Load initial setup
-onMounted(async () => {
-  // For testing: uncomment to reset first run
-  // localStorage.removeItem('firstRunCompleted');
-
-  const firstRunDone = localStorage.getItem('firstRunCompleted') === 'true';
-
-  if (!firstRunDone) {
-    try {
-      const response = await authStore.fetchInitialSetupInfo();
-
-      if (response?.isFirstRun) {
-        setupInfo.value = response;
-        isFirstRunDialog.value = true;
-        if (response.username) username.value = response.username;
-        if (response.password) password.value = response.password;
-      }
-    } catch {
+/**
+ * Probe /api/setup/status. Backend is the single source of truth — we never
+ * cache the result in localStorage so a fresh install always re-evaluates.
+ *
+ * Skipped in client mode: FirstRun is the server admin's responsibility on the
+ * machine that owns the database, not on every workstation that connects.
+ */
+async function refreshSetupStatus() {
+  if (connectionStore.isClientMode) return;
+  try {
+    const status = await api.get('/setup/status');
+    if (status?.setupRequired) {
+      isFirstRunDialog.value = true;
+    } else {
       isFirstRunDialog.value = false;
     }
+  } catch {
+    // Network/early-startup failures: don't show FirstRun. Backend will be
+    // re-probed once it transitions to 'ready'.
+    isFirstRunDialog.value = false;
   }
-}); // Close dialog
+}
+
+onMounted(() => {
+  if (backendStore.status === 'ready') {
+    refreshSetupStatus();
+  }
+});
+
+// Re-check setup status whenever the local backend transitions to ready —
+// covers the cold-start case where the renderer mounts before /health passes.
+watch(
+  () => backendStore.status,
+  (status) => {
+    if (status === 'ready') refreshSetupStatus();
+  }
+);
+
 function closeDialog() {
   isFirstRunDialog.value = false;
   authStore.isFirstRun = false;
-  localStorage.setItem('firstRunCompleted', 'true');
-
-  // Create lock file via IPC if in Electron
-  if (window.electronAPI?.createLockFile) {
-    window.electronAPI.createLockFile();
-  }
 }
 
 // Validation rules
@@ -273,57 +285,58 @@ const rules = {
   },
 };
 
-// Step 1: create user
+// Step 1: validate the admin-user form and advance to the company step.
+// Creation is deferred to step 2 so user + company are persisted in a single
+// idempotent /api/setup/first-run call (matches the backend contract).
 const handleCreateUser = async () => {
   if (!userFormRef.value) return;
   const { valid } = await userFormRef.value.validate();
   if (!valid) return;
   loadingUser.value = true;
   try {
-    const response = await authStore.createFirstUser({
+    pendingUser.value = {
       username: username.value,
       password: password.value,
       fullName: fullName.value,
       phone: phone.value,
-    });
-    // حفظ التوكن مؤقتاً لاستخدامه في الخطوة التالية
-    if (response && response.token) {
-      tempToken.value = response.token;
-    }
+    };
     step.value = 2;
-  } catch {
-    notification.error('تعذر إنشاء المستخدم. يرجى المحاولة مرة أخرى.');
   } finally {
     loadingUser.value = false;
   }
 };
 
-// Step 2: save company info
+// Step 2: submit the combined first-run payload, then sign in so the dashboard
+// loads without a second prompt.
 const handleSaveCompany = async () => {
   if (!companyFormRef.value) return;
   const { valid } = await companyFormRef.value.validate();
   if (!valid) return;
+  if (!pendingUser.value) {
+    step.value = 1;
+    return;
+  }
   loadingCompany.value = true;
   try {
-    // تسجيل الدخول أولاً للحصول على توكن صالح
-    await authStore.login({
-      username: username.value,
-      password: password.value,
+    await api.post('/setup/first-run', {
+      ...pendingUser.value,
+      company: { ...companyData.value },
     });
 
-    // الآن يمكننا حفظ معلومات الشركة باستخدام التوكن الجديد
-    await settingsStore.saveCompanyInfo(companyData.value);
+    await authStore.login({
+      username: pendingUser.value.username,
+      password: pendingUser.value.password,
+    });
 
-    // إغلاق النافذة وتحديث حالة الإعداد الأولي
     closeDialog();
-    tempToken.value = null;
+    pendingUser.value = null;
   } catch (error) {
     const errorMessage =
-      error.response?.data?.errors?.[0]?.message ||
-      error.response?.data?.message ||
-      'تعذر حفظ معلومات الشركة. يرجى المحاولة مرة أخرى.';
+      error?.errors?.[0]?.message ||
+      error?.message ||
+      error?.response?.data?.message ||
+      'تعذر إكمال الإعداد الأولي. يرجى المحاولة مرة أخرى.';
     notification.error(errorMessage);
-    tempToken.value = null;
   } finally {
     loadingCompany.value = false;
   }

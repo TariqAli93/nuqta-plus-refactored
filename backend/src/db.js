@@ -14,6 +14,7 @@ let dbInstance = null;
 let bootstrapState = {
   databaseReady: false,
   migrationsApplied: false,
+  schemaReady: false,
   lastError: null,
 };
 
@@ -145,9 +146,10 @@ async function initDB() {
 
       const client = await pool.connect();
       const result = await client.query('SELECT current_database() AS db, version() AS ver');
-      console.log(`Connected to PostgreSQL: ${result.rows[0].db}`);
+      console.log(`[bootstrap] database connected: ${result.rows[0].db}`);
       client.release();
       bootstrapState.databaseReady = true;
+      bootstrapState.lastError = null;
       break;
     } catch (error) {
       bootstrapState.lastError = error.message;
@@ -185,17 +187,39 @@ async function initDB() {
 
   try {
     await migrate(db, { migrationsFolder });
-    console.log('Database migrations applied successfully');
+    console.log('[bootstrap] migrations applied');
     bootstrapState.migrationsApplied = true;
   } catch (error) {
     // If migration fails because tables exist, it's okay
     if (error.message?.includes('already exists')) {
-      console.log('Migrations skipped - tables already exist');
+      console.log('[bootstrap] migrations skipped - tables already exist');
       bootstrapState.migrationsApplied = true;
     } else {
       bootstrapState.lastError = error.message;
       throw error;
     }
+  }
+
+  // Verify required tables actually exist after migration so the setup status
+  // endpoint can distinguish "DB up but schema broken" from "no admin yet".
+  try {
+    const probe = await pool.query(
+      `SELECT to_regclass('public.users') AS users_tbl,
+              to_regclass('public.settings') AS settings_tbl`
+    );
+    const row = probe.rows[0] || {};
+    if (row.users_tbl && row.settings_tbl) {
+      bootstrapState.schemaReady = true;
+      console.log('[bootstrap] schema ready');
+    } else {
+      bootstrapState.schemaReady = false;
+      bootstrapState.lastError = 'required tables missing after migration';
+      console.error('[bootstrap] schema NOT ready — missing tables');
+    }
+  } catch (error) {
+    bootstrapState.schemaReady = false;
+    bootstrapState.lastError = error.message;
+    console.error(`[bootstrap] schema probe failed: ${error.message}`);
   }
 
   dbInstance = db;

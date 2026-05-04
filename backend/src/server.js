@@ -222,6 +222,20 @@ const start = async () => {
       fastify.log.warn(`ONNX model init skipped: ${error.message}`);
     }
 
+    // Bootstrap check — log whether FirstRun is required so the result is
+    // visible in service logs even if the renderer never calls /setup/status.
+    try {
+      const { getSetupStatus } = await import('./services/setupService.js');
+      const status = await getSetupStatus();
+      if (status.setupRequired) {
+        fastify.log.info(`[bootstrap] setup required: ${status.reason}`);
+      } else {
+        fastify.log.info('[bootstrap] setup complete');
+      }
+    } catch (error) {
+      fastify.log.warn(`[bootstrap] setup status check failed: ${error.message}`);
+    }
+
     // Start listening
     await fastify.listen({
       port: config.server.port,
