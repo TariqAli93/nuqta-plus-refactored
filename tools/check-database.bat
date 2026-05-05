@@ -24,7 +24,7 @@ if not exist "%PG_BIN%\psql.exe" (
 set "PGPASSWORD=%PG_PASSWORD%"
 
 echo [check-database] testing connection to maintenance database
-"%PG_BIN%\psql.exe" -h "%PG_HOST%" -p "%PG_PORT%" -U "%PG_USER%" -d postgres -tAc "SELECT version()"
+"%PG_BIN%\psql.exe" -h "%PG_HOST%" -p "%PG_PORT%" -U "%PG_USER%" -d postgres -c "SELECT version()"
 if errorlevel 1 (
   echo [check-database] ERROR: cannot connect as %PG_USER%@%PG_HOST%:%PG_PORT%.
   set "PGPASSWORD="
@@ -33,11 +33,13 @@ if errorlevel 1 (
 
 echo.
 echo [check-database] checking database "%PG_DATABASE%"
-for /f "usebackq delims=" %%R in (`""%PG_BIN%\psql.exe" -h "%PG_HOST%" -p "%PG_PORT%" -U "%PG_USER%" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='%PG_DATABASE%'""`) do set "DB_EXISTS=%%R"
-if "%DB_EXISTS%"=="1" (
-  echo [check-database] database "%PG_DATABASE%" exists.
-) else (
+REM Probe via psql -l grep (avoids cmd's `=` quoting issues with ad-hoc
+REM SELECT statements wrapped in nested quotes).
+"%PG_BIN%\psql.exe" -h "%PG_HOST%" -p "%PG_PORT%" -U "%PG_USER%" -d postgres -lqt | findstr /R /C:"^ %PG_DATABASE% " >nul
+if errorlevel 1 (
   echo [check-database] database "%PG_DATABASE%" does NOT exist.
+) else (
+  echo [check-database] database "%PG_DATABASE%" exists.
 )
 
 set "PGPASSWORD="

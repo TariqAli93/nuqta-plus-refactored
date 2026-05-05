@@ -20,7 +20,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 const PACKAGED_ROOT = path.join(ROOT, 'release', 'win-unpacked');
 const PACKAGED_BACKEND = path.join(PACKAGED_ROOT, 'resources', 'backend');
-const PACKAGED_TOOLS = path.join(PACKAGED_ROOT, 'tools');
+const PACKAGED_TOOLS = path.join(PACKAGED_ROOT, 'resources', 'tools');
 
 const REQUIRED = [
   'src/server.js',
@@ -86,14 +86,14 @@ for (const rel of REQUIRED_TOOLS) {
   if (!fs.existsSync(abs)) {
     missingTools.push(rel);
   } else {
-    console.log(`[verify-packaged-backend] ✓ tools/${rel}`);
+    console.log(`[verify-packaged-backend] ✓ resources/tools/${rel}`);
   }
 }
 if (missingTools.length > 0) {
   fail(
     'packaged tools are incomplete. Missing:\n  - ' +
-      missingTools.map((m) => `tools/${m}`).join('\n  - ')
+      missingTools.map((m) => `resources/tools/${m}`).join('\n  - ')
   );
 }
 
-console.log('[verify-packaged-backend] ✅ release/win-unpacked/{resources/backend,tools} is complete');
+console.log('[verify-packaged-backend] ✅ release/win-unpacked/resources/{backend,tools} is complete');
