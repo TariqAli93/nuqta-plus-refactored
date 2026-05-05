@@ -160,20 +160,48 @@ exports.default = async function afterPack(context) {
   console.log(`[afterPack] migrations verified (${sqlCount} .sql files, _journal.json present)`);
 
   // ── tools\ — bootstrap and diagnostic scripts ─────────────────────────
-  // These live next to resources/ in the install root, not inside
-  // resources/backend. Copy from <repoRoot>/tools/*.bat → <appOutDir>/tools.
-  const toolsSrc = path.join(repoRoot, 'tools');
-  const toolsDst = path.join(appOutDir, 'tools');
-  fs.mkdirSync(toolsDst, { recursive: true });
-  for (const rel of REQUIRED_TOOLS) {
-    const srcAbs = path.join(toolsSrc, rel);
-    const dstAbs = path.join(toolsDst, rel);
-    if (!fs.existsSync(srcAbs)) {
-      throw new Error(`[afterPack] required tools script missing in source: tools/${rel}`);
-    }
-    fs.copyFileSync(srcAbs, dstAbs);
+  // electron-builder's `extraFiles` (configured in electron-builder.yml)
+  // is the source of truth for placing tools\*.bat into <appOutDir>\tools.
+  // Here we only:
+  //   1. Strip any stale resources\tools directory left by a previous build
+  //      (tools must NEVER live under resources\ — they are operator-facing
+  //      scripts that must be reachable from the install root).
+  //   2. Strictly verify the install-root tools tree is complete. Missing
+  //      bootstrap.bat fails the build immediately.
+  const staleResourcesTools = path.join(target, '..', 'tools');
+  // target == <appOutDir>\resources\backend → its parent is <appOutDir>\resources
+  const wrongResourcesTools = path.join(appOutDir, 'resources', 'tools');
+  if (fs.existsSync(wrongResourcesTools)) {
+    console.log(
+      `[afterPack] removing stale resources/tools left by a previous build: ${wrongResourcesTools}`
+    );
+    fs.rmSync(wrongResourcesTools, { recursive: true, force: true });
   }
-  console.log(`[afterPack] tools copied (${REQUIRED_TOOLS.length} scripts)`);
+  void staleResourcesTools; // documented; resources\backend\tools is never created
+
+  const toolsDst = path.join(appOutDir, 'tools');
+  if (!fs.existsSync(toolsDst)) {
+    throw new Error(
+      `[afterPack] tools directory missing at ${toolsDst}. ` +
+        'Check the `extraFiles` entry in frontend/electron-builder.yml.'
+    );
+  }
+  const missingTools = [];
+  for (const rel of REQUIRED_TOOLS) {
+    const abs = path.join(toolsDst, rel);
+    if (!fs.existsSync(abs)) missingTools.push(rel);
+  }
+  if (missingTools.length > 0) {
+    throw new Error(
+      `[afterPack] packaged tools tree is incomplete. Missing:\n  - ` +
+        missingTools.map((m) => `tools/${m}`).join('\n  - ') +
+        '\nCheck the `extraFiles` entry in frontend/electron-builder.yml ' +
+        'and ensure tools/*.bat are committed in the repo.'
+    );
+  }
+  console.log(
+    `[afterPack] tools verified at ${toolsDst} (${REQUIRED_TOOLS.length} scripts present)`
+  );
 
   // ── Post-copy verification ─────────────────────────────────────────────
   // Fail the build if anything required for PostgreSQL-based runtime is missing.

@@ -29,6 +29,18 @@ extraResources:
   - from: ../backend/models/credit-score.meta.json
     to: backend/models/credit-score.meta.json
 
+# extraFiles lands DIRECTLY at the install root (next to the app exe) — not
+# under resources\. The bootstrap and diagnostic scripts must be reachable as
+# %INSTDIR%\tools\bootstrap.bat so the operator can run them after install.
+# Only the .bat files are shipped — tools/winsw/ is a build-time input that
+# is bundled inside resources/backend/service/ by build-backend.js and is
+# not needed at runtime.
+extraFiles:
+  - from: ../tools
+    to: tools
+    filter:
+      - '*.bat'
+
 afterPack: ../scripts/afterPack.cjs
 
 directories:

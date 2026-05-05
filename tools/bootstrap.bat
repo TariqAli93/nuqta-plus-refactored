@@ -29,9 +29,10 @@ set "BACKEND_PORT=41732"
 set "SVC_NAME=NuqtaPlusBackend"
 
 REM Resolve install layout relative to this script (tools\ is a sibling of
-REM resources\backend in the packaged install).
+REM resources\backend in the packaged install). Canonicalize INSTALL_DIR so
+REM downstream paths don't carry a trailing "..\" segment.
 set "TOOLS_DIR=%~dp0"
-set "INSTALL_DIR=%TOOLS_DIR%.."
+for %%I in ("%TOOLS_DIR%..") do set "INSTALL_DIR=%%~fI"
 set "BACKEND_DIR=%INSTALL_DIR%\resources\backend"
 set "SERVICE_DIR=%BACKEND_DIR%\service"
 set "MIGRATIONS_DIR=%BACKEND_DIR%\migrations"
