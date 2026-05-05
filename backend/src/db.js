@@ -162,11 +162,15 @@ async function runMigrations(db) {
   console.log('[bootstrap] resolving migrations folder');
   const { folder, tried } = resolveMigrationsFolder();
 
+  // Always log every candidate path that was probed — operators reading
+  // service logs need this to debug a broken packaging quickly.
+  console.log('[bootstrap] migrations folder candidates probed:');
+  for (const p of tried) console.log(`  - ${p}`);
+
   if (!folder) {
-    const msg =
-      'migrations folder not found. Tried:\n  - ' + tried.join('\n  - ');
+    const msg = `migrations folder not found. Tried: ${tried.join(' | ')}`;
     console.error(`[bootstrap] ${msg}`);
-    bootstrapState.lastError = 'migrations folder not found';
+    bootstrapState.lastError = msg;
     return false;
   }
 
@@ -187,7 +191,8 @@ async function runMigrations(db) {
       return true;
     }
     console.error(`[bootstrap] migration failed: ${error.message}`);
-    bootstrapState.lastError = error.message;
+    if (error.stack) console.error(error.stack);
+    bootstrapState.lastError = `migration failed: ${error.message}`;
     return false;
   }
 }

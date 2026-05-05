@@ -48,10 +48,17 @@ export function resolveMigrationsFolder({ envOverride } = {}) {
   }
 
   if (process.execPath) {
+    // node.exe at the backend root (rare): <root>/node.exe
     candidates.push(path.join(path.dirname(process.execPath), 'drizzle'));
+    // Bundled node at <root>/bin/node.exe — used by the WinSW service host.
+    candidates.push(
+      path.join(path.dirname(process.execPath), '..', 'drizzle')
+    );
   }
 
   candidates.push(path.resolve(process.cwd(), 'drizzle'));
+  // Service host may set cwd one level up from the backend root.
+  candidates.push(path.resolve(process.cwd(), 'backend', 'drizzle'));
 
   for (const c of candidates) {
     if (!c) continue;

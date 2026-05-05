@@ -192,12 +192,18 @@ export async function runFirstRun(input, { ipAddress } = {}) {
   }
   if (status.reason === SETUP_REASONS.SCHEMA_NOT_READY) {
     const missing = status.missingTables || [];
-    const message =
-      missing.length > 0
-        ? `Database schema is not ready. Missing tables: ${missing.join(', ')}`
-        : 'Database schema is not ready.';
-    const err = new ValidationError(message, SETUP_REASONS.SCHEMA_NOT_READY);
-    err.details = { reason: status.reason, missingTables: missing };
+    const parts = ['Database schema is not ready.'];
+    if (missing.length > 0) parts.push(`Missing tables: ${missing.join(', ')}.`);
+    if (status.details) parts.push(`Cause: ${status.details}.`);
+    parts.push(
+      'Migrations did not complete — check the server log for "[bootstrap] migrations folder candidates probed" to see which paths were tried, then reinstall or restart the service.'
+    );
+    const err = new ValidationError(parts.join(' '), SETUP_REASONS.SCHEMA_NOT_READY);
+    err.details = {
+      reason: status.reason,
+      missingTables: missing,
+      cause: status.details || null,
+    };
     throw err;
   }
 
