@@ -175,38 +175,73 @@ const start = async () => {
       }, 200);
     });
 
-    // Delete old draft sales on startup
+    // ── Bootstrap: connect → migrate → verify ─────────────────────────────
+    // Must complete before any worker/scheduler starts so background timers
+    // never query a half-migrated database.
+    let bootstrapState = { databaseReady: false, schemaReady: false };
     try {
-      const { SaleService } = await import('./services/saleService.js');
-      const saleService = new SaleService();
-      const deletedCount = await saleService.deleteOldDrafts();
-      if (deletedCount > 0) {
-        fastify.log.info(`Deleted ${deletedCount} old draft sale(s) on startup`);
+      const { dbPromise, getBootstrapState } = await import('./db.js');
+      await dbPromise;
+      bootstrapState = getBootstrapState();
+    } catch (error) {
+      fastify.log.error(`[bootstrap] database init failed: ${error.message}`);
+    }
+
+    try {
+      const { getSetupStatus } = await import('./services/setupService.js');
+      const status = await getSetupStatus();
+      if (status.setupRequired) {
+        const extras = status.missingTables?.length
+          ? ` (missing: ${status.missingTables.join(', ')})`
+          : '';
+        fastify.log.info(`[bootstrap] setup required: ${status.reason}${extras}`);
+      } else {
+        fastify.log.info('[bootstrap] setup complete');
       }
     } catch (error) {
-      fastify.log.warn('Failed to delete old drafts on startup:', error.message);
+      fastify.log.warn(`[bootstrap] setup status check failed: ${error.message}`);
     }
 
-    // Register background jobs (daily credit scoring, etc.)
-    try {
-      const { registerDefaultJobs } = await import('./jobs/scheduler.js');
-      registerDefaultJobs(fastify);
-    } catch (error) {
-      fastify.log.warn('Failed to register background jobs:', error.message);
+    const schemaReady = bootstrapState.databaseReady && bootstrapState.schemaReady;
+
+    if (schemaReady) {
+      // Delete old draft sales on startup — needs the schema in place.
+      try {
+        const { SaleService } = await import('./services/saleService.js');
+        const saleService = new SaleService();
+        const deletedCount = await saleService.deleteOldDrafts();
+        if (deletedCount > 0) {
+          fastify.log.info(`Deleted ${deletedCount} old draft sale(s) on startup`);
+        }
+      } catch (error) {
+        fastify.log.warn('Failed to delete old drafts on startup:', error.message);
+      }
+
+      // Register background jobs (daily credit scoring, etc.)
+      try {
+        const { registerDefaultJobs } = await import('./jobs/scheduler.js');
+        registerDefaultJobs(fastify);
+      } catch (error) {
+        fastify.log.warn('Failed to register background jobs:', error.message);
+      }
+
+      // Notification queue worker — picks up pending notifications and dispatches
+      // them through the configured provider. The worker is a no-op when the
+      // notification system is disabled in settings.
+      try {
+        const { startWorker } = await import('./services/notifications/notificationQueue.js');
+        const intervalMs = Number(process.env.NOTIFICATIONS_WORKER_INTERVAL_MS) || 10_000;
+        startWorker({ intervalMs, log: fastify.log });
+      } catch (error) {
+        fastify.log.warn('Failed to start notification worker:', error.message);
+      }
+    } else {
+      fastify.log.warn(
+        '[bootstrap] schema not ready — background jobs and notification worker are NOT started; complete setup at /api/setup/status to enable them after restart'
+      );
     }
 
-    // Notification queue worker — picks up pending notifications and dispatches
-    // them through the configured provider. The worker is a no-op when the
-    // notification system is disabled in settings, so it's always safe to start.
-    try {
-      const { startWorker } = await import('./services/notifications/notificationQueue.js');
-      const intervalMs = Number(process.env.NOTIFICATIONS_WORKER_INTERVAL_MS) || 10_000;
-      startWorker({ intervalMs, log: fastify.log });
-    } catch (error) {
-      fastify.log.warn('Failed to start notification worker:', error.message);
-    }
-
-    // Initialize ONNX credit scoring model (optional — falls back to rules if absent)
+    // ONNX model load is independent of DB schema — safe either way.
     try {
       const { initCreditScoreModel, getModelStatus } = await import(
         './services/onnxCreditScoringService.js'
@@ -220,20 +255,6 @@ const start = async () => {
       }
     } catch (error) {
       fastify.log.warn(`ONNX model init skipped: ${error.message}`);
-    }
-
-    // Bootstrap check — log whether FirstRun is required so the result is
-    // visible in service logs even if the renderer never calls /setup/status.
-    try {
-      const { getSetupStatus } = await import('./services/setupService.js');
-      const status = await getSetupStatus();
-      if (status.setupRequired) {
-        fastify.log.info(`[bootstrap] setup required: ${status.reason}`);
-      } else {
-        fastify.log.info('[bootstrap] setup complete');
-      }
-    } catch (error) {
-      fastify.log.warn(`[bootstrap] setup status check failed: ${error.message}`);
     }
 
     // Start listening

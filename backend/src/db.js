@@ -1,10 +1,9 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
-import { join, dirname as pathDirname } from 'path';
-import { fileURLToPath } from 'url';
 import config from './config.js';
 import * as schema from './models/index.js';
+import { resolveMigrationsFolder } from './bootstrap/resolveMigrationsFolder.js';
 
 const { Pool, Client } = pg;
 
@@ -15,6 +14,7 @@ let bootstrapState = {
   databaseReady: false,
   migrationsApplied: false,
   schemaReady: false,
+  missingTables: [],
   lastError: null,
 };
 
@@ -135,7 +135,110 @@ function createPool() {
   return p;
 }
 
+// Tables that must exist after migrations for the app + always-on background
+// workers to be considered ready. Names are taken verbatim from
+// src/models/schema.js — do not invent.
+//
+// `notification_settings` and the `credit_*` tables are listed because the
+// notification queue worker and credit-scoring scheduler boot unconditionally
+// and would otherwise crash on a partially-migrated database.
+const REQUIRED_TABLES = [
+  'users',
+  'settings',
+  'products',
+  'customers',
+  'sales',
+  'sale_items',
+  'categories',
+  'branches',
+  'warehouses',
+  'notification_settings',
+  'credit_events',
+  'credit_snapshots',
+  'credit_scores',
+];
+
+async function runMigrations(db) {
+  console.log('[bootstrap] resolving migrations folder');
+  const { folder, tried } = resolveMigrationsFolder();
+
+  if (!folder) {
+    const msg =
+      'migrations folder not found. Tried:\n  - ' + tried.join('\n  - ');
+    console.error(`[bootstrap] ${msg}`);
+    bootstrapState.lastError = 'migrations folder not found';
+    return false;
+  }
+
+  console.log(`[bootstrap] migrations folder: ${folder}`);
+  console.log('[bootstrap] running migrations');
+
+  try {
+    await migrate(db, { migrationsFolder: folder });
+    console.log('[bootstrap] migrations complete');
+    bootstrapState.migrationsApplied = true;
+    return true;
+  } catch (error) {
+    // Pre-existing tables from a manual install or older migration baseline
+    // shouldn't block startup — the schema probe below decides readiness.
+    if (error.message?.includes('already exists')) {
+      console.log('[bootstrap] migrations skipped — objects already exist');
+      bootstrapState.migrationsApplied = true;
+      return true;
+    }
+    console.error(`[bootstrap] migration failed: ${error.message}`);
+    bootstrapState.lastError = error.message;
+    return false;
+  }
+}
+
+async function verifySchema() {
+  console.log('[bootstrap] verifying schema');
+  const placeholders = REQUIRED_TABLES.map((_, i) => `$${i + 1}`).join(',');
+  const result = await pool.query(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name IN (${placeholders})`,
+    REQUIRED_TABLES
+  );
+  const present = new Set(result.rows.map((r) => r.table_name));
+  const missing = REQUIRED_TABLES.filter((t) => !present.has(t));
+
+  if (missing.length === 0) {
+    bootstrapState.schemaReady = true;
+    bootstrapState.missingTables = [];
+    bootstrapState.lastError = null;
+    console.log('[bootstrap] schema ready');
+    return true;
+  }
+
+  bootstrapState.schemaReady = false;
+  bootstrapState.missingTables = missing;
+  bootstrapState.lastError = `missing tables: ${missing.join(', ')}`;
+  console.error(`[bootstrap] schema not ready. Missing tables: ${missing.join(', ')}`);
+  return false;
+}
+
+/**
+ * Re-run the schema probe on demand (e.g. before FirstRun) so a transient
+ * boot-time failure can be re-evaluated without restarting the process.
+ * Returns the latest bootstrap state snapshot.
+ */
+export async function ensureSchemaReady() {
+  if (!pool) {
+    return { ...bootstrapState };
+  }
+  try {
+    await verifySchema();
+  } catch (error) {
+    bootstrapState.schemaReady = false;
+    bootstrapState.lastError = error.message;
+    console.error(`[bootstrap] schema probe failed: ${error.message}`);
+  }
+  return { ...bootstrapState };
+}
+
 async function initDB() {
+  console.log('[bootstrap] connecting to database');
   const attempts = Number(process.env.PG_CONNECT_RETRY_ATTEMPTS || 15);
   const delayMs = Number(process.env.PG_CONNECT_RETRY_DELAY_MS || 2000);
 
@@ -177,52 +280,29 @@ async function initDB() {
     }
   }
 
-  // Create Drizzle instance
+  // Create Drizzle instance up-front so callers always get a usable handle.
+  // Migration / verification failures are surfaced via bootstrapState rather
+  // than rejecting dbPromise — that lets /api/setup/status correctly report
+  // SCHEMA_NOT_READY instead of masking it as DATABASE_CONNECTION_FAILED.
   const db = drizzle(pool, { schema });
-
-  // Run pending migrations
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = pathDirname(__filename);
-  const migrationsFolder = join(__dirname, '../drizzle');
-
-  try {
-    await migrate(db, { migrationsFolder });
-    console.log('[bootstrap] migrations applied');
-    bootstrapState.migrationsApplied = true;
-  } catch (error) {
-    // If migration fails because tables exist, it's okay
-    if (error.message?.includes('already exists')) {
-      console.log('[bootstrap] migrations skipped - tables already exist');
-      bootstrapState.migrationsApplied = true;
-    } else {
-      bootstrapState.lastError = error.message;
-      throw error;
-    }
-  }
-
-  // Verify required tables actually exist after migration so the setup status
-  // endpoint can distinguish "DB up but schema broken" from "no admin yet".
-  try {
-    const probe = await pool.query(
-      `SELECT to_regclass('public.users') AS users_tbl,
-              to_regclass('public.settings') AS settings_tbl`
-    );
-    const row = probe.rows[0] || {};
-    if (row.users_tbl && row.settings_tbl) {
-      bootstrapState.schemaReady = true;
-      console.log('[bootstrap] schema ready');
-    } else {
-      bootstrapState.schemaReady = false;
-      bootstrapState.lastError = 'required tables missing after migration';
-      console.error('[bootstrap] schema NOT ready — missing tables');
-    }
-  } catch (error) {
-    bootstrapState.schemaReady = false;
-    bootstrapState.lastError = error.message;
-    console.error(`[bootstrap] schema probe failed: ${error.message}`);
-  }
-
   dbInstance = db;
+
+  const migrated = await runMigrations(db);
+  if (migrated) {
+    await verifySchema();
+  } else {
+    // Still attempt schema verification — if a previous run already migrated,
+    // the tables may all be present even though this boot couldn't locate
+    // the folder.
+    try {
+      await verifySchema();
+    } catch (error) {
+      bootstrapState.schemaReady = false;
+      bootstrapState.lastError = error.message;
+      console.error(`[bootstrap] schema probe failed: ${error.message}`);
+    }
+  }
+
   return db;
 }
 
@@ -245,6 +325,10 @@ export const getPool = async () => {
 };
 
 export const getBootstrapState = () => ({ ...bootstrapState });
+
+/** Convenience predicate for workers/schedulers gating on a usable schema. */
+export const isSchemaReady = () =>
+  bootstrapState.databaseReady && bootstrapState.schemaReady;
 
 /**
  * Gracefully close the pool. Called during server shutdown.

@@ -1,6 +1,6 @@
 import { eq, like } from 'drizzle-orm';
 import { z } from 'zod';
-import { getDb, getBootstrapState } from '../db.js';
+import { getDb, getBootstrapState, ensureSchemaReady } from '../db.js';
 import { users, settings } from '../models/index.js';
 import { hashPassword } from '../utils/helpers.js';
 import { ConflictError, ValidationError } from '../utils/errors.js';
@@ -77,8 +77,8 @@ async function hasCompanySettings(db) {
  * documented in /api/setup/status — it never derives FirstRun from local cache.
  */
 export async function getSetupStatus() {
-  const base = getBootstrapState();
   const serverMode = process.env.NUQTA_APP_MODE || 'server';
+  let base = getBootstrapState();
 
   if (!base.databaseReady) {
     return {
@@ -105,12 +105,19 @@ export async function getSetupStatus() {
     };
   }
 
+  // Re-probe the schema if boot didn't see it ready — covers the case where
+  // migrations finished after the renderer first asked for /status.
+  if (!base.schemaReady) {
+    base = await ensureSchemaReady();
+  }
+
   if (!base.schemaReady) {
     return {
       databaseConnected: true,
       schemaReady: false,
       setupRequired: true,
       reason: SETUP_REASONS.SCHEMA_NOT_READY,
+      missingTables: base.missingTables || [],
       details: base.lastError || null,
       serverMode,
     };
@@ -176,10 +183,22 @@ export async function runFirstRun(input, { ipAddress } = {}) {
     throw new ConflictError('Setup is already complete.');
   }
   if (status.reason === SETUP_REASONS.DATABASE_CONNECTION_FAILED) {
-    throw new ValidationError('Database is not available.');
+    const err = new ValidationError(
+      'Database is not available.',
+      SETUP_REASONS.DATABASE_CONNECTION_FAILED
+    );
+    err.details = { reason: status.reason, message: status.details || null };
+    throw err;
   }
   if (status.reason === SETUP_REASONS.SCHEMA_NOT_READY) {
-    throw new ValidationError('Database schema is not ready.');
+    const missing = status.missingTables || [];
+    const message =
+      missing.length > 0
+        ? `Database schema is not ready. Missing tables: ${missing.join(', ')}`
+        : 'Database schema is not ready.';
+    const err = new ValidationError(message, SETUP_REASONS.SCHEMA_NOT_READY);
+    err.details = { reason: status.reason, missingTables: missing };
+    throw err;
   }
 
   const db = await getDb();

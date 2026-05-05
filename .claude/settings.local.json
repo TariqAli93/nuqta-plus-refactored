@@ -33,7 +33,9 @@
       "Bash(npx vue-tsc *)",
       "Bash(git stash *)",
       "Bash(VITE_TARGET=web npx vite build --mode production)",
-      "Bash(echo \"exit:$?\")"
+      "Bash(echo \"exit:$?\")",
+      "Bash(pnpm --filter backend lint)",
+      "Bash(pnpm exec *)"
     ]
   }
 }

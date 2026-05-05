@@ -1,6 +1,7 @@
 import * as svc from './notificationService.js';
 import * as settingsService from './notificationSettingsService.js';
 import { createAdapter } from './providers/index.js';
+import { isSchemaReady } from '../../db.js';
 
 /**
  * In-process notification queue worker.
@@ -33,6 +34,7 @@ let timer = null;
 let running = false;
 let inFlight = false;
 let logger = console;
+let schemaSkipNoticeEmitted = false;
 
 function buildAdapter(settings) {
   return createAdapter({
@@ -115,6 +117,14 @@ async function processOne(notification, settings, adapter) {
 
 async function tick() {
   if (inFlight) return;
+  if (!isSchemaReady()) {
+    if (!schemaSkipNoticeEmitted) {
+      logger.warn?.('[notification-worker] skipped: schema not ready');
+      schemaSkipNoticeEmitted = true;
+    }
+    return;
+  }
+  schemaSkipNoticeEmitted = false;
   inFlight = true;
   try {
     const settings = await settingsService.getInternal();

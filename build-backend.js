@@ -83,6 +83,26 @@ function copyBackendSource() {
     const abs = path.join(DIST_DIR, rel);
     if (!fs.existsSync(abs)) fail(`Source copy missing required file: ${rel}`);
   }
+
+  // Drizzle migrations are mandatory at runtime — initDB() runs them before
+  // the schema-readiness probe. Fail packaging loudly if they didn't ship.
+  const migrationsDir = path.join(DIST_DIR, 'drizzle');
+  const journalPath = path.join(migrationsDir, 'meta', '_journal.json');
+  if (!fs.existsSync(migrationsDir) || !fs.existsSync(journalPath)) {
+    fail(
+      `Drizzle migrations missing in dist-backend.\nExpected: ${path.relative(
+        ROOT,
+        journalPath
+      )}\nRun \`pnpm --filter backend db:generate\` and re-run the build.`
+    );
+  }
+  const sqlMigrations = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'));
+  if (sqlMigrations.length === 0) {
+    fail(`Drizzle migrations folder has no .sql files: ${path.relative(ROOT, migrationsDir)}`);
+  }
+  log(`✓ drizzle migrations bundled (${sqlMigrations.length} files)`);
 }
 
 function installProductionDeps() {

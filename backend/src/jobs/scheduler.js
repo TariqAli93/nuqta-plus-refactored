@@ -1,5 +1,6 @@
 import { runCreditScoringJob } from './creditScoringJob.js';
 import { runOverdueReminderJob } from '../services/notifications/overdueReminderJob.js';
+import { isSchemaReady } from '../db.js';
 
 /**
  * Lightweight internal scheduler.
@@ -23,8 +24,18 @@ const timers = new Map();
 export function scheduleJob(name, { intervalMs, runOnStart = false, run, logger }) {
   if (timers.has(name)) return; // idempotent — safe to call twice
   const log = logger || console;
+  let skippedNotice = false;
 
   const tick = async () => {
+    if (!isSchemaReady()) {
+      // Avoid log-spam: emit once until the schema becomes ready, then reset.
+      if (!skippedNotice) {
+        log.warn?.(`[scheduler:${name}] skipped: schema not ready`);
+        skippedNotice = true;
+      }
+      return;
+    }
+    skippedNotice = false;
     try {
       await run({ logger: log });
     } catch (err) {
