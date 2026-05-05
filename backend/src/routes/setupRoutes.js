@@ -1,4 +1,20 @@
 import { getSetupStatus, runFirstRun } from '../services/setupService.js';
+import { getDiagnostics } from '../db.js';
+
+/**
+ * Whether the diagnostics endpoint should expose detailed payload to the
+ * caller. Detailed mode is enabled in:
+ *   - non-production (NODE_ENV !== 'production')
+ *   - server-mode installs that explicitly opt in via NUQTA_DEBUG_DIAGNOSTICS=1
+ *
+ * In every other case the endpoint still responds, but returns only the
+ * compact `summary` block — no candidate paths, no error stacks.
+ */
+function diagnosticsAllowed() {
+  if (process.env.NODE_ENV !== 'production') return true;
+  if (process.env.NUQTA_DEBUG_DIAGNOSTICS === '1') return true;
+  return false;
+}
 
 export default async function setupRoutes(fastify) {
   // GET /api/setup/status — public, used by the SPA on every cold load.
@@ -11,6 +27,24 @@ export default async function setupRoutes(fastify) {
       `[bootstrap] /api/setup/status: ${status.reason}`
     );
     return status;
+  });
+
+  // GET /api/setup/diagnostics — verbose bootstrap state. Public so that an
+  // operator can hit it on a fresh install before any admin user exists,
+  // but credentials are masked and detailed payload only exposed in
+  // dev/debug-enabled installs.
+  fastify.get('/diagnostics', async () => {
+    const detailed = diagnosticsAllowed();
+    const full = getDiagnostics();
+    if (detailed) return full;
+    return {
+      summary: full.summary,
+      requiredTables: full.requiredTables,
+      maskedDatabaseUrl: full.maskedDatabaseUrl,
+      schemaReady: full.schemaReady,
+      reason: full.reason,
+      reasonDetails: full.reasonDetails,
+    };
   });
 
   // POST /api/setup/first-run — public so it's reachable from a fresh,

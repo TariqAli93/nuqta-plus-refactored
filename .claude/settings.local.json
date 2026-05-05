@@ -35,7 +35,8 @@
       "Bash(VITE_TARGET=web npx vite build --mode production)",
       "Bash(echo \"exit:$?\")",
       "Bash(pnpm --filter backend lint)",
-      "Bash(pnpm exec *)"
+      "Bash(pnpm exec *)",
+      "Bash(npx --no-install vue-tsc --version)"
     ]
   }
 }

@@ -135,6 +135,25 @@ exports.default = async function afterPack(context) {
     verbatimSymlinks: false,
   });
 
+  // ── Migrations sanity log ─────────────────────────────────────────────
+  // The runtime resolver in resolveMigrationsFolder.js looks up
+  // resources/backend/drizzle/meta/_journal.json — log the exact pair so a
+  // packaging regression fails the build here, not at first launch.
+  const migrationsSrc = path.join(distBackend, 'drizzle');
+  const migrationsDst = path.join(target, 'drizzle');
+  const journalDst = path.join(migrationsDst, 'meta', '_journal.json');
+  if (!fs.existsSync(migrationsDst) || !fs.existsSync(journalDst)) {
+    throw new Error(
+      `[afterPack] migrations missing after copy. Expected ${journalDst}. ` +
+        'build-backend.js must populate dist-backend/drizzle before packaging.'
+    );
+  }
+  const sqlCount = fs
+    .readdirSync(migrationsDst)
+    .filter((f) => f.toLowerCase().endsWith('.sql')).length;
+  console.log(`[afterPack] migrations copied from ${migrationsSrc} to ${migrationsDst}`);
+  console.log(`[afterPack] migrations verified (${sqlCount} .sql files, _journal.json present)`);
+
   // ── Post-copy verification ─────────────────────────────────────────────
   // Fail the build if anything required for PostgreSQL-based runtime is missing.
   const requiredAfterCopy = modelRequired

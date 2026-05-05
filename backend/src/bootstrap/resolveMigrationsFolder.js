@@ -5,69 +5,102 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function isValidMigrationsDir(dir) {
-  if (!dir) return false;
+function inspectCandidate(p) {
+  const record = {
+    path: p,
+    exists: false,
+    isDirectory: false,
+    hasJournal: false,
+    sqlFileCount: 0,
+    sqlFiles: [],
+    valid: false,
+    error: null,
+  };
+
   try {
-    if (!fs.existsSync(dir)) return false;
-    if (!fs.statSync(dir).isDirectory()) return false;
-    const journal = path.join(dir, 'meta', '_journal.json');
-    return fs.existsSync(journal);
-  } catch {
-    return false;
+    if (!p || !fs.existsSync(p)) return record;
+
+    record.exists = true;
+
+    const stat = fs.statSync(p);
+    if (!stat.isDirectory()) return record;
+
+    record.isDirectory = true;
+
+    const journal = path.join(p, 'meta', '_journal.json');
+    record.hasJournal = fs.existsSync(journal);
+
+    const entries = fs.readdirSync(p).filter((f) => f.toLowerCase().endsWith('.sql'));
+
+    record.sqlFileCount = entries.length;
+    record.sqlFiles = entries.slice(0, 5);
+
+    record.valid = record.hasJournal && record.sqlFileCount > 0;
+  } catch (err) {
+    record.error = err instanceof Error ? err.message : String(err);
   }
+
+  return record;
 }
 
-/**
- * Resolve the Drizzle migrations folder across dev, packaged, and service
- * runtimes. Returns the first candidate that exists and contains a valid
- * `meta/_journal.json`. Returns null if none match — callers should treat
- * that as a fatal packaging bug.
- *
- * Search order:
- *   1. <db.js>/../../drizzle                     (dev + dist-backend layout)
- *   2. process.resourcesPath/backend/drizzle     (Electron afterPack target)
- *   3. process.resourcesPath/resources/backend/drizzle (legacy nesting)
- *   4. <process.execPath dir>/drizzle            (WinSW %BASE%/drizzle)
- *   5. process.cwd()/drizzle                     (last resort)
- */
+function hasDuplicateBackendSegment(p) {
+  const parts = path
+    .normalize(p)
+    .toLowerCase()
+    .split(/[\\/]+/);
+
+  return parts.some((part, index) => part === 'backend' && parts[index + 1] === 'backend');
+}
+
 export function resolveMigrationsFolder({ envOverride } = {}) {
-  const tried = [];
-  const candidates = [];
+  const candidatePaths = [];
+  const seen = new Set();
 
-  if (envOverride) candidates.push(envOverride);
-  if (process.env.MIGRATIONS_FOLDER) candidates.push(process.env.MIGRATIONS_FOLDER);
+  const push = (p) => {
+    if (!p) return;
 
-  // db.js sits at <root>/src/db.js → migrations at <root>/drizzle.
-  // This file sits at <root>/src/bootstrap/resolveMigrationsFolder.js, so
-  // walk up two levels.
-  candidates.push(path.resolve(__dirname, '..', '..', 'drizzle'));
+    const abs = path.resolve(p);
 
+    if (hasDuplicateBackendSegment(abs)) return;
+    if (seen.has(abs)) return;
+
+    seen.add(abs);
+    candidatePaths.push(abs);
+  };
+
+  push(envOverride);
+  push(process.env.MIGRATIONS_FOLDER);
+
+  // Dev / compiled backend layouts
+  push(path.resolve(__dirname, '..', '..', 'drizzle'));
+  push(path.resolve(__dirname, '..', 'drizzle'));
+
+  // Electron packaged resources
   if (process.resourcesPath) {
-    candidates.push(path.join(process.resourcesPath, 'backend', 'drizzle'));
-    candidates.push(path.join(process.resourcesPath, 'resources', 'backend', 'drizzle'));
+    push(path.join(process.resourcesPath, 'backend', 'drizzle'));
+    push(path.join(process.resourcesPath, 'resources', 'backend', 'drizzle'));
   }
 
+  // Service / executable-relative layouts
   if (process.execPath) {
-    // node.exe at the backend root (rare): <root>/node.exe
-    candidates.push(path.join(path.dirname(process.execPath), 'drizzle'));
-    // Bundled node at <root>/bin/node.exe — used by the WinSW service host.
-    candidates.push(
-      path.join(path.dirname(process.execPath), '..', 'drizzle')
-    );
+    const execDir = path.dirname(process.execPath);
+    push(path.join(execDir, 'drizzle'));
+    push(path.join(execDir, '..', 'drizzle'));
   }
 
-  candidates.push(path.resolve(process.cwd(), 'drizzle'));
-  // Service host may set cwd one level up from the backend root.
-  candidates.push(path.resolve(process.cwd(), 'backend', 'drizzle'));
+  // CWD layouts
+  const cwd = process.cwd();
+  push(path.resolve(cwd, 'drizzle'));
 
-  for (const c of candidates) {
-    if (!c) continue;
-    const abs = path.resolve(c);
-    tried.push(abs);
-    if (isValidMigrationsDir(abs)) {
-      return { folder: abs, tried };
-    }
+  if (path.basename(cwd).toLowerCase() !== 'backend') {
+    push(path.resolve(cwd, 'backend', 'drizzle'));
   }
 
-  return { folder: null, tried };
+  const candidates = candidatePaths.map(inspectCandidate);
+  const winner = candidates.find((c) => c.valid) || null;
+
+  return {
+    folder: winner ? winner.path : null,
+    candidates,
+  };
 }

@@ -50,14 +50,13 @@ const isServiceMode = !isDev;
  * ships a new resources/backend folder atomically.
  */
 const SERVICE_HOST_ENTRIES = new Set([
-  'bin',                       // bundled node.exe runtime (ABI tied to electron build)
-  'NuqtaPlusBackend.exe',      // WinSW wrapper
-  'NuqtaPlusBackend.xml',      // service descriptor
-  'service',                   // .cmd helpers
-  'logs',                      // service log directory
+  'bin', // bundled node.exe runtime (ABI tied to electron build)
+  'NuqtaPlusBackend.exe', // WinSW wrapper
+  'NuqtaPlusBackend.xml', // service descriptor
+  'service', // .cmd helpers
+  'logs', // service log directory
 ]);
 import {
-  trustedRoots,
   ensureDownloadRoot,
   assertPathWithin,
   assertNoSymlinks,
@@ -140,11 +139,7 @@ export function stageBackendUpdate(sourceDir, version) {
 
   // Destination must sit inside stagingRoot — belt-and-braces against a
   // malformed `version` making it past isStrictSemver somehow.
-  const finalDir = assertPathWithin(
-    stagedVersionDir(version),
-    [stagingRoot()],
-    'finalDir'
-  );
+  const finalDir = assertPathWithin(stagedVersionDir(version), [stagingRoot()], 'finalDir');
   const tmpDir = `${finalDir}.staging`;
 
   logger.info(`Staging backend update v${version} from ${sanitizePath(safeSource)}`);
@@ -191,26 +186,17 @@ export function verifyStagedVersion(version, expectedHash) {
     throw new SecurityError(`verifyStagedVersion: invalid version: ${JSON.stringify(version)}`);
   }
 
-  const dir = assertPathWithin(
-    stagedVersionDir(version),
-    [stagingRoot()],
-    'stagedVersionDir'
-  );
+  const dir = assertPathWithin(stagedVersionDir(version), [stagingRoot()], 'stagedVersionDir');
   if (!fs.existsSync(dir)) {
     throw new SecurityError(`verifyStagedVersion: ${version} is not staged`);
   }
 
   assertNoSymlinks(dir, 'staged bundle');
 
-  const required = [
-    path.join(dir, 'src', 'server.js'),
-    path.join(dir, 'package.json'),
-  ];
+  const required = [path.join(dir, 'src', 'server.js'), path.join(dir, 'package.json')];
   for (const file of required) {
     if (!fs.existsSync(file)) {
-      throw new SecurityError(
-        `verifyStagedVersion: missing required file ${sanitizePath(file)}`
-      );
+      throw new SecurityError(`verifyStagedVersion: missing required file ${sanitizePath(file)}`);
     }
   }
 
@@ -226,8 +212,7 @@ export function verifyStagedVersion(version, expectedHash) {
       throw new SecurityError(`verifyStagedVersion: expectedHash is not a SHA-256 hex digest`);
     }
     const { rootHash, fileCount } = sha256Directory(dir);
-    const match =
-      rootHash.toLowerCase() === expectedHash.toLowerCase();
+    const match = rootHash.toLowerCase() === expectedHash.toLowerCase();
     if (!match) {
       throw new SecurityError(
         `verifyStagedVersion: SHA-256 mismatch for v${version} ` +
@@ -525,7 +510,11 @@ async function _applyBackendUpdateLockedService({
     logger.error(err, { phase: 'svc-snapshot' });
     // Restart service (still running on the original payload — nothing was moved
     // permanently; moveCurrentPayloadAside reversed itself before throwing).
-    try { await backendManager.StartBackend(); } catch (_) { /* surfaced below */ }
+    try {
+      await backendManager.StartBackend();
+    } catch (_) {
+      /* surfaced below */
+    }
     return { ok: false, version, rolledBack: false, error: `snapshot failed: ${err.message}` };
   }
 
@@ -542,10 +531,18 @@ async function _applyBackendUpdateLockedService({
     // Roll back: remove half-copied entries and restore snapshot.
     for (const name of payloadNames) {
       const live = path.join(baselineDir, name);
-      try { if (fs.existsSync(live)) fs.rmSync(live, { recursive: true, force: true }); } catch (_) { /* noop */ }
+      try {
+        if (fs.existsSync(live)) fs.rmSync(live, { recursive: true, force: true });
+      } catch (_) {
+        /* noop */
+      }
     }
     restoreBackupAside(baselineDir, moved);
-    try { await backendManager.StartBackend(); } catch (_) { /* logged */ }
+    try {
+      await backendManager.StartBackend();
+    } catch (_) {
+      /* logged */
+    }
     return { ok: false, version, rolledBack: true, error: `mirror failed: ${err.message}` };
   }
 
@@ -590,7 +587,11 @@ async function _applyBackendUpdateLockedService({
   // Remove the failed payload, restore snapshot.
   for (const name of payloadNames) {
     const live = path.join(baselineDir, name);
-    try { if (fs.existsSync(live)) fs.rmSync(live, { recursive: true, force: true }); } catch (_) { /* noop */ }
+    try {
+      if (fs.existsSync(live)) fs.rmSync(live, { recursive: true, force: true });
+    } catch (_) {
+      /* noop */
+    }
   }
   restoreBackupAside(baselineDir, moved);
 
