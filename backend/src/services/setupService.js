@@ -14,11 +14,8 @@ import { setSetupMode } from './featureFlagsService.js';
 
 /**
  * Setup status reasons surfaced to the frontend so it can decide whether to
- * route to FirstRun. Order matters — earliest unmet condition wins.
- *
- * The bootstrap-level reasons (DATABASE_CONNECTION_FAILED, MIGRATION_FAILED,
- * etc.) are forwarded verbatim from db.js' BOOTSTRAP_REASONS so the frontend
- * sees the exact root cause instead of a generic "SCHEMA_NOT_READY".
+ * route to FirstRun. The runtime backend only diagnoses — it never creates
+ * the database or runs migrations. Those are owned by tools/bootstrap.bat.
  */
 export const SETUP_REASONS = Object.freeze({
   ...BOOTSTRAP_REASONS,
@@ -26,22 +23,6 @@ export const SETUP_REASONS = Object.freeze({
   NO_COMPANY_SETTINGS: 'NO_COMPANY_SETTINGS',
   SETUP_COMPLETE: 'SETUP_COMPLETE',
 });
-
-/**
- * Bootstrap reasons that should short-circuit /api/setup/status — schema is
- * known not to be ready and we have a more specific cause than the legacy
- * SCHEMA_NOT_READY catch-all.
- */
-const SCHEMA_FAILURE_REASONS = new Set([
-  BOOTSTRAP_REASONS.WRONG_DATABASE_CONNECTED,
-  BOOTSTRAP_REASONS.INSUFFICIENT_SCHEMA_PRIVILEGES,
-  BOOTSTRAP_REASONS.MIGRATIONS_FOLDER_NOT_FOUND,
-  BOOTSTRAP_REASONS.MIGRATIONS_NOT_ATTEMPTED,
-  BOOTSTRAP_REASONS.MIGRATIONS_SKIPPED,
-  BOOTSTRAP_REASONS.MIGRATION_FAILED,
-  BOOTSTRAP_REASONS.MIGRATIONS_COMPLETED_BUT_SCHEMA_MISSING,
-  BOOTSTRAP_REASONS.SCHEMA_NOT_READY,
-]);
 
 const firstRunSchema = z.object({
   username: z
@@ -70,46 +51,6 @@ const firstRunSchema = z.object({
     .optional(),
 });
 
-/** Short user-facing headline for each schema-failure reason. */
-function reasonHeadline(reason) {
-  switch (reason) {
-    case BOOTSTRAP_REASONS.WRONG_DATABASE_CONNECTED:
-      return 'Connected to the wrong database.';
-    case BOOTSTRAP_REASONS.INSUFFICIENT_SCHEMA_PRIVILEGES:
-      return 'Database user lacks CREATE privilege on the public schema.';
-    case BOOTSTRAP_REASONS.MIGRATIONS_FOLDER_NOT_FOUND:
-      return 'Migrations folder was not found in the packaged backend.';
-    case BOOTSTRAP_REASONS.MIGRATIONS_NOT_ATTEMPTED:
-      return 'Database migrations were not attempted.';
-    case BOOTSTRAP_REASONS.MIGRATIONS_SKIPPED:
-      return 'Database migrations were skipped.';
-    case BOOTSTRAP_REASONS.MIGRATION_FAILED:
-      return 'Database migrations failed.';
-    case BOOTSTRAP_REASONS.MIGRATIONS_COMPLETED_BUT_SCHEMA_MISSING:
-      return 'Migrations completed but required tables are still missing.';
-    default:
-      return 'Database schema is not ready.';
-  }
-}
-
-/** Short remediation hint for each reason. */
-function reasonRemediation(reason) {
-  switch (reason) {
-    case BOOTSTRAP_REASONS.WRONG_DATABASE_CONNECTED:
-      return 'Update PG_DATABASE / DATABASE_URL to point at the correct database, then restart the service.';
-    case BOOTSTRAP_REASONS.INSUFFICIENT_SCHEMA_PRIVILEGES:
-      return 'Grant CREATE on schema public to the configured database user, or connect as a user that already has it.';
-    case BOOTSTRAP_REASONS.MIGRATIONS_FOLDER_NOT_FOUND:
-      return 'Reinstall NuqtaPlus Server — the drizzle/ folder is missing from resources/backend.';
-    case BOOTSTRAP_REASONS.MIGRATION_FAILED:
-      return 'Inspect the server log for "[bootstrap] migration failed" — the underlying error is logged with a stack trace.';
-    case BOOTSTRAP_REASONS.MIGRATIONS_COMPLETED_BUT_SCHEMA_MISSING:
-      return 'The migration runner reported success but the schema is incomplete — check for an unrelated database that shares the connection target, or re-run from a clean database.';
-    default:
-      return 'Check the server log for "[bootstrap] migrations folder candidates probed" to see which paths were tried, then reinstall or restart the service.';
-  }
-}
-
 async function probeDatabase() {
   try {
     const db = await getDb();
@@ -137,72 +78,14 @@ async function hasCompanySettings(db) {
 }
 
 /**
- * Build the schema-not-ready response payload. Surfaces the precise bootstrap
- * reason (MIGRATION_FAILED, MIGRATIONS_FOLDER_NOT_FOUND, etc.) plus a compact
- * migrations summary so the frontend / operator can act on it without parsing
- * service logs.
- */
-function buildSchemaNotReadyResponse(base, serverMode) {
-  const reason = SCHEMA_FAILURE_REASONS.has(base.reason)
-    ? base.reason
-    : SETUP_REASONS.SCHEMA_NOT_READY;
-
-  const m = base.migrations || {};
-  const migrationsSummary = {
-    attempted: !!m.attempted,
-    skipped: !!m.skipped,
-    skipReason: m.skipReason || null,
-    completed: !!m.completed,
-    folderSelected: m.folderSelected || null,
-    candidates: Array.isArray(m.candidates)
-      ? m.candidates.map((c) => ({
-          path: c.path,
-          exists: c.exists,
-          isDirectory: c.isDirectory,
-          hasJournal: c.hasJournal,
-          sqlFileCount: c.sqlFileCount,
-          valid: c.valid,
-        }))
-      : [],
-    errorCode: m.errorCode || null,
-    errorMessage: m.errorMessage || null,
-  };
-
-  const response = {
-    databaseConnected: true,
-    schemaReady: false,
-    setupRequired: true,
-    reason,
-    missingTables: base.missingTables || [],
-    details: base.reasonDetails || base.lastError || null,
-    migrations: migrationsSummary,
-    serverMode,
-  };
-
-  // Wrong-DB and insufficient-privilege responses benefit from including the
-  // expected vs. actual values so the frontend can render an actionable error.
-  if (reason === SETUP_REASONS.WRONG_DATABASE_CONNECTED) {
-    response.expectedDatabase = base.configured?.database || null;
-    response.actualDatabase = base.serverDiagnostics?.currentDatabase || null;
-  }
-  if (reason === SETUP_REASONS.INSUFFICIENT_SCHEMA_PRIVILEGES) {
-    response.user = base.serverDiagnostics?.currentUser || null;
-    response.database = base.serverDiagnostics?.currentDatabase || null;
-    response.schema = 'public';
-    response.missingPrivilege = 'CREATE';
-  }
-  if (reason === SETUP_REASONS.MIGRATIONS_COMPLETED_BUT_SCHEMA_MISSING) {
-    response.folderSelected = m.folderSelected || null;
-    response.sqlFileCount = m.candidates?.find((c) => c.path === m.folderSelected)?.sqlFileCount || 0;
-    response.existingTables = base.serverDiagnostics?.publicTables || [];
-  }
-
-  return response;
-}
-
-/**
- * Compute current setup status. Frontend consumes the canonical shape
- * documented in /api/setup/status — it never derives FirstRun from local cache.
+ * Compute current setup status. Diagnostic only — never repairs.
+ *
+ * Possible reasons:
+ *   DATABASE_CONNECTION_FAILED → backend cannot reach PostgreSQL
+ *   SCHEMA_NOT_READY           → schema is missing; run tools\bootstrap.bat
+ *   NO_ADMIN_USER              → schema is ready, FirstRun should run
+ *   NO_COMPANY_SETTINGS        → admin exists but company settings unset
+ *   SETUP_COMPLETE             → fully ready
  */
 export async function getSetupStatus() {
   const serverMode = process.env.NUQTA_APP_MODE || 'server';
@@ -215,8 +98,6 @@ export async function getSetupStatus() {
       setupRequired: true,
       reason: SETUP_REASONS.DATABASE_CONNECTION_FAILED,
       details: base.reasonDetails || base.lastError || null,
-      // Include only non-sensitive connection target fields so the FirstRun
-      // dialog can render host/port/database without ever seeing the password.
       configured: base.configured
         ? {
             host: base.configured.host,
@@ -229,8 +110,6 @@ export async function getSetupStatus() {
     };
   }
 
-  // Bootstrap thinks the DB is ready, but verify with a live ping so a pool
-  // that died after startup isn't reported as healthy.
   const probe = await probeDatabase();
   if (!probe.ok) {
     return {
@@ -243,14 +122,22 @@ export async function getSetupStatus() {
     };
   }
 
-  // Re-probe the schema if boot didn't see it ready — covers the case where
-  // migrations finished after the renderer first asked for /status.
   if (!base.schemaReady) {
     base = await ensureSchemaReady();
   }
 
   if (!base.schemaReady) {
-    return buildSchemaNotReadyResponse(base, serverMode);
+    return {
+      databaseConnected: true,
+      schemaReady: false,
+      setupRequired: true,
+      reason: SETUP_REASONS.SCHEMA_NOT_READY,
+      missingTables: base.missingTables || [],
+      details:
+        base.reasonDetails ||
+        'Database schema is not ready. Run tools\\bootstrap.bat as Administrator to apply migrations, then restart the NuqtaPlusBackend service.',
+      serverMode,
+    };
   }
 
   const db = await getDb();
@@ -298,12 +185,9 @@ export async function getSetupStatus() {
 }
 
 /**
- * Idempotent first-run handler. Refuses to run when setup is already complete
- * so a leaked endpoint can't reset the admin or replace company settings.
- *
- * Never returns the password or any auth token in the response — the client
- * is expected to log in via /api/auth/login afterwards using the credentials
- * the user just typed.
+ * Idempotent first-run handler. Creates the first admin user and seeds
+ * company settings only — never creates the database or applies migrations.
+ * The bootstrap script must have prepared the schema before this runs.
  */
 export async function runFirstRun(input, { ipAddress } = {}) {
   const data = firstRunSchema.parse(input);
@@ -314,7 +198,7 @@ export async function runFirstRun(input, { ipAddress } = {}) {
   }
   if (status.reason === SETUP_REASONS.DATABASE_CONNECTION_FAILED) {
     const err = new ValidationError(
-      reasonHeadline(SETUP_REASONS.DATABASE_CONNECTION_FAILED),
+      'Database connection failed. Run tools\\bootstrap.bat as Administrator.',
       SETUP_REASONS.DATABASE_CONNECTION_FAILED
     );
     err.details = {
@@ -326,22 +210,20 @@ export async function runFirstRun(input, { ipAddress } = {}) {
     };
     throw err;
   }
-  if (SCHEMA_FAILURE_REASONS.has(status.reason)) {
+  if (status.reason === SETUP_REASONS.SCHEMA_NOT_READY) {
     const missing = status.missingTables || [];
-    const parts = [reasonHeadline(status.reason)];
+    const parts = ['Database schema is not ready.'];
     if (missing.length > 0) parts.push(`Missing tables: ${missing.join(', ')}.`);
-    if (status.details) parts.push(`Cause: ${status.details}.`);
-    parts.push(reasonRemediation(status.reason));
-    const err = new ValidationError(parts.join(' '), status.reason);
+    parts.push(
+      'Run tools\\bootstrap.bat as Administrator to apply migrations, then restart the NuqtaPlusBackend service.'
+    );
+    const err = new ValidationError(parts.join(' '), SETUP_REASONS.SCHEMA_NOT_READY);
     err.details = {
       reason: status.reason,
       databaseConnected: true,
       schemaReady: false,
       missingTables: missing,
       cause: status.details || null,
-      migrations: status.migrations || null,
-      expectedDatabase: status.expectedDatabase || null,
-      actualDatabase: status.actualDatabase || null,
       serverMode: status.serverMode || null,
     };
     throw err;
@@ -349,10 +231,6 @@ export async function runFirstRun(input, { ipAddress } = {}) {
 
   const db = await getDb();
 
-  // Re-check inside a critical section so concurrent first-run calls cannot
-  // both create an admin. The unique constraint on users.username also blocks
-  // duplicates at the DB level, but checking first lets us return a clean
-  // error.
   const adminCount = await countAdmins(db);
   let createdUser = null;
 
@@ -378,8 +256,6 @@ export async function runFirstRun(input, { ipAddress } = {}) {
     console.log(`[bootstrap] first-run admin created: ${newUser.username}`);
   }
 
-  // Company settings — upsert under company.* keys. Always at least seed the
-  // company name so a subsequent /status returns SETUP_COMPLETE.
   const company = data.company || {};
   const companyName = company.name || data.fullName || 'My Company';
   const updates = [
@@ -415,8 +291,6 @@ export async function runFirstRun(input, { ipAddress } = {}) {
     }
   }
 
-  // Mark feature-flag setup wizard as no longer pending so the dashboard
-  // doesn't immediately bounce the new admin into the wizard.
   try {
     await setSetupMode('done', createdUser?.id || null);
   } catch (error) {

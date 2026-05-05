@@ -44,12 +44,7 @@ import {
   trustedRoots,
   sanitizePath,
 } from './security.js';
-import {
-  startService,
-  stopService,
-  queryServiceState,
-  isServiceInstalled,
-} from './serviceController.js';
+import { queryServiceState } from './serviceController.js';
 import {
   BACKEND_RESTART_MAX_ATTEMPTS,
   BACKEND_RESTART_COOLDOWN_MS,
@@ -153,26 +148,24 @@ export default class BackendManager extends EventEmitter {
   // ── Public API ────────────────────────────────────────────────────────────
 
   async StartBackend() {
-    // ── Service mode: ask the SCM to start NuqtaPlusBackend. ──────────────
+    // ── Service mode: refuse to manage the service from JS. ───────────────
+    // The Windows Service is owned by the operator workflow:
+    //   tools\bootstrap.bat  → installs + starts NuqtaPlusBackend
+    //   service\start-service.bat / stop-service.bat → manual control
+    // We only observe state via sc query.
     if (isServiceMode) {
-      if (!(await isServiceInstalled())) {
-        const msg =
-          'NuqtaPlusBackend Windows Service is not installed. ' +
-          'Reinstall the application or run service\\install-service.cmd as Administrator.';
-        logger.error(msg);
-        throw new Error(msg);
-      }
-      try {
-        await startService();
-        this._serviceRunningCached = true;
+      const state = await queryServiceState();
+      this._serviceRunningCached = state === 'running';
+      if (state === 'running') {
         this.emit('started', { pid: null });
-        logger.info('[svc] backend service started via SCM');
-      } catch (err) {
-        this._serviceRunningCached = false;
-        logger.error(err, { phase: 'svc-start' });
-        throw err;
+        logger.info('[svc] backend service is RUNNING (managed by Windows SCM)');
+        return;
       }
-      return;
+      const msg =
+        'NuqtaPlus Backend service is not running. ' +
+        'Please run tools\\bootstrap.bat as Administrator.';
+      logger.error(`[svc] ${msg} (sc state=${state})`);
+      throw new Error(msg);
     }
 
     if (this.permanentlyFailed) {
@@ -374,19 +367,11 @@ export default class BackendManager extends EventEmitter {
   // ── Graceful shutdown ─────────────────────────────────────────────────────
 
   async StopBackend() {
-    // ── Service mode: ask the SCM to stop NuqtaPlusBackend. ───────────────
+    // ── Service mode: do NOT stop the service from JS. ────────────────────
+    // The Windows Service lifecycle is owned by tools\bootstrap.bat and
+    // backend\service\*.bat. Electron only observes state.
     if (isServiceMode) {
-      try {
-        await stopService();
-        this._serviceRunningCached = false;
-        logger.info('[svc] backend service stopped via SCM');
-        this.emit('exit', { code: 0, signal: null, intentional: true });
-      } catch (err) {
-        // Don't throw — caller often calls StopBackend speculatively before
-        // a database operation. Surface the error in logs and let callers
-        // re-check via /health.
-        logger.warn(`[svc] StopBackend failed: ${err.message}`);
-      }
+      logger.info('[svc] StopBackend is a no-op in service mode (use service\\stop-service.bat)');
       return;
     }
 

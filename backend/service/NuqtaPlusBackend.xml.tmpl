@@ -14,20 +14,32 @@
   <name>NuqtaPlus Backend</name>
   <description>NuqtaPlus POS - Local backend service (HTTP on 127.0.0.1:41732). Version ${BACKEND_VERSION}.</description>
 
-  <executable>%BASE%\bin\node.exe</executable>
+  <executable>%BASE%\..\bin\node.exe</executable>
   <arguments>src\server.js</arguments>
-  <workingdirectory>%BASE%</workingdirectory>
+  <workingdirectory>%BASE%\..</workingdirectory>
 
   <env name="NODE_ENV" value="production" />
-  <env name="BACKEND_HOST" value="127.0.0.1" />
+  <env name="BACKEND_HOST" value="0.0.0.0" />
   <env name="BACKEND_PORT" value="41732" />
   <env name="NUQTA_RUN_MODE" value="service" />
+
+  <!--
+    PostgreSQL connection defaults. The runtime backend assumes the database
+    and schema were prepared by tools\bootstrap.bat — it never creates the
+    database or runs migrations. Override these by editing this file or by
+    placing a .env in the working directory (resources\backend\.env).
+  -->
+  <env name="PG_HOST" value="localhost" />
+  <env name="PG_PORT" value="5432" />
+  <env name="PG_DATABASE" value="nuqta_db" />
+  <env name="PG_USER" value="postgres" />
+  <env name="PG_PASSWORD" value="root" />
 
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
     <keepFiles>5</keepFiles>
   </log>
-  <logpath>%BASE%\logs</logpath>
+  <logpath>%BASE%\..\logs</logpath>
 
   <onfailure action="restart" delay="5 sec" />
   <onfailure action="restart" delay="10 sec" />

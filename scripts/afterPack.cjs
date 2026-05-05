@@ -42,7 +42,7 @@ const REQUIRED_AFTER_COPY = [
   'src/db.js',
   'package.json',
 
-  // Bundled Node.js runtime
+  // Bundled Node.js runtime — used by both the service and migrate-production.js
   'bin/node.exe',
 
   // Production dependencies
@@ -51,8 +51,10 @@ const REQUIRED_AFTER_COPY = [
   'node_modules/drizzle-orm/package.json',
   'node_modules/fastify/package.json',
 
-  // Drizzle migration files
-  'drizzle',
+  // Migration artifacts — applied by tools\bootstrap.bat, NOT by the runtime
+  'migrations/migrate-production.js',
+  'migrations/drizzle',
+  'migrations/drizzle/meta/_journal.json',
 
   // ── Credit-risk model artifacts ───────────────────────────────────────
   // Both must ship — the runtime falls back to RULES_ONLY if either is
@@ -62,14 +64,20 @@ const REQUIRED_AFTER_COPY = [
   'node_modules/onnxruntime-node/package.json',
 
   // ── Windows Service host (WinSW) ──────────────────────────────────────
-  'NuqtaPlusBackend.exe',
-  'NuqtaPlusBackend.xml',
-  'service/install-service.cmd',
-  'service/uninstall-service.cmd',
-  'service/start-service.cmd',
-  'service/stop-service.cmd',
-  'service/restart-service.cmd',
-  'service/status-service.cmd',
+  'service/NuqtaPlusBackend.exe',
+  'service/NuqtaPlusBackend.xml',
+  'service/install-service.bat',
+  'service/uninstall-service.bat',
+  'service/start-service.bat',
+  'service/stop-service.bat',
+];
+
+// tools/ scripts live next to resources/ in the install root, not under
+// resources/backend. They're verified separately below.
+const REQUIRED_TOOLS = [
+  'bootstrap.bat',
+  'check-service.bat',
+  'check-database.bat',
 ];
 
 exports.default = async function afterPack(context) {
@@ -136,23 +144,36 @@ exports.default = async function afterPack(context) {
   });
 
   // ── Migrations sanity log ─────────────────────────────────────────────
-  // The runtime resolver in resolveMigrationsFolder.js looks up
-  // resources/backend/drizzle/meta/_journal.json — log the exact pair so a
-  // packaging regression fails the build here, not at first launch.
-  const migrationsSrc = path.join(distBackend, 'drizzle');
-  const migrationsDst = path.join(target, 'drizzle');
+  // Migrations are applied by tools\bootstrap.bat using migrate-production.js
+  // BEFORE the service starts. The runtime backend never reads this folder.
+  const migrationsDst = path.join(target, 'migrations', 'drizzle');
   const journalDst = path.join(migrationsDst, 'meta', '_journal.json');
   if (!fs.existsSync(migrationsDst) || !fs.existsSync(journalDst)) {
     throw new Error(
       `[afterPack] migrations missing after copy. Expected ${journalDst}. ` +
-        'build-backend.js must populate dist-backend/drizzle before packaging.'
+        'build-backend.js must populate dist-backend/migrations/drizzle before packaging.'
     );
   }
   const sqlCount = fs
     .readdirSync(migrationsDst)
     .filter((f) => f.toLowerCase().endsWith('.sql')).length;
-  console.log(`[afterPack] migrations copied from ${migrationsSrc} to ${migrationsDst}`);
   console.log(`[afterPack] migrations verified (${sqlCount} .sql files, _journal.json present)`);
+
+  // ── tools\ — bootstrap and diagnostic scripts ─────────────────────────
+  // These live next to resources/ in the install root, not inside
+  // resources/backend. Copy from <repoRoot>/tools/*.bat → <appOutDir>/tools.
+  const toolsSrc = path.join(repoRoot, 'tools');
+  const toolsDst = path.join(appOutDir, 'tools');
+  fs.mkdirSync(toolsDst, { recursive: true });
+  for (const rel of REQUIRED_TOOLS) {
+    const srcAbs = path.join(toolsSrc, rel);
+    const dstAbs = path.join(toolsDst, rel);
+    if (!fs.existsSync(srcAbs)) {
+      throw new Error(`[afterPack] required tools script missing in source: tools/${rel}`);
+    }
+    fs.copyFileSync(srcAbs, dstAbs);
+  }
+  console.log(`[afterPack] tools copied (${REQUIRED_TOOLS.length} scripts)`);
 
   // ── Post-copy verification ─────────────────────────────────────────────
   // Fail the build if anything required for PostgreSQL-based runtime is missing.

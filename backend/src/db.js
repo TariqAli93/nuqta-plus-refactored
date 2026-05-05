@@ -1,11 +1,9 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import config from './config.js';
 import * as schema from './models/index.js';
-import { resolveMigrationsFolder } from './bootstrap/resolveMigrationsFolder.js';
 
-const { Pool, Client } = pg;
+const { Pool } = pg;
 
 // ── PostgreSQL connection pool ────────────────────────────────────────────
 let pool = null;
@@ -19,12 +17,6 @@ let dbInstance = null;
 export const BOOTSTRAP_REASONS = Object.freeze({
   DATABASE_CONNECTION_FAILED: 'DATABASE_CONNECTION_FAILED',
   WRONG_DATABASE_CONNECTED: 'WRONG_DATABASE_CONNECTED',
-  INSUFFICIENT_SCHEMA_PRIVILEGES: 'INSUFFICIENT_SCHEMA_PRIVILEGES',
-  MIGRATIONS_NOT_ATTEMPTED: 'MIGRATIONS_NOT_ATTEMPTED',
-  MIGRATIONS_SKIPPED: 'MIGRATIONS_SKIPPED',
-  MIGRATIONS_FOLDER_NOT_FOUND: 'MIGRATIONS_FOLDER_NOT_FOUND',
-  MIGRATION_FAILED: 'MIGRATION_FAILED',
-  MIGRATIONS_COMPLETED_BUT_SCHEMA_MISSING: 'MIGRATIONS_COMPLETED_BUT_SCHEMA_MISSING',
   SCHEMA_NOT_READY: 'SCHEMA_NOT_READY',
 });
 
@@ -52,22 +44,18 @@ const REQUIRED_TABLES = [
 ];
 
 /**
- * Structured bootstrap state. Mutated as the boot pipeline progresses; a
- * shallow clone is exposed via getBootstrapState() and getDiagnostics().
- *
- * Backward-compat fields (databaseReady, migrationsApplied, schemaReady,
- * missingTables, lastError) are kept for existing callers — see
- * server.js / setupService.js / scheduler.js.
+ * Structured bootstrap state. The runtime backend assumes the database has
+ * already been created and the schema migrated by the Windows bootstrap
+ * script (tools/bootstrap.bat → backend/migrations/migrate-production.js).
+ * This struct only records what the runtime can observe: connection status
+ * and schema readiness.
  */
 const bootstrap = {
-  // ── Backward-compat flags (kept stable for existing callers) ────────────
   databaseReady: false,
-  migrationsApplied: false,
   schemaReady: false,
   missingTables: [],
   lastError: null,
 
-  // ── Structured diagnostics ──────────────────────────────────────────────
   reason: null,
   reasonDetails: null,
 
@@ -85,31 +73,14 @@ const bootstrap = {
     lastError: null,
   },
 
-  databaseExists: null, // null = unknown (maintenance probe failed)
-  databaseCreated: false,
-
   serverDiagnostics: {
     currentDatabase: null,
     currentUser: null,
     serverAddress: null,
     serverPort: null,
     version: null,
-    canCreateInDatabase: null,
-    canCreateInPublicSchema: null,
     publicTables: [],
     queryError: null,
-  },
-
-  migrations: {
-    attempted: false,
-    skipped: false,
-    skipReason: null,
-    folderSelected: null,
-    candidates: [],
-    completed: false,
-    errorCode: null,
-    errorMessage: null,
-    errorStack: null,
   },
 };
 
@@ -126,21 +97,6 @@ export function maskConnectionString(input) {
   } catch {
     return input;
   }
-}
-
-/**
- * Resolve the target database name from environment configuration.
- */
-function getTargetDatabaseName() {
-  if (process.env.DATABASE_URL) {
-    try {
-      const url = new URL(process.env.DATABASE_URL);
-      return url.pathname.replace(/^\//, '') || 'nuqta_db';
-    } catch {
-      return 'nuqta_db';
-    }
-  }
-  return process.env.PG_DATABASE || 'nuqta_db';
 }
 
 /**
@@ -169,75 +125,6 @@ function snapshotConfiguredTarget() {
   }
 
   bootstrap.configured = { host, port, database, user, via };
-}
-
-/**
- * Build connection config for the "postgres" maintenance database.
- * Used to check/create the target database before connecting to it.
- */
-function getMaintenanceConfig() {
-  const sslOption = process.env.PG_SSL === 'true' ? { rejectUnauthorized: false } : false;
-
-  if (process.env.DATABASE_URL) {
-    try {
-      const url = new URL(process.env.DATABASE_URL);
-      return {
-        host: url.hostname || '127.0.0.1',
-        port: parseInt(url.port || '5432', 10),
-        user: decodeURIComponent(url.username) || 'postgres',
-        password: decodeURIComponent(url.password) || 'root',
-        database: 'postgres',
-        ssl: sslOption,
-      };
-    } catch {
-      // fall through
-    }
-  }
-
-  return {
-    host: process.env.PG_HOST || '127.0.0.1',
-    port: parseInt(process.env.PG_PORT || '5432', 10),
-    user: process.env.PG_USER || 'postgres',
-    password: process.env.PG_PASSWORD || 'root',
-    database: 'postgres',
-    ssl: sslOption,
-  };
-}
-
-/**
- * Ensure the target database exists. Connects to the "postgres" maintenance
- * database, checks if the target DB is present, and creates it if missing.
- */
-async function ensureDatabase() {
-  const dbName = getTargetDatabaseName();
-  const maintConfig = getMaintenanceConfig();
-  const client = new Client(maintConfig);
-
-  try {
-    await client.connect();
-
-    const result = await client.query(
-      'SELECT 1 FROM pg_database WHERE datname = $1',
-      [dbName]
-    );
-
-    if (result.rowCount === 0) {
-      // CREATE DATABASE cannot use parameterized queries; dbName comes from
-      // our own env config, not user input.
-      await client.query(`CREATE DATABASE "${dbName}"`);
-      bootstrap.databaseExists = true;
-      bootstrap.databaseCreated = true;
-      console.log(`[bootstrap] database "${dbName}" created`);
-    } else {
-      bootstrap.databaseExists = true;
-      bootstrap.databaseCreated = false;
-    }
-  } catch (error) {
-    bootstrap.databaseExists = null; // unknown — maintenance probe failed
-    console.warn(`[bootstrap] could not ensure database exists: ${error.message}`);
-  } finally {
-    await client.end().catch(() => {});
-  }
 }
 
 function createPool() {
@@ -272,13 +159,11 @@ async function runDiagnosticQueries() {
   try {
     const r = await pool.query(`
       SELECT
-        current_database()                                          AS current_database,
-        current_user                                                AS current_user,
-        host(inet_server_addr())                                    AS server_address,
-        inet_server_port()                                          AS server_port,
-        version()                                                   AS version,
-        has_database_privilege(current_user, current_database(), 'CREATE') AS can_create_in_database,
-        has_schema_privilege(current_user, 'public', 'CREATE')      AS can_create_in_public_schema
+        current_database() AS current_database,
+        current_user       AS current_user,
+        host(inet_server_addr()) AS server_address,
+        inet_server_port() AS server_port,
+        version()          AS version
     `);
     const row = r.rows[0] || {};
     diag.currentDatabase = row.current_database ?? null;
@@ -286,109 +171,14 @@ async function runDiagnosticQueries() {
     diag.serverAddress = row.server_address ?? null;
     diag.serverPort = row.server_port != null ? Number(row.server_port) : null;
     diag.version = row.version ?? null;
-    diag.canCreateInDatabase = row.can_create_in_database ?? null;
-    diag.canCreateInPublicSchema = row.can_create_in_public_schema ?? null;
 
     console.log(
       `[bootstrap] server diagnostics: db=${diag.currentDatabase} user=${diag.currentUser} ` +
-        `addr=${diag.serverAddress ?? 'n/a'}:${diag.serverPort ?? 'n/a'} ` +
-        `canCreate(public)=${diag.canCreateInPublicSchema}`
+        `addr=${diag.serverAddress ?? 'n/a'}:${diag.serverPort ?? 'n/a'}`
     );
   } catch (error) {
     diag.queryError = error.message;
     console.warn(`[bootstrap] diagnostic queries failed: ${error.message}`);
-  }
-
-  try {
-    const t = await pool.query(
-      `SELECT table_name FROM information_schema.tables
-       WHERE table_schema = 'public'
-       ORDER BY table_name`
-    );
-    diag.publicTables = t.rows.map((r) => r.table_name);
-  } catch (error) {
-    diag.queryError = (diag.queryError ? diag.queryError + '; ' : '') + error.message;
-  }
-}
-
-async function runMigrations(db) {
-  const m = bootstrap.migrations;
-
-  // ── Optional global skip via env ───────────────────────────────────────
-  if (process.env.MIGRATIONS_DISABLED === '1') {
-    m.skipped = true;
-    m.skipReason = 'env:MIGRATIONS_DISABLED=1';
-    console.log(`[bootstrap] migrations skipped: ${m.skipReason}`);
-    return false;
-  }
-
-  // ── Privilege precheck ─────────────────────────────────────────────────
-  // If the connected user cannot CREATE in the public schema, drizzle migrate
-  // is guaranteed to fail. Surface this as a distinct reason so the operator
-  // doesn't have to guess from a generic "permission denied" Postgres error.
-  if (bootstrap.serverDiagnostics.canCreateInPublicSchema === false) {
-    m.skipped = true;
-    m.skipReason = 'INSUFFICIENT_SCHEMA_PRIVILEGES';
-    bootstrap.reason = BOOTSTRAP_REASONS.INSUFFICIENT_SCHEMA_PRIVILEGES;
-    bootstrap.reasonDetails =
-      `User "${bootstrap.serverDiagnostics.currentUser}" lacks CREATE privilege on schema "public" ` +
-      `in database "${bootstrap.serverDiagnostics.currentDatabase}".`;
-    console.error(`[bootstrap] migrations skipped: ${bootstrap.reasonDetails}`);
-    return false;
-  }
-
-  // ── Resolve folder ─────────────────────────────────────────────────────
-  console.log('[bootstrap] resolving migrations folder');
-  const { folder, candidates } = resolveMigrationsFolder();
-  m.candidates = candidates;
-  m.folderSelected = folder;
-
-  console.log('[bootstrap] migrations folder candidates probed:');
-  for (const c of candidates) {
-    console.log(
-      `  - ${c.path} exists=${c.exists} dir=${c.isDirectory} ` +
-        `journal=${c.hasJournal} sqlFiles=${c.sqlFileCount} valid=${c.valid}` +
-        (c.error ? ` error=${c.error}` : '')
-    );
-  }
-
-  if (!folder) {
-    m.errorCode = BOOTSTRAP_REASONS.MIGRATIONS_FOLDER_NOT_FOUND;
-    m.errorMessage = `migrations folder not found. Tried ${candidates.length} candidates.`;
-    bootstrap.lastError = m.errorMessage;
-    console.error(`[bootstrap] ${m.errorMessage}`);
-    return false;
-  }
-
-  // ── Run migrate() ──────────────────────────────────────────────────────
-  console.log(`[bootstrap] migrations attempted=true`);
-  console.log(`[bootstrap] migrations folder selected: ${folder}`);
-  console.log('[bootstrap] running drizzle migrations');
-  m.attempted = true;
-
-  try {
-    await migrate(db, { migrationsFolder: folder });
-    m.completed = true;
-    bootstrap.migrationsApplied = true;
-    console.log('[bootstrap] migrations completed');
-    return true;
-  } catch (error) {
-    // Pre-existing tables from a manual install or older migration baseline
-    // shouldn't block startup — the schema probe below decides readiness.
-    if (error.message?.includes('already exists')) {
-      m.completed = true;
-      bootstrap.migrationsApplied = true;
-      console.log('[bootstrap] migrations completed (some objects already existed)');
-      return true;
-    }
-    m.completed = false;
-    m.errorCode = BOOTSTRAP_REASONS.MIGRATION_FAILED;
-    m.errorMessage = error.message || String(error);
-    m.errorStack = error.stack || null;
-    bootstrap.lastError = `migration failed: ${m.errorMessage}`;
-    console.error(`[bootstrap] migration failed: ${m.errorMessage}`);
-    if (m.errorStack) console.error(m.errorStack);
-    return false;
   }
 }
 
@@ -419,28 +209,18 @@ async function verifySchema() {
 }
 
 /**
- * Compute the highest-priority bootstrap reason from accumulated state. Called
- * at the end of initDB and again from ensureSchemaReady. Sets bootstrap.reason
- * and bootstrap.reasonDetails so /api/setup/status can return the exact root
- * cause without re-deriving it.
+ * Compute the highest-priority bootstrap reason from accumulated state.
+ * Runtime backend only diagnoses — it never repairs. The bootstrap script
+ * (tools/bootstrap.bat) is responsible for creating the database and
+ * applying migrations before the service starts.
  */
 function computeReason() {
-  // Privilege/skip-reason explicitly set by runMigrations takes precedence.
-  if (
-    bootstrap.reason === BOOTSTRAP_REASONS.INSUFFICIENT_SCHEMA_PRIVILEGES &&
-    !bootstrap.schemaReady
-  ) {
-    return;
-  }
-
   if (!bootstrap.connection.connected) {
     bootstrap.reason = BOOTSTRAP_REASONS.DATABASE_CONNECTION_FAILED;
     bootstrap.reasonDetails = bootstrap.connection.lastError;
     return;
   }
 
-  // Wrong database: configured target doesn't match current_database().
-  // Only meaningful when both values are known.
   const cfgDb = bootstrap.configured.database;
   const curDb = bootstrap.serverDiagnostics.currentDatabase;
   if (cfgDb && curDb && cfgDb !== curDb && !bootstrap.schemaReady) {
@@ -456,43 +236,10 @@ function computeReason() {
     return;
   }
 
-  const m = bootstrap.migrations;
-
-  if (m.errorCode === BOOTSTRAP_REASONS.MIGRATIONS_FOLDER_NOT_FOUND) {
-    bootstrap.reason = BOOTSTRAP_REASONS.MIGRATIONS_FOLDER_NOT_FOUND;
-    bootstrap.reasonDetails = m.errorMessage;
-    return;
-  }
-
-  if (m.errorCode === BOOTSTRAP_REASONS.MIGRATION_FAILED) {
-    bootstrap.reason = BOOTSTRAP_REASONS.MIGRATION_FAILED;
-    bootstrap.reasonDetails = m.errorMessage;
-    return;
-  }
-
-  if (m.skipped) {
-    bootstrap.reason = BOOTSTRAP_REASONS.MIGRATIONS_SKIPPED;
-    bootstrap.reasonDetails = m.skipReason;
-    return;
-  }
-
-  if (m.attempted && m.completed && bootstrap.missingTables.length > 0) {
-    bootstrap.reason = BOOTSTRAP_REASONS.MIGRATIONS_COMPLETED_BUT_SCHEMA_MISSING;
-    bootstrap.reasonDetails =
-      `Migrations completed against folder ${m.folderSelected} but ${bootstrap.missingTables.length} ` +
-      `required tables are still missing.`;
-    return;
-  }
-
-  if (!m.attempted) {
-    bootstrap.reason = BOOTSTRAP_REASONS.MIGRATIONS_NOT_ATTEMPTED;
-    bootstrap.reasonDetails = m.skipReason || bootstrap.lastError;
-    return;
-  }
-
-  // Fallback — schema isn't ready and we don't have a more specific reason.
   bootstrap.reason = BOOTSTRAP_REASONS.SCHEMA_NOT_READY;
-  bootstrap.reasonDetails = bootstrap.lastError;
+  bootstrap.reasonDetails =
+    bootstrap.lastError ||
+    'Database schema is not ready. Run tools\\bootstrap.bat as Administrator to apply migrations.';
 }
 
 /**
@@ -521,6 +268,9 @@ async function initDB() {
     `[bootstrap] target: ${bootstrap.configured.user}@${bootstrap.configured.host}:` +
       `${bootstrap.configured.port}/${bootstrap.configured.database} (via ${bootstrap.configured.via})`
   );
+  console.log(
+    '[bootstrap] runtime assumes database+schema were prepared by tools\\bootstrap.bat'
+  );
 
   console.log('[bootstrap] connecting to database');
   const attempts = Number(process.env.PG_CONNECT_RETRY_ATTEMPTS || 15);
@@ -529,11 +279,10 @@ async function initDB() {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     bootstrap.connection.attempts = attempt;
     try {
-      await ensureDatabase();
       pool = createPool();
 
       const client = await pool.connect();
-      const result = await client.query('SELECT current_database() AS db, version() AS ver');
+      const result = await client.query('SELECT current_database() AS db');
       console.log(`[bootstrap] database connected: ${result.rows[0].db}`);
       client.release();
 
@@ -556,9 +305,7 @@ async function initDB() {
 
       if (attempt === attempts) {
         console.error('Failed to connect to PostgreSQL:', error.message);
-        console.error('Make sure PostgreSQL is running and the connection details are correct.');
-        console.error('Set PG_HOST, PG_PORT, PG_DATABASE, PG_USER, PG_PASSWORD env vars,');
-        console.error('or provide a full DATABASE_URL connection string.');
+        console.error('Make sure PostgreSQL is running and tools\\bootstrap.bat has been run.');
         bootstrap.connection.connected = false;
         computeReason();
         throw error;
@@ -571,34 +318,11 @@ async function initDB() {
     }
   }
 
-  // Run diagnostic SQL right after first successful connect — needed for
-  // privilege/wrong-DB checks below and for the /diagnostics endpoint.
   await runDiagnosticQueries();
 
-  // Wrong-database short-circuit: don't try to migrate into the wrong DB.
-  const cfgDb = bootstrap.configured.database;
-  const curDb = bootstrap.serverDiagnostics.currentDatabase;
-  if (cfgDb && curDb && cfgDb !== curDb) {
-    bootstrap.reason = BOOTSTRAP_REASONS.WRONG_DATABASE_CONNECTED;
-    bootstrap.reasonDetails = `Configured PG_DATABASE="${cfgDb}" but current_database()="${curDb}".`;
-    bootstrap.migrations.skipped = true;
-    bootstrap.migrations.skipReason = 'WRONG_DATABASE_CONNECTED';
-    console.error(`[bootstrap] ${bootstrap.reasonDetails} — refusing to run migrations`);
-  }
-
-  // Create Drizzle instance up-front so callers always get a usable handle.
-  // Migration / verification failures are surfaced via bootstrap rather than
-  // rejecting dbPromise — that lets /api/setup/status correctly report the
-  // exact reason instead of masking it as DATABASE_CONNECTION_FAILED.
   const db = drizzle(pool, { schema });
   dbInstance = db;
 
-  // Only run migrations if we haven't already short-circuited.
-  if (!bootstrap.migrations.skipped) {
-    await runMigrations(db);
-  }
-
-  // Verify schema either way — a previous run may have already migrated.
   try {
     await verifySchema();
   } catch (error) {
@@ -638,13 +362,11 @@ export const getPool = async () => {
 };
 
 /**
- * Backward-compatible snapshot. Includes the legacy flat fields plus the new
- * structured ones. Existing callers (server.js, setupService.js) read the
- * legacy fields; new code can use bootstrap.reason / .migrations / etc.
+ * Snapshot of the runtime bootstrap state, surfaced through
+ * /api/setup/status and /api/setup/diagnostics.
  */
 export const getBootstrapState = () => ({
   databaseReady: bootstrap.databaseReady,
-  migrationsApplied: bootstrap.migrationsApplied,
   schemaReady: bootstrap.schemaReady,
   missingTables: [...bootstrap.missingTables],
   lastError: bootstrap.lastError,
@@ -654,22 +376,15 @@ export const getBootstrapState = () => ({
 
   configured: { ...bootstrap.configured },
   connection: { ...bootstrap.connection },
-  databaseExists: bootstrap.databaseExists,
-  databaseCreated: bootstrap.databaseCreated,
   serverDiagnostics: {
     ...bootstrap.serverDiagnostics,
     publicTables: [...bootstrap.serverDiagnostics.publicTables],
   },
-  migrations: {
-    ...bootstrap.migrations,
-    candidates: bootstrap.migrations.candidates.map((c) => ({ ...c, sqlFiles: [...c.sqlFiles] })),
-  },
 });
 
 /**
- * Detailed snapshot suitable for the /api/setup/diagnostics endpoint. Same
- * shape as getBootstrapState() plus a few synthesised top-level fields and a
- * masked connection summary that's safe to expose.
+ * Detailed snapshot suitable for the /api/setup/diagnostics endpoint.
+ * Diagnostic only — never repairs anything.
  */
 export const getDiagnostics = () => {
   const state = getBootstrapState();
@@ -693,8 +408,6 @@ export const getDiagnostics = () => {
         diag.serverAddress && diag.serverPort
           ? `${diag.serverAddress}:${diag.serverPort}`
           : null,
-      databaseExists: state.databaseExists,
-      databaseCreated: state.databaseCreated,
       schemaReady: state.schemaReady,
       missingTables: state.missingTables,
       reason: state.reason,

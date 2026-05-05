@@ -35,9 +35,17 @@ const SERVICE_NAME = 'NuqtaPlusBackend';
 const WINSW_SOURCE = path.join(ROOT, 'tools', 'winsw', 'WinSW-x64.exe');
 const SERVICE_TEMPLATE_DIR = path.join(SOURCE_DIR, 'service');
 const SERVICE_XML_TEMPLATE = path.join(SERVICE_TEMPLATE_DIR, `${SERVICE_NAME}.xml.tmpl`);
-const SERVICE_EXE_DIST = path.join(DIST_DIR, `${SERVICE_NAME}.exe`);
-const SERVICE_XML_DIST = path.join(DIST_DIR, `${SERVICE_NAME}.xml`);
 const SERVICE_SCRIPTS_DIST = path.join(DIST_DIR, 'service');
+const SERVICE_EXE_DIST = path.join(SERVICE_SCRIPTS_DIST, `${SERVICE_NAME}.exe`);
+const SERVICE_XML_DIST = path.join(SERVICE_SCRIPTS_DIST, `${SERVICE_NAME}.xml`);
+
+// ── Migrations layout ──────────────────────────────────────────────────────
+// Source layout (dev):       backend/drizzle/*.sql  +  backend/migrations/migrate-production.js
+// Dist layout (production):  backend/migrations/drizzle/*.sql  +  backend/migrations/migrate-production.js
+const MIGRATIONS_SRC_DRIZZLE = path.join(SOURCE_DIR, 'drizzle');
+const MIGRATIONS_DIST_DIR = path.join(DIST_DIR, 'migrations');
+const MIGRATIONS_DIST_DRIZZLE = path.join(MIGRATIONS_DIST_DIR, 'drizzle');
+const MIGRATE_SCRIPT_DIST = path.join(MIGRATIONS_DIST_DIR, 'migrate-production.js');
 
 const REQUIRED_SOURCE_FILES = [
   'src/server.js',
@@ -84,25 +92,51 @@ function copyBackendSource() {
     if (!fs.existsSync(abs)) fail(`Source copy missing required file: ${rel}`);
   }
 
-  // Drizzle migrations are mandatory at runtime — initDB() runs them before
-  // the schema-readiness probe. Fail packaging loudly if they didn't ship.
-  const migrationsDir = path.join(DIST_DIR, 'drizzle');
-  const journalPath = path.join(migrationsDir, 'meta', '_journal.json');
-  if (!fs.existsSync(migrationsDir) || !fs.existsSync(journalPath)) {
+  // Reorganise migrations into the production layout:
+  //   dist-backend/migrations/migrate-production.js   (already copied by source copy)
+  //   dist-backend/migrations/drizzle/<sql + meta>
+  //
+  // The runtime backend no longer applies migrations — tools\bootstrap.bat
+  // runs migrate-production.js with the bundled Node before starting the
+  // service. The packaged layout is what the script expects.
+  if (!fs.existsSync(MIGRATIONS_SRC_DRIZZLE)) {
     fail(
-      `Drizzle migrations missing in dist-backend.\nExpected: ${path.relative(
-        ROOT,
-        journalPath
-      )}\nRun \`pnpm --filter backend db:generate\` and re-run the build.`
+      `Drizzle migrations not found in source: ${path.relative(ROOT, MIGRATIONS_SRC_DRIZZLE)}.\n` +
+        'Run `pnpm --filter backend db:generate` and re-run the build.'
     );
   }
+  const stagedDrizzle = path.join(DIST_DIR, 'drizzle');
+  if (fs.existsSync(stagedDrizzle)) {
+    fs.rmSync(stagedDrizzle, { recursive: true, force: true });
+  }
+  fs.mkdirSync(MIGRATIONS_DIST_DIR, { recursive: true });
+  if (fs.existsSync(MIGRATIONS_DIST_DRIZZLE)) {
+    fs.rmSync(MIGRATIONS_DIST_DRIZZLE, { recursive: true, force: true });
+  }
+  fs.cpSync(MIGRATIONS_SRC_DRIZZLE, MIGRATIONS_DIST_DRIZZLE, { recursive: true });
+
+  const journalPath = path.join(MIGRATIONS_DIST_DRIZZLE, 'meta', '_journal.json');
+  if (!fs.existsSync(journalPath)) {
+    fail(`Drizzle journal missing after copy: ${path.relative(ROOT, journalPath)}`);
+  }
   const sqlMigrations = fs
-    .readdirSync(migrationsDir)
+    .readdirSync(MIGRATIONS_DIST_DRIZZLE)
     .filter((f) => f.endsWith('.sql'));
   if (sqlMigrations.length === 0) {
-    fail(`Drizzle migrations folder has no .sql files: ${path.relative(ROOT, migrationsDir)}`);
+    fail(
+      `Drizzle migrations folder has no .sql files: ${path.relative(ROOT, MIGRATIONS_DIST_DRIZZLE)}`
+    );
   }
-  log(`✓ drizzle migrations bundled (${sqlMigrations.length} files)`);
+
+  if (!fs.existsSync(MIGRATE_SCRIPT_DIST)) {
+    fail(
+      `migrate-production.js missing in dist-backend.\nExpected: ${path.relative(
+        ROOT,
+        MIGRATE_SCRIPT_DIST
+      )}\nEnsure backend/migrations/migrate-production.js is committed.`
+    );
+  }
+  log(`✓ migrations bundled (${sqlMigrations.length} SQL files + migrate-production.js)`);
 }
 
 function installProductionDeps() {
@@ -211,7 +245,14 @@ function bundleServiceHost() {
     );
   }
 
-  // 1. Copy WinSW.exe → dist-backend/NuqtaPlusBackend.exe
+  if (!fs.existsSync(SERVICE_SCRIPTS_DIST)) {
+    fail(
+      `Service scripts directory missing in dist-backend: ${SERVICE_SCRIPTS_DIST}\n` +
+        'Expected backend/service/*.bat to be copied by copyBackendSource().'
+    );
+  }
+
+  // 1. Copy WinSW.exe → dist-backend/service/NuqtaPlusBackend.exe
   fs.copyFileSync(WINSW_SOURCE, SERVICE_EXE_DIST);
   log(`✓ ${path.relative(ROOT, SERVICE_EXE_DIST)}`);
 
@@ -224,25 +265,16 @@ function bundleServiceHost() {
   fs.writeFileSync(SERVICE_XML_DIST, rendered, 'utf8');
   log(`✓ ${path.relative(ROOT, SERVICE_XML_DIST)} (v${backendPkg.version})`);
 
-  // 3. Sanity check the service scripts directory.
-  if (!fs.existsSync(SERVICE_SCRIPTS_DIST)) {
-    fail(
-      `Service scripts directory missing in dist-backend: ${SERVICE_SCRIPTS_DIST}\n` +
-        'Expected backend/service/*.cmd to be copied by copyBackendSource().'
-    );
-  }
   for (const required of [
-    'install-service.cmd',
-    'uninstall-service.cmd',
-    'start-service.cmd',
-    'stop-service.cmd',
-    'restart-service.cmd',
-    'status-service.cmd',
+    'install-service.bat',
+    'uninstall-service.bat',
+    'start-service.bat',
+    'stop-service.bat',
   ]) {
     const abs = path.join(SERVICE_SCRIPTS_DIST, required);
     if (!fs.existsSync(abs)) fail(`Missing service script: service/${required}`);
   }
-  // Remove template — not needed at runtime.
+  // Remove the descriptor template — it's a build-time input only.
   const distTmpl = path.join(SERVICE_SCRIPTS_DIST, `${SERVICE_NAME}.xml.tmpl`);
   if (fs.existsSync(distTmpl)) fs.rmSync(distTmpl, { force: true });
 

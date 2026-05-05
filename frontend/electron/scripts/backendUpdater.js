@@ -51,9 +51,8 @@ const isServiceMode = !isDev;
  */
 const SERVICE_HOST_ENTRIES = new Set([
   'bin', // bundled node.exe runtime (ABI tied to electron build)
-  'NuqtaPlusBackend.exe', // WinSW wrapper
-  'NuqtaPlusBackend.xml', // service descriptor
-  'service', // .cmd helpers
+  'service', // WinSW wrapper, descriptor, and .bat helpers
+  'migrations', // migrate-production.js + drizzle SQL (managed by bootstrap.bat)
   'logs', // service log directory
 ]);
 import {

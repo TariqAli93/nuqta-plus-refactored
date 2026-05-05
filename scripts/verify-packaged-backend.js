@@ -18,13 +18,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 
-const PACKAGED_BACKEND = path.join(
-  ROOT,
-  'release',
-  'win-unpacked',
-  'resources',
-  'backend'
-);
+const PACKAGED_ROOT = path.join(ROOT, 'release', 'win-unpacked');
+const PACKAGED_BACKEND = path.join(PACKAGED_ROOT, 'resources', 'backend');
+const PACKAGED_TOOLS = path.join(PACKAGED_ROOT, 'tools');
 
 const REQUIRED = [
   'src/server.js',
@@ -35,6 +31,20 @@ const REQUIRED = [
   'node_modules/pg/package.json',
   'node_modules/fastify/package.json',
   'node_modules/drizzle-orm/package.json',
+  'migrations/migrate-production.js',
+  'migrations/drizzle/meta/_journal.json',
+  'service/NuqtaPlusBackend.exe',
+  'service/NuqtaPlusBackend.xml',
+  'service/install-service.bat',
+  'service/uninstall-service.bat',
+  'service/start-service.bat',
+  'service/stop-service.bat',
+];
+
+const REQUIRED_TOOLS = [
+  'bootstrap.bat',
+  'check-service.bat',
+  'check-database.bat',
 ];
 
 function fail(msg) {
@@ -67,4 +77,23 @@ if (missing.length > 0) {
   );
 }
 
-console.log('[verify-packaged-backend] ✅ release/win-unpacked/resources/backend is complete');
+if (!fs.existsSync(PACKAGED_TOOLS)) {
+  fail(`packaged tools directory not found: ${path.relative(ROOT, PACKAGED_TOOLS)}`);
+}
+const missingTools = [];
+for (const rel of REQUIRED_TOOLS) {
+  const abs = path.join(PACKAGED_TOOLS, rel);
+  if (!fs.existsSync(abs)) {
+    missingTools.push(rel);
+  } else {
+    console.log(`[verify-packaged-backend] ✓ tools/${rel}`);
+  }
+}
+if (missingTools.length > 0) {
+  fail(
+    'packaged tools are incomplete. Missing:\n  - ' +
+      missingTools.map((m) => `tools/${m}`).join('\n  - ')
+  );
+}
+
+console.log('[verify-packaged-backend] ✅ release/win-unpacked/{resources/backend,tools} is complete');
