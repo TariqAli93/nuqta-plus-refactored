@@ -235,20 +235,36 @@ onMounted(async () => {
   // localStorage.removeItem('firstRunCompleted');
 
   const firstRunDone = localStorage.getItem('firstRunCompleted') === 'true';
+  if (firstRunDone) return;
 
-  if (!firstRunDone) {
-    try {
-      const response = await authStore.fetchInitialSetupInfo();
+  const response = await authStore.fetchInitialSetupInfo();
 
-      if (response?.isFirstRun) {
-        setupInfo.value = response;
-        isFirstRunDialog.value = true;
-        if (response.username) username.value = response.username;
-        if (response.password) password.value = response.password;
-      }
-    } catch {
-      isFirstRunDialog.value = false;
-    }
+  if (response?._error || response?._reason) {
+    const reason =
+      response._error?.response?.status
+        ? `HTTP ${response._error.response.status}`
+        : response._error?.message || response._reason || 'سبب غير معروف';
+    notification.error(
+      `تعذر التحقق من حالة الإعداد الأولي (${reason}). راجع DevTools (Ctrl+Shift+I) → Console للتفاصيل.`,
+      8000
+    );
+    return;
+  }
+
+  if (response?.backendReady === false) {
+    notification.error(
+      `الخادم غير جاهز: ${response.reason || 'سبب غير معروف'}. ` +
+        `تحقق من تشغيل PostgreSQL واكتمال الـ migrations في سجلات الخدمة.`,
+      10000
+    );
+    return;
+  }
+
+  if (response?.isFirstRun) {
+    setupInfo.value = response;
+    isFirstRunDialog.value = true;
+    if (response.username) username.value = response.username;
+    if (response.password) password.value = response.password;
   }
 }); // Close dialog
 function closeDialog() {

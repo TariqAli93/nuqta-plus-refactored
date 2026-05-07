@@ -18,9 +18,9 @@
  *
  *   <userData>/backend-active.json          ← pointer + history
  *     {
- *       "activeVersion": "1.0.13",
+ *       "activeVersion": "1.0.1",
  *       "activeSource":  "userData",        // "userData" | "baseline"
- *       "previousVersion": "1.0.12",
+ *       "previousVersion": "1.0.0",
  *       "previousSource":  "baseline",
  *       "updatedAt": "2026-04-16T00:00:00Z"
  *     }
@@ -43,10 +43,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import logger from './logger.js';
-import {
-  EXPECTED_BACKEND_VERSION,
-  KEEP_BACKEND_VERSIONS,
-} from '../../../packages/shared/index.js';
+import { EXPECTED_BACKEND_VERSION, KEEP_BACKEND_VERSIONS } from '../../../packages/shared/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -124,11 +121,7 @@ export function readPointer() {
 export function writePointer(pointer) {
   const file = pointerFile();
   const tmp = `${file}.tmp`;
-  const payload = JSON.stringify(
-    { ...pointer, updatedAt: new Date().toISOString() },
-    null,
-    2
-  );
+  const payload = JSON.stringify({ ...pointer, updatedAt: new Date().toISOString() }, null, 2);
   fs.writeFileSync(tmp, payload, 'utf8');
   fs.renameSync(tmp, file);
   logger.info(`Backend pointer updated: active=${pointer.activeVersion} (${pointer.activeSource})`);

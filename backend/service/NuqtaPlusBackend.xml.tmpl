@@ -8,6 +8,29 @@
   %BASE% is a WinSW built-in variable that resolves to the directory
   containing the wrapper executable. Everything is relative to that
   directory so the bundle is fully relocatable.
+
+  ─── DATABASE CONFIGURATION ─────────────────────────────────────────────
+  The backend connects to PostgreSQL at startup. By default we use the
+  values below (matching a stock postgres install). To override on a client
+  machine, EITHER:
+
+    a) Edit this file in-place (resources/backend/NuqtaPlusBackend.xml) and
+       restart the service:
+           net stop NuqtaPlusBackend
+           net start NuqtaPlusBackend
+
+    b) Drop a .env at %PROGRAMDATA%\NuqtaPlus\.env containing PG_HOST,
+       PG_USER, PG_PASSWORD, etc. The backend's envLoader.js searches
+       multiple locations in order — file values DO NOT override
+       <env> values from this descriptor.
+
+    c) Set DATABASE_URL=postgresql://user:pass@host:5432/dbname which
+       takes precedence over the individual PG_* vars.
+
+  All bootstrap diagnostics are written to:
+       %PROGRAMDATA%\NuqtaPlus\logs\bootstrap.log
+  This is the FIRST file to inspect when the backend reports "not ready".
+  ────────────────────────────────────────────────────────────────────────
 -->
 <service>
   <id>NuqtaPlusBackend</id>
@@ -18,11 +41,36 @@
   <arguments>src\server.js</arguments>
   <workingdirectory>%BASE%</workingdirectory>
 
+  <!-- Runtime mode -->
   <env name="NODE_ENV" value="production" />
   <env name="BACKEND_HOST" value="127.0.0.1" />
   <env name="BACKEND_PORT" value="41732" />
   <env name="NUQTA_RUN_MODE" value="service" />
 
+  <!-- PostgreSQL connection (edit to match the local PG install) -->
+  <env name="PG_HOST" value="127.0.0.1" />
+  <env name="PG_PORT" value="5432" />
+  <env name="PG_DATABASE" value="nuqta_db" />
+  <env name="PG_USER" value="postgres" />
+  <env name="PG_PASSWORD" value="root" />
+  <env name="PG_SSL" value="false" />
+
+  <!-- Connection retry policy: 30 attempts × 2s = 60s budget, generous
+       enough that the backend survives PostgreSQL still warming up. -->
+  <env name="PG_CONNECT_RETRY_ATTEMPTS" value="30" />
+  <env name="PG_CONNECT_RETRY_DELAY_MS" value="2000" />
+
+  <!-- JWT secret. PRODUCTION DEPLOYMENTS MUST OVERRIDE THIS with a strong,
+       random 32+ char string (e.g. via `openssl rand -hex 32`). The fallback
+       in src/config.js will warn if it's still the default at runtime. -->
+  <env name="JWT_SECRET" value="CHANGE_ME_nuqtaplus_2025_replace_with_strong_random_32_chars_or_more" />
+
+  <!-- Where bootstrap diagnostics + structured logs are written. Defaults to
+       %PROGRAMDATA%\NuqtaPlus\logs — admin reads this when troubleshooting. -->
+  <env name="NUQTA_LOG_DIR" value="%ProgramData%\NuqtaPlus\logs" />
+
+  <!-- Service stdout/stderr (separate from bootstrap.log). Each spawn gets
+       a fresh roll-by-size file so a crash loop doesn't blow up the disk. -->
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
     <keepFiles>5</keepFiles>

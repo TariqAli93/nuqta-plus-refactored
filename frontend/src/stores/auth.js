@@ -525,9 +525,16 @@ export const useAuthStore = defineStore('auth', {
           this.isFirstRun = response.data.isFirstRun;
           return response.data;
         }
-        return { isFirstRun: false };
-      } catch {
-        return { isFirstRun: false };
+        return { isFirstRun: false, _reason: 'empty-response' };
+      } catch (error) {
+        console.error('[FirstRun] fetchInitialSetupInfo failed:', {
+          status: error?.response?.status,
+          url: error?.config?.url,
+          baseURL: api.defaults.baseURL,
+          message: error?.message,
+          code: error?.code,
+        });
+        return { isFirstRun: false, _error: error };
       }
     },
 

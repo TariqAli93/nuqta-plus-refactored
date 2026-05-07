@@ -1,6 +1,6 @@
 {
   "name": "@nuqtaplus/frontend",
-  "version": "1.0.12",
+  "version": "1.0.7",
   "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
   "main": "./dist-electron/main/main.js",
   "type": "module",
@@ -15,6 +15,7 @@
     "build:client": "cross-env NODE_ENV=production VITE_TARGET=electron NUQTA_APP_MODE=client vite build && electron-builder --win --config electron-builder-client.yml",
     "build:win": "cross-env NODE_ENV=production VITE_TARGET=electron NUQTA_APP_MODE=server vite build && electron-builder --win",
     "publish:win": "cross-env VITE_TARGET=electron NODE_ENV=production NUQTA_APP_MODE=server vite build && electron-builder --win --publish always",
+    "publish:client": "cross-env VITE_TARGET=electron NODE_ENV=production NUQTA_APP_MODE=client vite build && electron-builder --win --config electron-builder-client.yml --publish always",
     "lint": "eslint src",
     "format": "prettier --write src"
   },

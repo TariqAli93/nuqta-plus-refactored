@@ -157,6 +157,39 @@ exports.default = async function afterPack(context) {
     );
   }
 
+  // ── Verify NuqtaPlusBackend.xml carries DB connection env vars ────────
+  // Without these, the backend silently falls back to in-code defaults and
+  // produces opaque "database_not_ready" responses on customer machines.
+  const xmlPath = path.join(target, 'NuqtaPlusBackend.xml');
+  const xmlContent = fs.readFileSync(xmlPath, 'utf8');
+  const requiredEnvNames = [
+    'PG_HOST', 'PG_PORT', 'PG_DATABASE', 'PG_USER', 'PG_PASSWORD',
+    'JWT_SECRET', 'NUQTA_LOG_DIR',
+  ];
+  const missingEnv = requiredEnvNames.filter(
+    (n) => !new RegExp(`<env\\s+name="${n}"`).test(xmlContent)
+  );
+  if (missingEnv.length > 0) {
+    throw new Error(
+      `[afterPack] NuqtaPlusBackend.xml is missing required <env> entries:\n  - ` +
+        missingEnv.join('\n  - ') +
+        `\nUpdate backend/service/NuqtaPlusBackend.xml.tmpl and rebuild.`
+    );
+  }
+  console.log(
+    `[afterPack] ✓ NuqtaPlusBackend.xml carries all required env vars (${requiredEnvNames.join(', ')})`
+  );
+
+  // ── Verify .env.production.example was emitted by build-backend.js ────
+  const envExample = path.join(target, '.env.production.example');
+  if (!fs.existsSync(envExample)) {
+    throw new Error(
+      `[afterPack] missing resources/backend/.env.production.example — ` +
+        `build-backend.js did not emit the env template. Re-run the backend build.`
+    );
+  }
+  console.log('[afterPack] ✓ .env.production.example present');
+
   // Informational: ONNX runtime (optional — runtime gracefully degrades
   // to RULES_ONLY if missing).
   const ortPackaged = fs.existsSync(path.join(target, 'node_modules', 'onnxruntime-node'));

@@ -1,6 +1,6 @@
 {
   "name": "@nuqtaplus/backend",
-  "version": "1.0.12",
+  "version": "1.0.7",
   "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
   "type": "module",
   "main": "src/server.js",

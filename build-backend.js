@@ -74,14 +74,85 @@ function copyBackendSource() {
       if (rel[0] === 'node_modules') return false;
       if (rel.length === 1 && rel[0] === 'package-lock.json') return false;
       if (rel.length === 1 && rel[0] === 'pnpm-lock.yaml') return false;
-      if (rel.length === 1 && rel[0].startsWith('.env')) return false;
+      // Strip dev .env files so we never ship dev credentials. Production
+      // overrides ship via .env.production / .env.production.example below.
+      if (rel.length === 1 && rel[0] === '.env') return false;
+      if (rel.length === 1 && rel[0] === '.env.debug') return false;
+      if (rel.length === 1 && rel[0] === '.env.example') return false;
       return true;
     },
   });
 
+  // ── Ship a .env.production.example as a template for admins ──────────
+  // The backend's envLoader.js searches:
+  //   1) $NUQTA_ENV_FILE
+  //   2) cwd/.env
+  //   3) <backend>/.env, <backend>/.env.production
+  //   4) %PROGRAMDATA%\NuqtaPlus\.env
+  // We always ship the example so the documented override location is
+  // discoverable. If a real .env.production exists in the source tree it is
+  // also copied (for sites that build per-customer images).
+  writeEnvProductionExample();
+  copyEnvProductionIfPresent();
+
   for (const rel of REQUIRED_SOURCE_FILES) {
     const abs = path.join(DIST_DIR, rel);
     if (!fs.existsSync(abs)) fail(`Source copy missing required file: ${rel}`);
+  }
+}
+
+function writeEnvProductionExample() {
+  const target = path.join(DIST_DIR, '.env.production.example');
+  const content =
+`# NuqtaPlus backend — production environment overrides.
+#
+# The service descriptor (NuqtaPlusBackend.xml) sets default values for
+# PG_HOST/PG_USER/etc. Values in THIS file are loaded by envLoader.js but
+# DO NOT override values already set by the service descriptor.
+#
+# To use this file as an actual override, either:
+#   1. Rename it to .env.production (next to NuqtaPlusBackend.xml)
+#   2. Place it at %PROGRAMDATA%\\NuqtaPlus\\.env
+#   3. Set NUQTA_ENV_FILE=<absolute path> in the service descriptor
+# In all cases, REMOVE the matching <env> line from NuqtaPlusBackend.xml so
+# this file's value can take effect.
+
+# DATABASE_URL takes precedence over PG_* when set:
+# DATABASE_URL=postgresql://postgres:root@127.0.0.1:5432/nuqta_db
+
+# Individual PostgreSQL connection params:
+PG_HOST=127.0.0.1
+PG_PORT=5432
+PG_DATABASE=nuqta_db
+PG_USER=postgres
+PG_PASSWORD=root
+PG_SSL=false
+
+# Connection retry policy:
+PG_CONNECT_RETRY_ATTEMPTS=30
+PG_CONNECT_RETRY_DELAY_MS=2000
+
+# Strong random secret REQUIRED in production. Generate one with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+JWT_SECRET=replace_me_with_a_strong_random_32_byte_hex_string
+
+# Diagnostics log directory (default: %PROGRAMDATA%\\NuqtaPlus\\logs):
+# NUQTA_LOG_DIR=C:\\ProgramData\\NuqtaPlus\\logs
+`;
+  fs.writeFileSync(target, content, 'utf8');
+  log(`✓ ${path.relative(ROOT, target)}`);
+}
+
+function copyEnvProductionIfPresent() {
+  const src = path.join(SOURCE_DIR, '.env.production');
+  if (fs.existsSync(src)) {
+    const dst = path.join(DIST_DIR, '.env.production');
+    fs.copyFileSync(src, dst);
+    warn(
+      `Shipped backend/.env.production into dist-backend. Make sure it does ` +
+      `NOT contain dev secrets — this file ends up on every customer install.`
+    );
+    log(`✓ ${path.relative(ROOT, dst)}`);
   }
 }
 

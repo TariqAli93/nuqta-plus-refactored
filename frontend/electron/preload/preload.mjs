@@ -98,7 +98,7 @@ contextBridge.exposeInMainWorld('splashAPI', {
  * window.api — backend lifecycle API consumed by the Vue frontend.
  *
  * status()  → Promise<'starting' | 'ready' | 'error'>
- * version() → Promise<string>   e.g. "1.0.12"
+ * version() → Promise<string>   e.g. "1.0.0"
  */
 contextBridge.exposeInMainWorld('api', {
   backend: {

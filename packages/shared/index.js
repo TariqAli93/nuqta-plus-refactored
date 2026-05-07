@@ -50,7 +50,7 @@ export const SERVER_INFO_ENDPOINT = `${BACKEND_BASE_URL}/server-info`;
  * Must match backend/package.json#version.
  * Electron will refuse to start if the running backend reports a different version.
  */
-export const EXPECTED_BACKEND_VERSION = '1.0.12';
+export const EXPECTED_BACKEND_VERSION = '1.0.0';
 
 /**
  * Version compatibility policy.

@@ -1,4 +1,4 @@
-import { getDb, saveDatabase } from '../db.js';
+import { getDb, saveDatabase, getBootstrapState } from '../db.js';
 import { users, settings } from '../models/index.js';
 import { hashPassword, comparePassword } from '../utils/helpers.js';
 import { AuthenticationError, NotFoundError, ConflictError } from '../utils/errors.js';
@@ -16,26 +16,55 @@ export class AuthService {
    * @returns {Promise<Object>} Initial setup status
    */
   async checkInitialSetup() {
-    const db = await getDb();
-    // Check if any users exist
-    const allUsers = await db.select().from(users).limit(1);
-    const hasUsers = allUsers.length > 0;
+    // Surface bootstrap failures (DB not ready / migrations failed) instead
+    // of letting the query throw and getting masked by the production
+    // errorHandler as "An unexpected error occurred".
+    const bootstrap = getBootstrapState();
+    if (!bootstrap.databaseReady) {
+      return {
+        isFirstRun: false,
+        hasUsers: false,
+        hasCompanyInfo: false,
+        backendReady: false,
+        // bootstrap.lastError is now always populated with a stage-specific
+        // code (e.g. [postgresql_unreachable] connect ECONNREFUSED 127.0.0.1:5432).
+        reason: bootstrap.lastError,
+        reasonCode: bootstrap.reasonCode,
+        attempts: bootstrap.attempts,
+      };
+    }
 
-    // Check if company info exists in settings
-    const companySettings = await db
-      .select()
-      .from(settings)
-      .where(eq(settings.key, 'company_name'))
-      .limit(1);
-    const hasCompanyInfo = companySettings.length > 0;
+    try {
+      const db = await getDb();
+      const allUsers = await db.select().from(users).limit(1);
+      const hasUsers = allUsers.length > 0;
 
-    const isFirstRun = !hasUsers && !hasCompanyInfo;
+      const companySettings = await db
+        .select()
+        .from(settings)
+        .where(eq(settings.key, 'company_name'))
+        .limit(1);
+      const hasCompanyInfo = companySettings.length > 0;
 
-    return {
-      isFirstRun,
-      hasUsers,
-      hasCompanyInfo,
-    };
+      const isFirstRun = !hasUsers && !hasCompanyInfo;
+
+      return {
+        isFirstRun,
+        hasUsers,
+        hasCompanyInfo,
+        backendReady: true,
+        migrationsApplied: bootstrap.migrationsApplied,
+      };
+    } catch (error) {
+      // Most likely cause: migrations failed → tables missing.
+      return {
+        isFirstRun: false,
+        hasUsers: false,
+        hasCompanyInfo: false,
+        backendReady: false,
+        reason: error?.message || 'initial_setup_query_failed',
+      };
+    }
   }
 
   /**

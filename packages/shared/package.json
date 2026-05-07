@@ -1,6 +1,6 @@
 {
   "name": "@nuqtaplus/shared",
-  "version": "1.0.12",
+  "version": "1.0.0",
   "description": "Shared constants and API contract for nuqtaplus monorepo",
   "type": "module",
   "main": "./index.js",

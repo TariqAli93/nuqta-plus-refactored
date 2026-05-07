@@ -1,5 +1,14 @@
-import 'dotenv/config';
+// Multi-path .env loader. MUST run before getPgConfig() reads env vars.
+// Replaces the implicit `import 'dotenv/config'` because the packaged build
+// strips backend/.env from dist-backend (build-backend.js filter), so the
+// implicit loader would silently no-op in production. envLoader logs the
+// resolved file path via bootstrapDiagnostics.
+import { envFilesTried, envFileLoaded } from './utils/envLoader.js';
 import { getPgConfig } from './utils/database.js';
+
+// Re-export so db.js can include them in the bootstrap diagnostics snapshot
+export const __envFilesTried = envFilesTried;
+export const __envFileLoaded = envFileLoaded;
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const isProduction = NODE_ENV === 'production';

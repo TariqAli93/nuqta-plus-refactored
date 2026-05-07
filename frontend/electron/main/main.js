@@ -176,11 +176,23 @@ function createWindow() {
     show: false,
     icon: isDev ? join(__dirname, '../../build/icon.png') : join(__dirname, '../build/icon.png'),
     webPreferences: {
-      devTools: isDev,
+      devTools: true,
       contextIsolation: true,
       nodeIntegration: false,
       preload: join(__dirname, '../preload/preload.mjs'),
     },
+  });
+
+  // Allow F12 / Ctrl+Shift+I to toggle DevTools in production for client-side diagnostics
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const isF12 = input.key === 'F12';
+    const isCtrlShiftI =
+      (input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i';
+    if (isF12 || isCtrlShiftI) {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
   });
 
   // Do not automatically show the main window here; we'll control showing it
@@ -603,11 +615,22 @@ function createActivationWindow() {
     title: 'تفعيل نقطة بلس',
     icon: isDev ? join(__dirname, '../../build/icon.png') : join(__dirname, '../build/icon.png'),
     webPreferences: {
-      devTools: isDev,
+      devTools: true,
       contextIsolation: true,
       nodeIntegration: false,
       preload: join(__dirname, '../preload/preload.mjs'),
     },
+  });
+
+  activationWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const isF12 = input.key === 'F12';
+    const isCtrlShiftI =
+      (input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i';
+    if (isF12 || isCtrlShiftI) {
+      activationWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
   });
 
   activationWindow.removeMenu();
