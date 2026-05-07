@@ -18,12 +18,7 @@
 
       <template v-else>
         <!-- Status -->
-        <v-alert
-          type="success"
-          variant="tonal"
-          class="mb-4"
-          icon="mdi-check-network"
-        >
+        <v-alert type="success" variant="tonal" class="mb-4" icon="mdi-check-network">
           <div class="font-weight-bold">الخادم يعمل</div>
           <div v-if="serverInfo" class="text-body-2 mt-1">
             {{ serverInfo.name }} - v{{ serverInfo.version }}
@@ -44,12 +39,18 @@
             <tr>
               <td class="text-medium-emphasis font-weight-medium">الوضع</td>
               <td>
-                <v-chip size="small" color="primary" variant="tonal">
-                  خادم محلي
-                </v-chip>
+                <v-chip size="small" color="primary" variant="tonal"> خادم محلي </v-chip>
               </td>
             </tr>
-            <tr>
+            <template v-if="serverInfo.addresses && serverInfo.addresses.length">
+              <tr v-for="net in serverInfo.addresses" :key="net.address">
+                <td class="text-medium-emphasis font-weight-medium">{{ net.interface }}</td>
+                <td dir="ltr" class="text-start">
+                  <span class="me-2">{{ net.address }}:{{ serverInfo.port || 41732 }}</span>
+                </td>
+              </tr>
+            </template>
+            <tr v-else>
               <td class="text-medium-emphasis font-weight-medium">العنوان</td>
               <td dir="ltr" class="text-start">{{ serverInfo.host || '127.0.0.1' }}</td>
             </tr>
@@ -77,6 +78,8 @@
         تحديث
       </v-btn>
     </v-card-actions>
+
+    <v-snackbar v-model="copied" :timeout="1500" location="top"> تم النسخ </v-snackbar>
   </v-card>
 </template>
 
@@ -87,6 +90,7 @@ import axios from 'axios';
 const loading = ref(true);
 const error = ref(null);
 const serverInfo = ref(null);
+const copied = ref(false);
 
 async function fetchInfo() {
   loading.value = true;

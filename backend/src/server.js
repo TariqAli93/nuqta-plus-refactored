@@ -3,6 +3,7 @@ import config from './config.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { getLanAddresses } from './utils/networkInterfaces.js';
 
 // Get package version
 const __filename = fileURLToPath(import.meta.url);
@@ -116,6 +117,7 @@ const start = async () => {
         mode: 'server',
         host: config.server.host,
         port: config.server.port,
+        addresses: getLanAddresses(),
         timestamp: new Date().toISOString(),
         clientIp: request.ip,
       };
@@ -155,25 +157,29 @@ const start = async () => {
     }
 
     // Authenticated shutdown route — only admins can trigger
-    fastify.post('/__shutdown__', {
-      onRequest: [fastify.authenticate],
-      config: { skipAudit: true },
-    }, async (req, res) => {
-      if (req.user?.role !== 'admin') {
-        return res.code(403).send({ error: 'Forbidden' });
-      }
-      fastify.log.info('Shutdown requested via authenticated API call');
-      res.send({ message: 'Shutting down...' });
-      setTimeout(async () => {
-        try {
-          await closeServer();
-          process.exit(0);
-        } catch (err) {
-          fastify.log.error('Error closing server:', err);
-          process.exit(1);
+    fastify.post(
+      '/__shutdown__',
+      {
+        onRequest: [fastify.authenticate],
+        config: { skipAudit: true },
+      },
+      async (req, res) => {
+        if (req.user?.role !== 'admin') {
+          return res.code(403).send({ error: 'Forbidden' });
         }
-      }, 200);
-    });
+        fastify.log.info('Shutdown requested via authenticated API call');
+        res.send({ message: 'Shutting down...' });
+        setTimeout(async () => {
+          try {
+            await closeServer();
+            process.exit(0);
+          } catch (err) {
+            fastify.log.error('Error closing server:', err);
+            process.exit(1);
+          }
+        }, 200);
+      }
+    );
 
     // Delete old draft sales on startup
     try {
@@ -208,9 +214,8 @@ const start = async () => {
 
     // Initialize ONNX credit scoring model (optional — falls back to rules if absent)
     try {
-      const { initCreditScoreModel, getModelStatus } = await import(
-        './services/onnxCreditScoringService.js'
-      );
+      const { initCreditScoreModel, getModelStatus } =
+        await import('./services/onnxCreditScoringService.js');
       await initCreditScoreModel();
       const status = getModelStatus();
       if (status.available) {

@@ -79,9 +79,13 @@ export default defineConfig({
     vue(),
     vuetify({ autoImport: true }),
 
-    ...(isDev ? [VueDevTools({
-      launchEditor: process.env.EDITOR || 'cursor'
-    })] : []),
+    ...(isDev
+      ? [
+          VueDevTools({
+            launchEditor: process.env.EDITOR || 'cursor',
+          }),
+        ]
+      : []),
 
     // Copy assets only when building electron target
     ...(isElectronTarget ? [copyStaticAssets()] : []),
@@ -161,9 +165,8 @@ export default defineConfig({
   },
 
   define: {
-    'process.env.EDITOR': JSON.stringify('cursor'),
     // APP_MODE: 'server' (full backend + frontend) or 'client' (frontend-only, connects to remote server)
-    '__NUQTA_APP_MODE__': JSON.stringify(process.env.NUQTA_APP_MODE || 'server'),
+    __NUQTA_APP_MODE__: JSON.stringify(process.env.NUQTA_APP_MODE || 'server'),
   },
 
   // IMPORTANT: base must be '/' for web dev, './' for electron packaging
