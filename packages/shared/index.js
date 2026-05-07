@@ -49,8 +49,12 @@ export const SERVER_INFO_ENDPOINT = `${BACKEND_BASE_URL}/server-info`;
 /**
  * Must match backend/package.json#version.
  * Electron will refuse to start if the running backend reports a different version.
+ *
+ * AUTO-MANAGED: this literal is rewritten by `pumb-version.js` on every bump,
+ * and verified by `scripts/verify-versions.js` before each build. Do not edit
+ * by hand — bump via `pnpm run bump-version <x.y.z>` instead.
  */
-export const EXPECTED_BACKEND_VERSION = '1.0.0';
+export const EXPECTED_BACKEND_VERSION = '1.0.12';
 
 /**
  * Version compatibility policy.

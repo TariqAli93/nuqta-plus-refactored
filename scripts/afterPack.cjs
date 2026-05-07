@@ -190,6 +190,42 @@ exports.default = async function afterPack(context) {
   }
   console.log('[afterPack] ✓ .env.production.example present');
 
+  // ── Final cross-check: packaged backend version must equal Electron's ──
+  // EXPECTED_BACKEND_VERSION. This catches the case where build-backend.js
+  // copied a stale package.json or where verify:versions was bypassed.
+  // Without this, customers see runtime errors like:
+  //   "Version mismatch (exact): Electron expects vA, backend reports vB"
+  try {
+    const packagedPkg = JSON.parse(
+      fs.readFileSync(path.join(target, 'package.json'), 'utf8')
+    );
+    const sharedSrc = fs.readFileSync(
+      path.join(repoRoot, 'packages', 'shared', 'index.js'),
+      'utf8'
+    );
+    const m = sharedSrc.match(
+      /export\s+const\s+EXPECTED_BACKEND_VERSION\s*=\s*['"]([^'"]+)['"]/
+    );
+    const expected = m ? m[1] : null;
+    if (!expected) {
+      throw new Error(
+        'EXPECTED_BACKEND_VERSION constant not found in packages/shared/index.js'
+      );
+    }
+    if (packagedPkg.version !== expected) {
+      throw new Error(
+        `packaged backend reports v${packagedPkg.version} but Electron expects ` +
+          `v${expected}. Run \`pnpm run bump-version <x.y.z>\` to sync all five ` +
+          `version locations, then \`pnpm run clean && pnpm run build:server\`.`
+      );
+    }
+    console.log(
+      `[afterPack] ✓ packaged backend version matches EXPECTED_BACKEND_VERSION (${expected})`
+    );
+  } catch (err) {
+    throw new Error(`[afterPack] version cross-check failed: ${err.message}`);
+  }
+
   // Informational: ONNX runtime (optional — runtime gracefully degrades
   // to RULES_ONLY if missing).
   const ortPackaged = fs.existsSync(path.join(target, 'node_modules', 'onnxruntime-node'));
