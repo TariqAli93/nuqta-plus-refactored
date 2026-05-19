@@ -29,6 +29,12 @@ extraResources:
   - from: ../backend/models/credit-score.meta.json
     to: backend/models/credit-score.meta.json
 
+  # Cloudflared binary for the Remote Access (Cloudflare Tunnel) feature.
+  # Server-only — the client build (electron-builder-client.yml) does not bundle this.
+  # Resolved at runtime via process.resourcesPath in backend/src/utils/cloudflaredPath.js.
+  - from: ../tools/cloudflared/cloudflared.exe
+    to: cloudflared.exe
+
 afterPack: ../scripts/afterPack.cjs
 
 directories:

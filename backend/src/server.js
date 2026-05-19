@@ -43,6 +43,7 @@ import installmentRoutes from './routes/installmentRoutes.js';
 import collectionsRoutes from './routes/collectionsRoutes.js';
 import expensesRoutes from './routes/expensesRoutes.js';
 import setupRoutes from './routes/setupRoutes.js';
+import remoteAccessRoutes from './routes/remoteAccessRoutes.js';
 
 // Debug features - only in development
 const isProduction = config.server.env === 'production';
@@ -150,6 +151,7 @@ const start = async () => {
     await fastify.register(collectionsRoutes, { prefix: '/api/collections' });
     await fastify.register(expensesRoutes, { prefix: '/api/expenses' });
     await fastify.register(setupRoutes, { prefix: '/api/setup' });
+    await fastify.register(remoteAccessRoutes, { prefix: '/api/tunnel' });
     // Only register debug routes in development
     if (!isProduction) {
       const { default: debugRoutes } = await import('./routes/debugRoutes.js');
@@ -212,6 +214,16 @@ const start = async () => {
       fastify.log.warn('Failed to start notification worker:', error.message);
     }
 
+    // Remote-access auto-resume — if the user previously enabled the Cloudflare
+    // tunnel, re-spawn cloudflared from on-disk config without re-calling the
+    // provisioning API. Survives Windows-service / app-restart / crash.
+    try {
+      const { resumeIfPreviouslyEnabled } = await import('./services/remoteAccessService.js');
+      await resumeIfPreviouslyEnabled({ log: fastify.log });
+    } catch (error) {
+      fastify.log.warn(`Remote-access auto-resume skipped: ${error.message}`);
+    }
+
     // Initialize ONNX credit scoring model (optional — falls back to rules if absent)
     try {
       const { initCreditScoreModel, getModelStatus } =
@@ -246,6 +258,18 @@ const start = async () => {
 
 export const closeServer = async () => {
   fastify.log.info('Shutting down server...');
+
+  // Stop the Cloudflare tunnel child process before closing Fastify so it
+  // doesn't outlive the parent. Lazy import to avoid bootstrap cycles.
+  try {
+    const { shutdown: shutdownRemoteAccess } = await import(
+      './services/remoteAccessService.js'
+    );
+    await shutdownRemoteAccess();
+  } catch (err) {
+    fastify.log.warn(`Remote-access shutdown failed: ${err.message}`);
+  }
+
   await fastify.close();
 
   // Close the PostgreSQL connection pool

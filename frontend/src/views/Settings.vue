@@ -41,6 +41,10 @@
               <v-icon start>mdi-server-network</v-icon>
               <span>الاتصال</span>
             </v-tab>
+            <v-tab v-if="!connectionStore.isClientMode" value="remote-access">
+              <v-icon start>mdi-cloud-upload</v-icon>
+              <span>الوصول الخارجي</span>
+            </v-tab>
             <v-tab v-if="canManageMessaging" value="messaging">
               <v-icon start>mdi-message-text</v-icon>
               <span>الرسائل والإشعارات</span>
@@ -75,6 +79,10 @@
             <ServerConnectionInfo v-else />
           </v-window-item>
 
+          <v-window-item v-if="!connectionStore.isClientMode" value="remote-access" class="pa-0">
+            <RemoteAccessSettings />
+          </v-window-item>
+
           <v-window-item v-if="canManageMessaging" value="messaging" class="pa-0">
             <MessagingSettings />
           </v-window-item>
@@ -105,6 +113,7 @@ import LicenseStatus from '@/components/settings/LicenseStatus.vue';
 import ConnectionSettings from '@/components/settings/ConnectionSettings.vue';
 import ServerConnectionInfo from '@/components/settings/ServerConnectionInfo.vue';
 import MessagingSettings from '@/components/settings/MessagingSettings.vue';
+import RemoteAccessSettings from '@/components/settings/RemoteAccessSettings.vue';
 import PageHeader from '@/components/PageHeader.vue';
 
 // Stores
