@@ -250,6 +250,48 @@ const start = async () => {
     fastify.log.info(`Environment: ${config.server.env}`);
     fastify.log.info(`Log Level: ${config.logging.level}`);
     fastify.log.info('Ready to accept requests');
+
+    // LAN discovery — advertise this server over mDNS / Bonjour so client
+    // desktops on the same network can auto-discover and connect. Failures
+    // here are non-fatal: the backend still runs, clients can still connect
+    // manually by IP.
+    try {
+      const { start: startMdns } = await import('./services/mdns-advertisement.service.js');
+      const { getOrCreateMachineId } = await import('./utils/machineId.js');
+      const { SettingsService } = await import('./services/settingsService.js');
+
+      const settingsService = new SettingsService();
+      const [companyName, branchName] = await Promise.all([
+        settingsService.getValue('company_name').catch(() => null),
+        settingsService.getValue('branch_name').catch(() => null),
+      ]);
+
+      // Best-effort remote URL lookup — only if Cloudflare tunnel is currently enabled.
+      let remoteUrl = '';
+      try {
+        const { getStatus: getRemoteAccessStatus } = await import(
+          './services/remoteAccessService.js'
+        );
+        const status = await getRemoteAccessStatus();
+        if (status && status.enabled && status.publicUrl) {
+          remoteUrl = status.publicUrl;
+        }
+      } catch (err) {
+        fastify.log.warn(`mDNS: remote-access status unavailable: ${err.message}`);
+      }
+
+      await startMdns({
+        port: config.server.port,
+        machineId: getOrCreateMachineId(),
+        companyName: companyName || 'NuqtaPlus',
+        branchName: branchName || 'Main',
+        version,
+        remoteUrl,
+        log: fastify.log,
+      });
+    } catch (err) {
+      fastify.log.warn(`mDNS advertisement failed to start: ${err.message}`);
+    }
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -258,6 +300,15 @@ const start = async () => {
 
 export const closeServer = async () => {
   fastify.log.info('Shutting down server...');
+
+  // Stop the LAN advertisement before tearing down the HTTP server so clients
+  // don't keep seeing a "ghost" record while we shut down.
+  try {
+    const { stop: stopMdns } = await import('./services/mdns-advertisement.service.js');
+    await stopMdns();
+  } catch (err) {
+    fastify.log.warn(`mDNS shutdown failed: ${err.message}`);
+  }
 
   // Stop the Cloudflare tunnel child process before closing Fastify so it
   // doesn't outlive the parent. Lazy import to avoid bootstrap cycles.

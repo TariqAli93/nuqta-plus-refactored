@@ -119,7 +119,11 @@ export default defineConfig({
                   minify: true,
                   sourcemap: false,
                   rollupOptions: {
-                    external: ['electron'],
+                    // bonjour-service / multicast-dns use dynamic requires and
+                    // node-native dgram sockets; keep them external so they
+                    // are loaded from node_modules at runtime via require()
+                    // rather than rolled up into the main bundle.
+                    external: ['electron', 'bonjour-service', 'multicast-dns', 'dns-packet'],
                   },
                 },
               },

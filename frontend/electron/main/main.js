@@ -1033,6 +1033,21 @@ ipcMain.handle('connection:clear', async () => {
   return { success: true };
 });
 
+// --- IPC: LAN server discovery (mDNS / Bonjour) ---
+// Only meaningful in client mode, but we don't hard-block server mode in case
+// admin tools want to verify the local advertisement is visible.
+ipcMain.handle('mdns:discover', async (_e, options = {}) => {
+  try {
+    const { discover } = await import('../scripts/serverDiscovery.js');
+    const durationMs = Number(options.durationMs) || 4000;
+    const servers = await discover({ durationMs });
+    return { success: true, servers };
+  } catch (err) {
+    logger.warn(`mdns:discover failed: ${err.message}`);
+    return { success: false, error: err.message, servers: [] };
+  }
+});
+
 // --- Dialog ---
 ipcMain.handle('dialog:showSaveDialog', async (_e, options) =>
   dialog.showSaveDialog(mainWindow, options)

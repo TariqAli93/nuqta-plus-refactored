@@ -86,6 +86,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     clear: () => ipcRenderer.invoke('connection:clear'),
   },
 
+  // ---- LAN server discovery (mDNS / Bonjour, client mode) ----
+  discoverServers: (options) => ipcRenderer.invoke('mdns:discover', options || {}),
+
   // ---- fallback invoke ----
   invoke: (channel, data) => ipcRenderer.invoke(channel, data),
 });

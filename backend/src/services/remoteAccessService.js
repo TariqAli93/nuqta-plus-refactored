@@ -182,6 +182,7 @@ function buildPublicUrl(subdomain) {
 export async function getStatus() {
   const state = readState();
   const machineId = getOrCreateMachineId();
+  // Quiet on getStatus — polled frequently. Verbose logging only on enable.
   const cloudflared = resolveCloudflaredPath();
   return {
     enabled: state.enabled === true,
@@ -195,13 +196,26 @@ export async function getStatus() {
   };
 }
 
+function buildMissingBinaryError(resolution) {
+  const lines = (resolution.checked || resolution.candidates || []).map((c) => {
+    if (typeof c === 'string') return `  - ${c}`;
+    return `  - ${c.path}${c.valid ? ' (FOUND)' : c.note ? ` (${c.note})` : ''}`;
+  });
+  const message = lines.length
+    ? `${MISSING_BINARY_MSG_AR}\nتم فحص المسارات التالية:\n${lines.join('\n')}`
+    : MISSING_BINARY_MSG_AR;
+  const err = new Error(message);
+  err.code = 'CLOUDFLARED_MISSING';
+  err.candidates = resolution.candidates;
+  err.checked = resolution.checked;
+  return err;
+}
+
 async function enableInternal() {
-  const cloudflared = resolveCloudflaredPath();
+  // Verbose log on enable — helps diagnose "cloudflared not found" reports.
+  const cloudflared = resolveCloudflaredPath({ log: logger });
   if (cloudflared.status !== 'found') {
-    const err = new Error(MISSING_BINARY_MSG_AR);
-    err.code = 'CLOUDFLARED_MISSING';
-    err.candidates = cloudflared.candidates;
-    throw err;
+    throw buildMissingBinaryError(cloudflared);
   }
 
   const machineId = getOrCreateMachineId();
@@ -296,7 +310,7 @@ export async function resumeIfPreviouslyEnabled({ log } = {}) {
     logger.warn('[remote-access] auto-resume: config or credentials missing, skipping');
     return { resumed: false, reason: 'config_missing' };
   }
-  const cloudflared = resolveCloudflaredPath();
+  const cloudflared = resolveCloudflaredPath({ log: logger });
   if (cloudflared.status !== 'found') {
     logger.warn('[remote-access] auto-resume: cloudflared binary not found, skipping');
     return { resumed: false, reason: 'binary_missing' };
