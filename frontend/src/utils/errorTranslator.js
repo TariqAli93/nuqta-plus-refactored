@@ -181,6 +181,32 @@ function translateActionName(action = '') {
   return map[action] || action;
 }
 
+// Sale stock-validation reasons emitted by the backend
+// (inventoryService.validateSaleStock). Keep in sync with the reason strings
+// the API returns so each rejected item renders a precise Arabic line.
+function translateStockReason(reason = '') {
+  const map = {
+    insufficient_stock: 'الكمية غير كافية',
+    inventory_record_not_found: 'لا يوجد سجل مخزون لهذا المنتج في هذا المخزن',
+    product_not_active: 'المنتج غير مُفعل',
+    product_not_sale_enabled: 'المنتج غير متاح للبيع',
+    warehouse_not_found: 'المخزن غير موجود',
+    branch_mismatch: 'المنتج لا يتبع الفرع المحدد',
+    unit_not_found: 'الوحدة غير موجودة',
+    invalid_unit_conversion: 'عامل تحويل الوحدة غير صالح',
+  };
+  return map[reason] || reason;
+}
+
+function formatStockDetail(d) {
+  const name = d.productName || (d.productId ? `#${d.productId}` : 'منتج');
+  const reasonText = translateStockReason(d.reason);
+  if (d.reason === 'insufficient_stock') {
+    return `${name}: ${reasonText} (مطلوب ${d.requestedQty}، متاح ${d.availableQty}، نقص ${d.shortageQty})`;
+  }
+  return `${name}: ${reasonText}`;
+}
+
 export function buildArabicErrorMessage(error) {
   const data = error?.response?.data || {};
   const status = error?.response?.status;
@@ -226,6 +252,9 @@ export function extractArabicDetails(error) {
   if (!Array.isArray(data.details)) return [];
   return data.details
     .map((d) => {
+      // Stock-validation details carry a `reason` (and product/quantity fields)
+      // instead of the Zod `{ field, message }` shape.
+      if (d?.reason) return formatStockDetail(d);
       const arField = d?.field ? translateFieldName(d.field) : '';
       const field = arField ? `${arField}: ` : '';
       const msg = translateZodDetailMessage(d?.message || '');

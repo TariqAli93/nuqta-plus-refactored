@@ -419,11 +419,137 @@ export class InventoryService {
   }
 
   /**
+   * Pre-flight stock validation for a sale.
+   *
+   * Reads availability from the SAME canonical source the product API / tablet
+   * uses — `product_stock` per (productId, warehouseId) — so the backend never
+   * rejects a sale the catalogue showed as sellable. Rejection happens ONLY for
+   * a real product/warehouse problem or a genuine shortage (requestedQty >
+   * availableQty). On any problem it throws a ValidationError carrying an
+   * item-level `details` payload the tablet can render.
+   *
+   * `items[].quantity` is a BASE-unit quantity (see applySaleStockMovement);
+   * `product_stock.quantity` is also in base units, so they compare directly.
+   *
+   * Detected reasons: warehouse_not_found, product_not_active,
+   * product_not_sale_enabled, inventory_record_not_found, insufficient_stock.
+   * (unit_not_found / invalid_unit_conversion are surfaced earlier, when the
+   * sale service resolves each line's unit snapshot.)
+   */
+  static async validateSaleStock(tx, { warehouseId, items }) {
+    if (!warehouseId) throw new ValidationError('Sale must have a warehouseId for stock tracking');
+
+    const [warehouse] = await tx
+      .select({ id: warehouses.id, branchId: warehouses.branchId, isActive: warehouses.isActive })
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId))
+      .limit(1);
+    if (!warehouse) {
+      const err = new ValidationError('المخزن غير موجود');
+      err.code = 'SALE_STOCK_VALIDATION';
+      err.details = [{ warehouseId, reason: 'warehouse_not_found' }];
+      throw err;
+    }
+
+    // Aggregate base-unit demand per product — a product may span several lines
+    // (e.g. one line in pieces, another in cartons) and must be checked against
+    // the single per-warehouse available figure as a whole.
+    const demand = new Map();
+    for (const item of items || []) {
+      if (!item.productId) continue;
+      const need = Number(item.quantity) || 0;
+      if (need <= 0) continue;
+      const cur = demand.get(item.productId) || {
+        need: 0,
+        unitName: item.unitName || null,
+        unitQuantity: 0,
+      };
+      cur.need += need;
+      cur.unitQuantity += Number(item.unitQuantity) || 0;
+      demand.set(item.productId, cur);
+    }
+
+    const details = [];
+    for (const [productId, info] of demand) {
+      const [product] = await tx
+        .select({
+          id: products.id,
+          name: products.name,
+          isActive: products.isActive,
+          status: products.status,
+        })
+        .from(products)
+        .where(eq(products.id, productId))
+        .limit(1);
+
+      const base = {
+        productId,
+        productName: product?.name || null,
+        requestedQty: info.need,
+        unitName: info.unitName,
+        unitQuantity: info.unitQuantity || null,
+        branchId: warehouse.branchId,
+        warehouseId,
+      };
+
+      if (!product) {
+        details.push({ ...base, availableQty: 0, shortageQty: info.need, reason: 'inventory_record_not_found' });
+        continue;
+      }
+      if (product.isActive === false) {
+        details.push({ ...base, reason: 'product_not_active' });
+        continue;
+      }
+      if (product.status === 'discontinued') {
+        details.push({ ...base, reason: 'product_not_sale_enabled' });
+        continue;
+      }
+
+      const [stockRow] = await tx
+        .select({ quantity: productStock.quantity })
+        .from(productStock)
+        .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
+        .limit(1);
+
+      if (!stockRow) {
+        details.push({ ...base, availableQty: 0, shortageQty: info.need, reason: 'inventory_record_not_found' });
+        continue;
+      }
+
+      const available = Number(stockRow.quantity) || 0;
+      if (info.need > available) {
+        details.push({
+          ...base,
+          availableQty: available,
+          shortageQty: info.need - available,
+          reason: 'insufficient_stock',
+        });
+      }
+    }
+
+    if (details.length > 0) {
+      const err = new ValidationError('بعض المنتجات لا تحتوي على كمية كافية');
+      err.code = 'SALE_STOCK_VALIDATION';
+      err.details = details;
+      throw err;
+    }
+  }
+
+  /**
    * Apply the stock movements for a completed sale inside an existing transaction.
    * Called from saleService.create / completeDraft / restore.
    */
   static async applySaleStockMovement(tx, { saleId, warehouseId, items, userId }) {
     if (!warehouseId) throw new ValidationError('Sale must have a warehouseId for stock tracking');
+
+    // Pre-flight: reject only on a genuine shortage or a real product/warehouse
+    // problem, measured against the SAME canonical source the catalogue/tablet
+    // reads (product_stock per warehouse). This must run before the FIFO
+    // deduction below so the backend never rejects a sale the tablet showed as
+    // sellable, and so the client gets item-level reasons instead of an opaque
+    // "no sellable quantity" message.
+    await InventoryService.validateSaleStock(tx, { warehouseId, items });
+
     for (const item of items) {
       if (!item.productId) continue;
       let need = Number(item.quantity) || 0;
@@ -503,7 +629,41 @@ export class InventoryService {
         need -= take;
       }
       if (need > 0) {
-        throw new ValidationError('لا توجد كمية صالحة للبيع لهذا المنتج');
+        // The FIFO cost layers (product_stock_entries) are out of sync with the
+        // canonical per-warehouse quantity (product_stock): entries were
+        // missing, depleted, or expired even though stock is on hand.
+        // validateSaleStock already confirmed product_stock covers this sale,
+        // so draw the remainder from a backfilled layer at the product's
+        // current base cost. This keeps COGS and the sale_item → stock-entry
+        // linkage complete instead of rejecting a sale the catalogue showed as
+        // sellable. The authoritative product_stock deduction happens in
+        // applyStockChangeTx below and still guards against going negative.
+        const [productRow] = await tx
+          .select({ costPrice: products.costPrice })
+          .from(products)
+          .where(eq(products.id, item.productId))
+          .limit(1);
+        const [backfill] = await tx
+          .insert(productStockEntries)
+          .values({
+            productId: item.productId,
+            warehouseId,
+            quantity: need,
+            remainingQuantity: 0,
+            costPrice: String(productRow?.costPrice || 0),
+            expiryDate: null,
+            status: 'depleted',
+            createdBy: userId || null,
+          })
+          .returning({ id: productStockEntries.id });
+        if (item.saleItemId && backfill) {
+          await tx.insert(saleItemStockEntries).values({
+            saleItemId: item.saleItemId,
+            productStockEntryId: backfill.id,
+            quantity: need,
+          });
+        }
+        need = 0;
       }
       await applyStockChangeTx(tx, {
         productId: item.productId,

@@ -82,7 +82,7 @@ export default defineConfig({
     ...(isDev
       ? [
           VueDevTools({
-            launchEditor: process.env.EDITOR || 'cursor',
+            launchEditor: process.env.EDITOR || 'code',
           }),
         ]
       : []),

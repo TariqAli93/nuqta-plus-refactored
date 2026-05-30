@@ -178,134 +178,6 @@
           </div>
         </button>
       </div>
-
-      <!-- Numpad / pay area -->
-      <div class="numpad bg-surface-soft rounded-lg p-3">
-        <div class="numpad__readout" :class="changeStateClass">
-          <div class="numpad__readout-top">
-            <span class="numpad__readout-label">المستلم</span>
-            <span v-if="paidInput" class="numpad__readout-typed">{{ paidInput }}</span>
-          </div>
-          <div class="numpad__readout-value">
-            {{ formatMoney(payment.paidAmount || 0, currency) }}
-          </div>
-          <div class="numpad__delta">
-            <v-icon size="14">{{ changeIcon }}</v-icon>
-            <span class="numpad__delta-label">{{ changeLabel }}</span>
-            <span class="numpad__delta-value">{{ formatMoney(changeAmount, currency) }}</span>
-          </div>
-        </div>
-
-        <div v-if="payment.method === 'card'" class="numpad__refs">
-          <v-text-field
-            v-model="payment.reference"
-            variant="outlined"
-            density="compact"
-            hide-details="auto"
-            label="مرجع البطاقة *"
-            placeholder="رقم العملية أو الوصل"
-            autocomplete="off"
-            prepend-inner-icon="mdi-credit-card-outline"
-          />
-        </div>
-
-        <v-divider class="my-3" />
-
-        <v-row>
-          <v-col cols="8">
-            <div class="numpad__keys">
-              <v-btn
-                v-for="k in numpadKeys"
-                :key="k.value"
-                variant="elevated"
-                color="secondary"
-                :class="k.cls"
-                :aria-label="k.aria || k.label"
-                @click="onNumpad(k.value)"
-              >
-                <v-icon v-if="k.icon" size="22">{{ k.icon }}</v-icon>
-                <span v-else>{{ k.label }}</span>
-              </v-btn>
-            </div>
-          </v-col>
-          <v-divider vertical />
-          <v-col cols="4">
-            <div class="grid grid-cols-1 gap-1 w-full">
-              <div class="grid grid-cols-2 gap-2 w-full mb-3">
-                <v-btn
-                  v-for="a in quickAmounts"
-                  :key="a"
-                  variant="elevated"
-                  color="secondary"
-                  :title="`+ ${formatMoney(a, currency)}`"
-                  @click="addToPaid(a)"
-                >
-                  <v-icon start size="18">mdi-plus</v-icon>
-                  {{ shortAmount(a) }}
-                </v-btn>
-                <v-btn
-                  variant="elevated"
-                  color="primary"
-                  class="numpad__util numpad__util--primary"
-                  :disabled="items.length === 0"
-                  @click="onFullPayment"
-                >
-                  <v-icon start size="18">mdi-cash-multiple</v-icon>
-                  المبلغ كامل
-                </v-btn>
-              </div>
-
-              <v-btn
-                variant="elevated"
-                color="red"
-                :disabled="!paidInput"
-                @click="onNumpad('clear')"
-              >
-                <v-icon start size="18">mdi-refresh</v-icon>
-                تصفير
-              </v-btn>
-            </div>
-          </v-col>
-        </v-row>
-
-        <v-divider class="my-3" />
-        <!-- Actions -->
-        <div class="pay__actions">
-          <v-tooltip
-            v-if="draftsVisible"
-            location="top"
-            :text="draftsReason"
-            :disabled="!draftsDisabled"
-          >
-            <template #activator="{ props: tipProps }">
-              <span v-bind="tipProps" class="pay__draft-wrap">
-                <v-btn
-                  variant="outlined"
-                  size="large"
-                  class="pay__draft-btn"
-                  :disabled="draftsDisabled || items.length === 0 || submitting"
-                  @click="onHold"
-                >
-                  <v-icon start size="18">mdi-content-save-outline</v-icon>
-                  مسودة
-                </v-btn>
-              </span>
-            </template>
-          </v-tooltip>
-          <v-btn
-            size="large"
-            color="primary"
-            class="pay__checkout"
-            :loading="submitting"
-            :disabled="!canSubmit"
-            @click="checkout"
-          >
-            <v-icon start size="18">mdi-check-circle-outline</v-icon>
-            دفع وإتمام
-            <span class="pay__hotkey">F9</span>
-          </v-btn>
-        </div>
-      </div>
     </section>
 
     <!-- ═══════════════════ Cart zone ═══════════════════ -->
@@ -413,10 +285,7 @@
                 <span class="line__unit-label">
                   {{ item.unitName ? `سعر ${item.unitName}` : 'للوحدة' }}
                 </span>
-                <v-menu
-                  v-if="item.units && item.units.length > 1"
-                  location="bottom start"
-                >
+                <v-menu v-if="item.units && item.units.length > 1" location="bottom start">
                   <template #activator="{ props: menuProps }">
                     <v-btn
                       v-bind="menuProps"
@@ -440,10 +309,7 @@
                     >
                       <v-list-item-title>
                         {{ u.name }}
-                        <span
-                          v-if="!u.isBase"
-                          class="text-caption text-medium-emphasis"
-                        >
+                        <span v-if="!u.isBase" class="text-caption text-medium-emphasis">
                           (يعادل {{ Number(u.conversionFactor) || 1 }})
                         </span>
                       </v-list-item-title>
@@ -507,8 +373,9 @@
         </TransitionGroup>
       </div>
 
-      <!-- Total summary -->
-      <div class="cart__total">
+      <!-- ═══ Pay / footer ═══ -->
+      <div class="cart__pay">
+        <!-- Total breakdown — only shown when a discount or tax applies -->
         <div v-if="discountValue > 0 || taxValue > 0" class="cart__total-rows">
           <div class="cart__total-row">
             <span class="cart__total-row-label">المجموع الفرعي</span>
@@ -529,10 +396,20 @@
           <span class="cart__total-value">{{ formatMoney(total, currency) }}</span>
         </div>
 
-        <v-divider class="my-3" />
-
-        <div class="cart__adjustments">
-          <div class="adj__row">
+        <!-- Collapsible discount / tax options (hidden by default) -->
+        <button
+          type="button"
+          class="cart__options-toggle"
+          :class="{ 'is-open': showOptions }"
+          :aria-expanded="showOptions"
+          @click="showOptions = !showOptions"
+        >
+          <v-icon size="18" class="cart__options-chevron">mdi-chevron-down</v-icon>
+          <span>خيارات</span>
+          <span class="cart__options-hint">خصم / ضريبة</span>
+        </button>
+        <v-expand-transition>
+          <div v-show="showOptions" class="cart__adjustments">
             <v-number-input
               v-model.number="saleDiscount.value"
               type="number"
@@ -564,8 +441,6 @@
                 </v-btn>
               </template>
             </v-number-input>
-          </div>
-          <div class="adj__row">
             <v-number-input
               v-model.number="tax.value"
               type="number"
@@ -582,11 +457,9 @@
               </template>
             </v-number-input>
           </div>
-        </div>
+        </v-expand-transition>
 
-        <v-divider class="my-3" />
-
-        <!-- Payment methods -->
+        <!-- Payment method -->
         <div class="pay__methods" role="radiogroup" aria-label="طريقة الدفع">
           <button
             v-for="m in paymentMethods"
@@ -598,9 +471,145 @@
             :aria-checked="payment.method === m.value"
             @click="onMethodChange(m.value)"
           >
-            <v-icon size="22">{{ m.icon }}</v-icon>
+            <v-icon size="20">{{ m.icon }}</v-icon>
             <span>{{ m.label }}</span>
           </button>
+        </div>
+
+        <!-- Card reference (card payments only) -->
+        <v-text-field
+          v-if="payment.method === 'card'"
+          v-model="payment.reference"
+          variant="outlined"
+          density="compact"
+          hide-details="auto"
+          label="مرجع البطاقة *"
+          placeholder="رقم العملية أو الوصل"
+          autocomplete="off"
+          prepend-inner-icon="mdi-credit-card-outline"
+          class="cart__card-ref"
+        />
+
+        <!-- Paid amount + change readout -->
+        <div class="pay__readout" :class="changeStateClass">
+          <div class="pay__readout-line">
+            <span class="pay__readout-label">المستلم</span>
+            <span v-if="paidInput" class="pay__readout-typed">{{ paidInput }}</span>
+            <span class="pay__readout-amount">
+              {{ formatMoney(payment.paidAmount || 0, currency) }}
+            </span>
+          </div>
+          <div class="pay__readout-line pay__readout-line--delta">
+            <v-icon size="14">{{ changeIcon }}</v-icon>
+            <span class="pay__readout-label">{{ changeLabel }}</span>
+            <span class="pay__readout-amount">{{ formatMoney(changeAmount, currency) }}</span>
+          </div>
+        </div>
+
+        <!-- Numpad: quick amounts + digit keypad live in a collapsible panel
+             so the cart footer stays compact when manual entry isn't needed -->
+        <button
+          type="button"
+          class="cart__options-toggle"
+          :class="{ 'is-open': showNumpad }"
+          :aria-expanded="showNumpad"
+          @click="showNumpad = !showNumpad"
+        >
+          <v-icon size="18" class="cart__options-chevron">mdi-chevron-down</v-icon>
+          <span>لوحة الأرقام</span>
+          <span class="cart__options-hint">إدخال يدوي</span>
+        </button>
+        <v-expand-transition>
+          <div v-show="showNumpad" class="numpad__panel">
+            <!-- Quick amounts -->
+            <div class="numpad__quick">
+              <button
+                v-for="a in quickAmounts"
+                :key="a"
+                type="button"
+                class="numpad__quick-btn"
+                :title="`+ ${formatMoney(a, currency)}`"
+                @click="addToPaid(a)"
+              >
+                +{{ shortAmount(a) }}
+              </button>
+            </div>
+
+            <!-- Keypad -->
+            <div class="numpad__keys">
+              <button
+                v-for="k in numpadKeys"
+                :key="k.value"
+                type="button"
+                class="numpad__key"
+                :class="k.cls"
+                :aria-label="k.aria || k.label"
+                @click="onNumpad(k.value)"
+              >
+                <v-icon v-if="k.icon" size="22">{{ k.icon }}</v-icon>
+                <span v-else>{{ k.label }}</span>
+              </button>
+            </div>
+          </div>
+        </v-expand-transition>
+
+        <!-- Keypad utilities -->
+        <div class="numpad__utils">
+          <button
+            type="button"
+            class="numpad__util numpad__util--primary"
+            :disabled="items.length === 0"
+            @click="onFullPayment"
+          >
+            <v-icon size="18">mdi-cash-multiple</v-icon>
+            المبلغ كامل
+          </button>
+          <button
+            type="button"
+            class="numpad__util"
+            :disabled="!paidInput"
+            @click="onNumpad('clear')"
+          >
+            <v-icon size="18">mdi-refresh</v-icon>
+            تصفير
+          </button>
+        </div>
+
+        <!-- Actions -->
+        <div class="pay__actions">
+          <v-tooltip
+            v-if="draftsVisible"
+            location="top"
+            :text="draftsReason"
+            :disabled="!draftsDisabled"
+          >
+            <template #activator="{ props: tipProps }">
+              <span v-bind="tipProps" class="pay__draft-wrap">
+                <v-btn
+                  variant="outlined"
+                  size="large"
+                  class="pay__draft-btn"
+                  :disabled="draftsDisabled || items.length === 0 || submitting"
+                  @click="onHold"
+                >
+                  <v-icon start size="18">mdi-content-save-outline</v-icon>
+                  مسودة
+                </v-btn>
+              </span>
+            </template>
+          </v-tooltip>
+          <v-btn
+            size="large"
+            color="primary"
+            class="pay__checkout"
+            :loading="submitting"
+            :disabled="!canSubmit"
+            @click="checkout"
+          >
+            <v-icon start size="18">mdi-check-circle-outline</v-icon>
+            دفع وإتمام
+            <span class="pay__hotkey">F9</span>
+          </v-btn>
         </div>
       </div>
     </aside>
@@ -956,6 +965,12 @@ const loadingProducts = ref(false);
 const cartOpen = ref(false);
 const clearDialog = ref(false);
 const hideExpired = ref(false);
+// Discount/tax inputs are hidden by default to keep the cart footer clean —
+// most sales need neither, so they live behind a collapsible "خيارات" toggle.
+const showOptions = ref(false);
+// The digit keypad + quick-amount chips are collapsed by default; the common
+// flow is "المبلغ كامل" (exact), so manual entry hides behind a toggle.
+const showNumpad = ref(false);
 
 // Numpad: a free-typed string we own as the source of truth for the readout.
 // Sync to/from payment.paidAmount so applyExact / addToPaid still drive it.
@@ -1169,7 +1184,11 @@ const expiryStatusOf = (p) => {
   if (!p?.tracksExpiry) return 'بدون تاريخ انتهاء';
   const status = expiryInfoOf(p)?.status;
   if (!status) return 'صالح';
-  if (status === 'ينتهي خلال 7 أيام' || status === 'ينتهي خلال 30 يوم' || status === 'ينتهي خلال 60 يوم')
+  if (
+    status === 'ينتهي خلال 7 أيام' ||
+    status === 'ينتهي خلال 30 يوم' ||
+    status === 'ينتهي خلال 60 يوم'
+  )
     return 'ينتهي قريباً';
   if (status === 'منتهي') return 'منتهي';
   return 'صالح';
@@ -1298,7 +1317,8 @@ const onBarcode = () => {
     }
     return false;
   });
-  const match = productByUnitBarcode || products.value.find((p) => p.barcode === code || p.sku === code);
+  const match =
+    productByUnitBarcode || products.value.find((p) => p.barcode === code || p.sku === code);
   if (!match) {
     notify.error('لا يوجد منتج بهذا الرمز');
     return;
@@ -1695,7 +1715,7 @@ onUnmounted(() => {
   --pos-primary-hover: rgba(var(--v-theme-primary), 0.14);
 
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 440px;
+  grid-template-columns: minmax(0, 1fr) 460px;
   gap: var(--pos-space-4);
   height: calc(100vh - 120px);
   min-height: 600px;
@@ -1715,7 +1735,7 @@ onUnmounted(() => {
 
 .pos__products {
   display: grid;
-  grid-template-rows: 0.2fr 1fr 0.2fr;
+  grid-template-rows: auto 1fr;
   gap: var(--pos-space-2);
   padding: var(--pos-space-3);
   height: 100%;
@@ -2441,12 +2461,16 @@ onUnmounted(() => {
   color: var(--pos-primary);
 }
 
-/* ══════════════════ Cart total ══════════════════ */
-.cart__total {
-  padding: 10px 14px;
+/* ══════════════════ Cart pay / footer ══════════════════ */
+.cart__pay {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
   border-top: 1px solid var(--pos-border);
   background: linear-gradient(180deg, transparent, var(--pos-surface-soft));
   flex-shrink: 0;
+  overflow-y: auto;
 }
 
 .cart__total-rows {
@@ -2496,20 +2520,22 @@ onUnmounted(() => {
   line-height: 1.1;
 }
 
-.cart__total-adv {
-  margin-top: 6px;
+/* Collapsible discount / tax toggle */
+.cart__options-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  align-self: flex-start;
   padding: 4px 8px;
+  margin-inline-start: -8px;
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  color: rgba(var(--v-theme-on-surface), 0.65);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
   transition:
     background 0.15s ease,
     color 0.15s ease;
@@ -2520,23 +2546,24 @@ onUnmounted(() => {
   }
 }
 
-.cart__total-adv-hint {
-  margin-inline-start: 6px;
-  opacity: 0.85;
+.cart__options-chevron {
+  transition: transform 0.2s ease;
+  .cart__options-toggle.is-open & {
+    transform: rotate(180deg);
+  }
+}
+
+.cart__options-hint {
   font-weight: 600;
+  font-size: 0.72rem;
+  opacity: 0.7;
 }
 
 .cart__adjustments {
-  margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.adj__row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+  padding-top: 4px;
 }
 
 .adj__field {
@@ -2589,7 +2616,6 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--pos-space-2);
-  padding: 8px 0px;
   flex-shrink: 0;
 }
 
@@ -2600,7 +2626,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 4px;
   padding: 8px 4px;
-  min-height: 56px;
+  min-height: 50px;
   border-radius: var(--pos-radius-md);
   border: 1px solid var(--pos-border);
   background: var(--pos-surface-soft);
@@ -2630,20 +2656,17 @@ onUnmounted(() => {
   }
 }
 
-/* ══════════════════ Numpad ══════════════════ */
-.numpad {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 4px;
+/* Card reference field */
+.cart__card-ref {
   flex-shrink: 0;
 }
 
-.numpad__readout {
+/* ══════════════════ Paid / change readout ══════════════════ */
+.pay__readout {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 14px;
+  gap: 2px;
+  padding: 8px 12px;
   border-radius: var(--pos-radius-md);
   background: var(--pos-surface-tint);
   border: 1px solid var(--pos-border);
@@ -2664,65 +2687,69 @@ onUnmounted(() => {
   }
 }
 
-.numpad__readout-top {
+.pay__readout-line {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 1.1rem;
 }
 
-.numpad__readout-label {
+.pay__readout-label {
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
-.numpad__readout-typed {
-  font-size: 0.7rem;
+.pay__readout-typed {
+  font-size: 0.68rem;
   font-family: ui-monospace, 'Cascadia Code', monospace;
   color: rgba(var(--v-theme-on-surface), 0.45);
   font-variant-numeric: tabular-nums;
 }
 
-.numpad__readout-value {
-  font-size: 1.5rem;
+.pay__readout-amount {
+  margin-inline-start: auto;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   color: rgb(var(--v-theme-on-surface));
-  line-height: 1.15;
 }
 
-.numpad__delta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  font-weight: 700;
+.pay__readout-line--delta {
+  font-size: 0.82rem;
   color: rgba(var(--v-theme-on-surface), 0.5);
 
+  .pay__readout-amount {
+    font-weight: 800;
+  }
   .is-success & {
     color: rgb(var(--v-theme-success));
+    .pay__readout-amount,
+    .pay__readout-label {
+      color: rgb(var(--v-theme-success));
+    }
   }
   .is-error & {
     color: rgb(var(--v-theme-error));
+    .pay__readout-amount,
+    .pay__readout-label {
+      color: rgb(var(--v-theme-error));
+    }
   }
   .is-neutral & {
     color: var(--pos-primary);
+    .pay__readout-amount,
+    .pay__readout-label {
+      color: var(--pos-primary);
+    }
   }
 }
 
-.numpad__delta-label {
-  opacity: 0.85;
-}
-.numpad__delta-value {
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  margin-inline-start: auto;
-}
-
-.numpad__refs {
-  margin-top: 2px;
+/* ══════════════════ Numpad ══════════════════ */
+.numpad__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
 }
 
 .numpad__keys {
@@ -2732,13 +2759,13 @@ onUnmounted(() => {
 }
 
 .numpad__key {
-  height: 50px;
+  height: 38px;
   border: 1px solid var(--pos-border);
   border-radius: var(--pos-radius-md);
   background: var(--pos-surface-soft);
   color: inherit;
   font: inherit;
-  font-size: 1.15rem;
+  font-size: 1rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -2771,20 +2798,14 @@ onUnmounted(() => {
   }
 }
 
-.numpad__actions-row {
+.numpad__utils {
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 6px;
 }
 
-.numpad__actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
 .numpad__util {
-  height: 42px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2876,18 +2897,17 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 2fr;
   gap: var(--pos-space-2);
-  padding: 8px 12px 12px;
   flex-shrink: 0;
 }
 
 .pay__draft-btn {
-  height: 52px !important;
+  height: 50px !important;
   font-size: 0.88rem;
   font-weight: 700;
 }
 
 .pay__checkout {
-  height: 52px !important;
+  height: 50px !important;
   font-size: 1rem !important;
   font-weight: 900 !important;
   letter-spacing: 0.02em;
@@ -3091,7 +3111,7 @@ onUnmounted(() => {
 /* ══════════════════ Responsive ══════════════════ */
 @media (max-width: 1280px) {
   .pos {
-    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-columns: minmax(0, 1fr) 330px;
   }
 
   .products__grid {
@@ -3099,8 +3119,8 @@ onUnmounted(() => {
   }
 
   .numpad__key {
-    height: 46px;
-    font-size: 1.05rem;
+    height: 36px;
+    font-size: 0.95rem;
   }
 }
 
@@ -3155,20 +3175,16 @@ onUnmounted(() => {
 
   .pay__methods {
     gap: 6px;
-    padding: 8px 10px;
   }
 
-  .numpad {
-    padding: 8px 10px 4px;
+  .cart__pay {
+    padding: 10px;
+    gap: 8px;
   }
 
   .numpad__key {
-    height: 44px;
+    height: 40px;
     font-size: 1rem;
-  }
-
-  .pay__actions {
-    padding: 8px 10px 12px;
   }
 
   .pay__draft-btn,
