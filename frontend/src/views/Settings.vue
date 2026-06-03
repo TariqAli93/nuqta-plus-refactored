@@ -28,6 +28,7 @@
             direction="vertical"
             color="primary"
             density="comfortable"
+            slider-transition="shift"
           >
             <v-tab value="company">
               <v-icon start>mdi-domain</v-icon>
@@ -162,6 +163,12 @@ onMounted(async () => {
     margin-block: 2px;
     border-radius: 8px;
     font-weight: 500;
+  }
+
+  :deep(.v-tab__slider) {
+    right: 0;
+    left: auto;
+    width: 3px;
   }
 
   // selected state

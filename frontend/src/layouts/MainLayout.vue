@@ -8,13 +8,13 @@
       width="250"
       rail
       rail-width="120"
-      :touchless="false"
+      class="!fixed top-0 h-screen"
       @update:model-value="onDrawerUpdate"
     >
       <!-- Logo -->
       <router-link
         to="/"
-        class="flex justify-center align-center pa-1 absolute top-0 left-0 w-full border-b z-50"
+        class="flex justify-center align-center pa-1 absolute top-0 left-0 w-full z-50"
         style="background-color: rgba(var(--v-theme-surface), 1)"
         aria-label="الرئيسية"
       >
@@ -93,7 +93,7 @@
       </v-list>
     </v-navigation-drawer>
 
-    <v-app-bar app elevation="0" dark class="border-b" color="surface">
+    <v-app-bar app elevation="0" dark class="!fixed top-0 glass__main" color="surface">
       <v-container fluid class="flex align-center container">
         <v-app-bar-nav-icon
           :aria-label="drawer ? 'إخفاء القائمة الجانبية' : 'إظهار القائمة الجانبية'"
@@ -501,5 +501,10 @@ onUnmounted(() => {
 .slide-down-leave-to {
   transform: translateY(6px);
   opacity: 0;
+}
+
+.glass__main {
+  background: rgba(var(--v-theme-surface), 0.8) !important;
+  @apply bg-white/10 backdrop-blur-lg;
 }
 </style>

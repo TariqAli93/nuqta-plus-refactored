@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell">
+  <div class="page-shell space-y-3">
     <!-- Loading state ---------------------------------------------------- -->
     <div v-if="loading" class="loading-state">
       <v-progress-circular indeterminate color="primary" size="56" />
