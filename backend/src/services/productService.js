@@ -1,9 +1,29 @@
 import { getDb, getPool, saveDatabase } from '../db.js';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { products, categories, productStock, productUnits } from '../models/index.js';
+import {
+  products,
+  categories,
+  productStock,
+  productStockEntries,
+  productUnits,
+  stockMovements,
+  warehouseTransfers,
+  sales,
+  saleItems,
+  saleReturns,
+  saleReturnItems,
+} from '../models/index.js';
 import * as schema from '../models/index.js';
-import { NotFoundError, ConflictError } from '../utils/errors.js';
-import { eq, like, or, and, desc, sql } from 'drizzle-orm';
+import {
+  NotFoundError,
+  ConflictError,
+  AppError,
+  translateDbConstraintError,
+} from '../utils/errors.js';
+import { eq, like, or, and, ne, desc, sql } from 'drizzle-orm';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('ProductService');
 import alertBus from '../events/alertBus.js';
 import inventoryService from './inventoryService.js';
 import {
@@ -329,12 +349,130 @@ export class ProductService {
     return { ...updated, units };
   }
 
+  /**
+   * Permanently (hard) delete a product, but ONLY when it is not referenced by
+   * any *active* data. Runs inside one transaction with automatic rollback.
+   *
+   * "Active" = a non-cancelled sale/return line, or a pending warehouse
+   * transfer. A product that appears solely inside CANCELLED invoices is
+   * deletable: those invoices are preserved for archival/audit, and their line
+   * items keep a frozen product snapshot (product_name/sku/barcode/unit_name/
+   * unit_price) so they render correctly after the product row is gone.
+   *
+   * Tables that reference `products.id` and what happens to them on delete:
+   *   sale_items           → product_id set to NULL (row + snapshot preserved)
+   *   sale_return_items    → product_id set to NULL (row + snapshot preserved)
+   *   warehouse_transfers  → deleted (only resolved/historical ones remain)
+   *   stock_movements      → deleted
+   *   product_stock_entries→ deleted (cascades sale_item_stock_entries)
+   *   product_stock        → deleted
+   *   product_units        → deleted (kept sale lines' unit_id → SET NULL)
+   */
   async delete(id) {
     const db = await getDb();
-    const [deleted] = await db.delete(products).where(eq(products.id, id)).returning();
+    const productId = Number(id);
 
-    if (!deleted) {
+    const [existing] = await db
+      .select({ id: products.id, name: products.name })
+      .from(products)
+      .where(eq(products.id, productId));
+
+    if (!existing) {
       throw new NotFoundError('Product');
+    }
+
+    // ── Active-reference check ────────────────────────────────────────────
+    // Sale lines on any non-cancelled invoice (pending/completed/returned/
+    // partially_returned/draft) count as active. We count DISTINCT invoices so
+    // the user-facing message can state exactly how many invoices block the
+    // deletion.
+    const [activeSaleRow] = await db
+      .select({ invoices: sql`COUNT(DISTINCT ${saleItems.saleId})` })
+      .from(saleItems)
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      .where(and(eq(saleItems.productId, productId), ne(sales.status, 'cancelled')));
+
+    // Return lines tied to a non-cancelled sale.
+    const [activeReturnRow] = await db
+      .select({ count: sql`COUNT(*)` })
+      .from(saleReturnItems)
+      .innerJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
+      .innerJoin(sales, eq(saleReturns.saleId, sales.id))
+      .where(and(eq(saleReturnItems.productId, productId), ne(sales.status, 'cancelled')));
+
+    // Pending (not yet approved/rejected) stock transfers are live operations.
+    const [pendingTransferRow] = await db
+      .select({ count: sql`COUNT(*)` })
+      .from(warehouseTransfers)
+      .where(
+        and(eq(warehouseTransfers.productId, productId), eq(warehouseTransfers.status, 'pending'))
+      );
+
+    const activeInvoices = Number(activeSaleRow?.invoices) || 0;
+    const activeReturns = Number(activeReturnRow?.count) || 0;
+    const pendingTransfers = Number(pendingTransferRow?.count) || 0;
+
+    if (activeInvoices > 0 || activeReturns > 0 || pendingTransfers > 0) {
+      // When the blocker is sales invoices, name the count; otherwise fall back
+      // to the generic "registered invoices or operations" wording.
+      const message =
+        activeInvoices > 0
+          ? `لا يمكن حذف هذا المنتج لأنه مرتبط بـ ${activeInvoices} فاتورة مسجلة داخل النظام.`
+          : 'لا يمكن حذف هذا المنتج لأنه مستخدم في فواتير أو عمليات مسجلة داخل النظام.';
+      const error = new ConflictError(message);
+      error.code = 'PRODUCT_IN_ACTIVE_USE';
+      error.details = {
+        productId,
+        activeInvoices,
+        activeReturnItems: activeReturns,
+        pendingTransfers,
+      };
+      throw error;
+    }
+
+    // ── Hard delete (atomic, rolls back on any error) ─────────────────────
+    try {
+      await withTransaction(async (tx) => {
+        // Preserve cancelled-invoice archives: detach the product from the line
+        // items but keep the rows and their snapshot intact.
+        await tx
+          .update(saleItems)
+          .set({ productId: null })
+          .where(eq(saleItems.productId, productId));
+        await tx
+          .update(saleReturnItems)
+          .set({ productId: null })
+          .where(eq(saleReturnItems.productId, productId));
+
+        // Remove the product's owned operational data.
+        await tx.delete(warehouseTransfers).where(eq(warehouseTransfers.productId, productId));
+        await tx.delete(stockMovements).where(eq(stockMovements.productId, productId));
+        await tx.delete(productStockEntries).where(eq(productStockEntries.productId, productId));
+        await tx.delete(productStock).where(eq(productStock.productId, productId));
+        await tx.delete(productUnits).where(eq(productUnits.productId, productId));
+
+        // Finally the product row itself.
+        const [deleted] = await tx
+          .delete(products)
+          .where(eq(products.id, productId))
+          .returning();
+        if (!deleted) {
+          throw new NotFoundError('Product');
+        }
+      });
+    } catch (err) {
+      // Already user-facing (NotFound/Conflict/…) — surface as-is.
+      if (err instanceof AppError) throw err;
+      // Otherwise log the FULL technical error and return a clean Arabic
+      // message. A lingering FK reference (e.g. a table added later without a
+      // pre-check above) maps to the same "in use" wording instead of leaking
+      // a database constraint error to the user.
+      log.error('Hard delete of product failed', err);
+      throw (
+        translateDbConstraintError(err, {
+          fkMessage: 'لا يمكن حذف هذا المنتج لأنه مستخدم في فواتير أو عمليات مسجلة داخل النظام.',
+        }) || new AppError('تعذّر حذف المنتج بسبب خطأ غير متوقع. يرجى المحاولة مرة أخرى.', 500)
+      );
     }
 
     saveDatabase();

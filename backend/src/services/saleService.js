@@ -490,7 +490,11 @@ export class SaleService {
         const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: newSale.id,
           productId: item.productId,
+          // Product snapshot — frozen here so the invoice survives a later
+          // hard-delete of the product (cancelled invoices keep these values).
           productName: product.name,
+          productSku: product.sku || null,
+          barcode: product.barcode || null,
           quantity: item.quantity,
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),
@@ -753,7 +757,10 @@ export class SaleService {
         id: saleItems.id,
         saleId: saleItems.saleId,
         productId: saleItems.productId,
+        // Snapshot fields — survive a hard-delete of the product.
         productName: saleItems.productName,
+        productSku: saleItems.productSku,
+        barcode: saleItems.barcode,
         productDescription: products.description,
         quantity: saleItems.quantity,
         unitPrice: saleItems.unitPrice,
@@ -1895,15 +1902,19 @@ export class SaleService {
       const itemsToInsert = [];
       for (const item of saleData.items) {
         let productName = item.productName || 'Unknown Product';
+        let productSku = item.productSku || null;
+        let barcode = item.barcode || null;
 
         if (item.productId) {
           const [product] = await db
-            .select({ name: products.name })
+            .select({ name: products.name, sku: products.sku, barcode: products.barcode })
             .from(products)
             .where(eq(products.id, item.productId))
             .limit(1);
           if (product) {
             productName = product.name;
+            productSku = product.sku || null;
+            barcode = product.barcode || null;
           }
         }
 
@@ -1913,7 +1924,10 @@ export class SaleService {
         itemsToInsert.push({
           saleId: newDraft.id,
           productId: item.productId || null,
+          // Product snapshot — frozen so the invoice survives product deletion.
           productName,
+          productSku,
+          barcode,
           quantity: item.quantity || 1,
           unitPrice: String(item.unitPrice || 0),
           discount: String(itemDiscountTotal),
@@ -2083,7 +2097,10 @@ export class SaleService {
         const [insertedSaleItem] = await tx.insert(saleItems).values({
           saleId: updatedSale.id,
           productId: item.productId,
+          // Product snapshot — frozen so the invoice survives product deletion.
           productName: product.name,
+          productSku: product.sku || null,
+          barcode: product.barcode || null,
           quantity: item.quantity,
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),

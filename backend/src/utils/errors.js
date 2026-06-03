@@ -88,3 +88,42 @@ export class DatabaseError extends AppError {
     this.name = 'DatabaseError';
   }
 }
+
+/**
+ * Translate a low-level PostgreSQL constraint error into a clean, user-facing
+ * AppError carrying an Arabic message — so the end user never sees raw database
+ * text (SQL, constraint names, codes). Returns `null` when the error is not a
+ * recognised constraint violation, letting the caller decide what to do
+ * (usually: log the original and throw a generic Arabic error).
+ *
+ * Relevant PostgreSQL SQLSTATE codes:
+ *   23503 → foreign_key_violation (row is still referenced elsewhere)
+ *   23505 → unique_violation      (duplicate value)
+ *   23502 → not_null_violation
+ *   23514 → check_violation
+ *
+ * @param {Error} error - the caught error (may be a wrapped pg error)
+ * @param {object} [opts]
+ * @param {string} [opts.fkMessage] - Arabic message to use for FK violations
+ * @returns {AppError|null}
+ */
+export function translateDbConstraintError(error, { fkMessage } = {}) {
+  // Drizzle/pg may wrap the driver error; check the error and its `.cause`.
+  const code = error?.code || error?.cause?.code;
+  if (typeof code !== 'string') return null;
+
+  switch (code) {
+    case '23503':
+      return new ConflictError(
+        fkMessage || 'لا يمكن حذف هذا العنصر لأنه مستخدم في بيانات أخرى مسجلة داخل النظام.'
+      );
+    case '23505':
+      return new ConflictError('القيمة المُدخلة موجودة مسبقاً داخل النظام.');
+    case '23502':
+      return new ValidationError('بيانات ناقصة: أحد الحقول المطلوبة فارغ.');
+    case '23514':
+      return new ValidationError('القيمة المُدخلة غير مقبولة وفق قواعد النظام.');
+    default:
+      return null;
+  }
+}

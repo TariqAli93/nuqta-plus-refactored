@@ -8,10 +8,18 @@ import {
   branches,
   currencySettings,
 } from '../models/index.js';
-import { NotFoundError, ConflictError } from '../utils/errors.js';
+import {
+  NotFoundError,
+  ConflictError,
+  AppError,
+  translateDbConstraintError,
+} from '../utils/errors.js';
 import { normalizeIraqPhone } from '../utils/phone.js';
 import { eq, like, or, desc, sql, and, asc, ne } from 'drizzle-orm';
 import { isGlobalAdmin } from './scopeService.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('CustomerService');
 
 /**
  * Build a ConflictError for a duplicate phone, with the existing customer
@@ -579,15 +587,36 @@ export class CustomerService {
 
   async delete(id) {
     const db = await getDb();
-    const [deleted] = await db.delete(customers).where(eq(customers.id, id)).returning();
 
-    if (!deleted) {
-      throw new NotFoundError('Customer');
+    // Pre-check: a customer tied to sales invoices cannot be deleted (their
+    // financial history must be preserved). Report the invoice count.
+    const [usage] = await db
+      .select({ count: sql`COUNT(*)` })
+      .from(sales)
+      .where(eq(sales.customerId, Number(id)));
+    const invoiceCount = Number(usage?.count) || 0;
+    if (invoiceCount > 0) {
+      throw new ConflictError(
+        `لا يمكن حذف هذا العميل لأنه مرتبط بـ ${invoiceCount} فاتورة مسجلة داخل النظام.`
+      );
     }
 
-    saveDatabase();
-
-    return { message: 'Customer deleted successfully' };
+    try {
+      const [deleted] = await db.delete(customers).where(eq(customers.id, id)).returning();
+      if (!deleted) {
+        throw new NotFoundError('Customer');
+      }
+      saveDatabase();
+      return { message: 'Customer deleted successfully' };
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      log.error('Delete of customer failed', err);
+      throw (
+        translateDbConstraintError(err, {
+          fkMessage: 'لا يمكن حذف هذا العميل لأنه مرتبط بفواتير أو مدفوعات مسجلة داخل النظام.',
+        }) || new AppError('تعذّر حذف العميل بسبب خطأ غير متوقع. يرجى المحاولة مرة أخرى.', 500)
+      );
+    }
   }
 
   async updateDebt(customerId, amount) {

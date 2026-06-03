@@ -46,12 +46,18 @@ async function errorHandlerPlugin(fastify) {
       });
     }
 
-    // Default server error
+    // Default server error. The full technical error is already logged above
+    // (request.log.error). Never leak raw DB/driver text to the end user — in
+    // production we return a clean Arabic message; in development we keep the
+    // real message to aid debugging.
     const statusCode = error.statusCode || 500;
     return reply.status(statusCode).send({
       statusCode,
       error: 'Internal Server Error',
-      message: config.server.env === 'production' ? 'An unexpected error occurred' : error.message,
+      message:
+        config.server.env === 'production'
+          ? 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.'
+          : error.message,
     });
   });
 

@@ -1,7 +1,15 @@
 import { getDb, saveDatabase } from '../db.js';
-import { categories } from '../models/index.js';
-import { NotFoundError, ConflictError } from '../utils/errors.js';
+import { categories, products } from '../models/index.js';
+import {
+  NotFoundError,
+  ConflictError,
+  AppError,
+  translateDbConstraintError,
+} from '../utils/errors.js';
 import { eq, like, desc, sql } from 'drizzle-orm';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('CategoryService');
 
 export class CategoryService {
   async create(categoryData) {
@@ -89,14 +97,35 @@ export class CategoryService {
 
   async delete(id) {
     const db = await getDb();
-    const [deleted] = await db.delete(categories).where(eq(categories.id, id)).returning();
 
-    if (!deleted) {
-      throw new NotFoundError('Category');
+    // Pre-check: a category still used by products cannot be deleted. Report
+    // the exact count so the message is actionable.
+    const [usage] = await db
+      .select({ count: sql`COUNT(*)` })
+      .from(products)
+      .where(eq(products.categoryId, Number(id)));
+    const productCount = Number(usage?.count) || 0;
+    if (productCount > 0) {
+      throw new ConflictError(
+        `لا يمكن حذف هذه الفئة لأنها مرتبطة بـ ${productCount} منتج مسجل داخل النظام.`
+      );
     }
 
-    saveDatabase();
-
-    return { message: 'Category deleted successfully' };
+    try {
+      const [deleted] = await db.delete(categories).where(eq(categories.id, id)).returning();
+      if (!deleted) {
+        throw new NotFoundError('Category');
+      }
+      saveDatabase();
+      return { message: 'Category deleted successfully' };
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      log.error('Delete of category failed', err);
+      throw (
+        translateDbConstraintError(err, {
+          fkMessage: 'لا يمكن حذف هذه الفئة لأنها مستخدمة في بيانات أخرى مسجلة داخل النظام.',
+        }) || new AppError('تعذّر حذف الفئة بسبب خطأ غير متوقع. يرجى المحاولة مرة أخرى.', 500)
+      );
+    }
   }
 }

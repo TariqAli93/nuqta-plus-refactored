@@ -162,11 +162,11 @@
 
     <ConfirmDialog
       v-model="deleteDialog"
-      title="تأكيد الحذف"
-      message="هل أنت متأكد من حذف المنتج؟"
+      title="تحذير: حذف نهائي"
+      message="سيتم حذف المنتج نهائياً. سيتم الاحتفاظ باسم المنتج داخل الفواتير الملغية فقط، ولن تتأثر سجلات الأرشفة. إذا كان المنتج مستخدماً في بيانات فعالة (فواتير أو عمليات غير ملغية) فسيُرفض الحذف."
       :details="selectedProduct ? `المنتج: ${selectedProduct.name}` : ''"
       type="error"
-      confirm-text="حذف"
+      confirm-text="حذف نهائي"
       cancel-text="إلغاء"
       @confirm="handleDelete"
       @cancel="deleteDialog = false"
@@ -345,7 +345,7 @@ const handleExport = () => {
     }));
     exportToCSV(productStore.products, exportHeaders, 'products.csv');
     notificationStore.success('تم تصدير البيانات بنجاح');
-  } catch {
+  } catch (error) {
     notificationStore.error('فشل تصدير البيانات');
   }
 };
@@ -368,8 +368,10 @@ const handleDelete = async () => {
       },
       `تم حذف المنتج "${productName}"`
     );
-  } catch {
+  } catch (error) {
     // Error handled by notification
+    notificationStore.error(error?.message || 'فشل حذف المنتج');
+    console.error('Error deleting product:', error.message);
   }
 };
 

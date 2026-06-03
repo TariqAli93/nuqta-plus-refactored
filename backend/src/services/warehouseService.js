@@ -5,8 +5,13 @@ import {
   ConflictError,
   ValidationError,
   AuthorizationError,
+  AppError,
+  translateDbConstraintError,
 } from '../utils/errors.js';
 import { eq, and, desc, ne, sql } from 'drizzle-orm';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('WarehouseService');
 import featureFlagsService from './featureFlagsService.js';
 import {
   PERMISSION_ERRORS,
@@ -464,7 +469,7 @@ export class WarehouseService {
       .limit(1);
     if (defaultFor) {
       throw new ConflictError(
-        `Cannot delete warehouse: it is the default warehouse for branch "${defaultFor.name}". Pick a different default first.`
+        `لا يمكن حذف هذا المخزن لأنه المخزن الافتراضي للفرع "${defaultFor.name}". يرجى تعيين مخزن افتراضي آخر أولاً.`
       );
     }
 
@@ -476,13 +481,23 @@ export class WarehouseService {
 
     if (Number(hasStock?.total || 0) > 0) {
       await db.update(warehouses).set({ isActive: false }).where(eq(warehouses.id, id));
-      return { message: 'Warehouse deactivated (contains stock)' };
+      return { message: 'تم تعطيل المخزن لاحتوائه على مخزون.' };
     }
 
     // No stock — safe to delete (cascade clears product_stock)
-    const [deleted] = await db.delete(warehouses).where(eq(warehouses.id, id)).returning();
-    if (!deleted) throw new NotFoundError('Warehouse');
-    return { message: 'Warehouse deleted' };
+    try {
+      const [deleted] = await db.delete(warehouses).where(eq(warehouses.id, id)).returning();
+      if (!deleted) throw new NotFoundError('Warehouse');
+      return { message: 'تم حذف المخزن بنجاح.' };
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      log.error('Delete of warehouse failed', err);
+      throw (
+        translateDbConstraintError(err, {
+          fkMessage: 'لا يمكن حذف هذا المخزن لأنه مرتبط بحركات أو فواتير مسجلة داخل النظام.',
+        }) || new AppError('تعذّر حذف المخزن بسبب خطأ غير متوقع. يرجى المحاولة مرة أخرى.', 500)
+      );
+    }
   }
 }
 

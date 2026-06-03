@@ -1,3 +1,25 @@
+CREATE TABLE IF NOT EXISTS "audit_log" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"user_id" integer,
+	"username" text,
+	"action" text NOT NULL,
+	"resource" text,
+	"resource_id" integer,
+	"details" text,
+	"ip_address" text,
+	"created_at" timestamp DEFAULT now()
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "branches" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"address" text,
+	"default_warehouse_id" integer,
+	"is_active" boolean DEFAULT true,
+	"created_at" timestamp DEFAULT now(),
+	CONSTRAINT "branches_name_unique" UNIQUE("name")
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "cash_sessions" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
@@ -11,6 +33,17 @@ CREATE TABLE IF NOT EXISTS "cash_sessions" (
 	"notes" text,
 	"opened_at" timestamp DEFAULT now(),
 	"closed_at" timestamp
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "categories" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"description" text,
+	"is_active" boolean DEFAULT true,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
+	"created_by" integer,
+	CONSTRAINT "categories_name_unique" UNIQUE("name")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "credit_events" (
@@ -51,6 +84,37 @@ CREATE TABLE IF NOT EXISTS "credit_snapshots" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "currency_settings" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"currency_code" text NOT NULL,
+	"currency_name" text NOT NULL,
+	"symbol" text NOT NULL,
+	"exchange_rate" numeric(18, 6) NOT NULL,
+	"is_base_currency" boolean DEFAULT false,
+	"is_active" boolean DEFAULT true,
+	"updated_at" timestamp DEFAULT now(),
+	CONSTRAINT "currency_settings_currency_code_unique" UNIQUE("currency_code")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "customers" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"phone" text,
+	"normalized_phone" text,
+	"address" text,
+	"city" text,
+	"notes" text,
+	"total_purchases" numeric(18, 4) DEFAULT '0',
+	"total_debt" numeric(18, 4) DEFAULT '0',
+	"credit_score" integer,
+	"credit_score_updated_at" timestamp,
+	"recommended_limit" numeric(18, 4),
+	"is_active" boolean DEFAULT true,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
+	"created_by" integer
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "expenses" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"branch_id" integer,
@@ -88,6 +152,24 @@ CREATE TABLE IF NOT EXISTS "installment_actions" (
 	"new_due_date" text,
 	"payment_id" integer,
 	"created_at" timestamp DEFAULT now()
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "installments" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"sale_id" integer,
+	"customer_id" integer,
+	"installment_number" integer NOT NULL,
+	"due_amount" numeric(18, 4) NOT NULL,
+	"paid_amount" numeric(18, 4) DEFAULT '0',
+	"remaining_amount" numeric(18, 4) NOT NULL,
+	"currency" text DEFAULT 'IQD' NOT NULL,
+	"due_date" text NOT NULL,
+	"paid_date" text,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"notes" text,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
+	"created_by" integer
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "invoice_sequences" (
@@ -157,6 +239,30 @@ CREATE TABLE IF NOT EXISTS "notifications" (
 	"created_by" integer
 );
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "payments" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"sale_id" integer,
+	"customer_id" integer,
+	"amount" numeric(18, 4) NOT NULL,
+	"currency" text DEFAULT 'USD' NOT NULL,
+	"exchange_rate" numeric(18, 6) DEFAULT '1',
+	"payment_method" text NOT NULL,
+	"payment_reference" text,
+	"payment_date" timestamp DEFAULT now(),
+	"cash_session_id" integer,
+	"notes" text,
+	"created_at" timestamp DEFAULT now(),
+	"created_by" integer
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "product_stock" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"product_id" integer NOT NULL,
+	"warehouse_id" integer NOT NULL,
+	"quantity" integer DEFAULT 0 NOT NULL,
+	"updated_at" timestamp DEFAULT now()
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "product_stock_entries" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"product_id" integer NOT NULL,
@@ -188,11 +294,54 @@ CREATE TABLE IF NOT EXISTS "product_units" (
 	"updated_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "products" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"sku" text,
+	"barcode" text,
+	"category_id" integer,
+	"description" text,
+	"cost_price" numeric(18, 4) NOT NULL,
+	"selling_price" numeric(18, 4) NOT NULL,
+	"currency" text DEFAULT 'USD' NOT NULL,
+	"stock" integer DEFAULT 0,
+	"min_stock" integer DEFAULT 0,
+	"unit" text DEFAULT 'piece',
+	"supplier" text,
+	"tracks_expiry" boolean DEFAULT false NOT NULL,
+	"status" text DEFAULT 'available' NOT NULL,
+	"low_stock_threshold" integer DEFAULT 0,
+	"is_active" boolean DEFAULT true,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
+	"created_by" integer,
+	CONSTRAINT "products_sku_unique" UNIQUE("sku")
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "sale_item_stock_entries" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"sale_item_id" integer NOT NULL,
 	"product_stock_entry_id" integer NOT NULL,
 	"quantity" integer NOT NULL,
+	"created_at" timestamp DEFAULT now()
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "sale_items" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"sale_id" integer NOT NULL,
+	"product_id" integer,
+	"product_name" text NOT NULL,
+	"product_sku" text,
+	"barcode" text,
+	"quantity" integer NOT NULL,
+	"unit_price" numeric(18, 4) NOT NULL,
+	"discount" numeric(18, 4) DEFAULT '0',
+	"subtotal" numeric(18, 4) NOT NULL,
+	"unit_id" integer,
+	"unit_name" text,
+	"unit_conversion_factor" numeric(18, 6) DEFAULT '1' NOT NULL,
+	"base_quantity" integer DEFAULT 0 NOT NULL,
+	"unit_cost_price" numeric(18, 4),
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
@@ -230,6 +379,79 @@ CREATE TABLE IF NOT EXISTS "sale_returns" (
 	"created_by" integer
 );
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "sales" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"invoice_number" text NOT NULL,
+	"customer_id" integer,
+	"branch_id" integer,
+	"warehouse_id" integer,
+	"cash_session_id" integer,
+	"subtotal" numeric(18, 4) NOT NULL,
+	"discount" numeric(18, 4) DEFAULT '0',
+	"tax" numeric(18, 4) DEFAULT '0',
+	"total" numeric(18, 4) NOT NULL,
+	"currency" text DEFAULT 'USD' NOT NULL,
+	"exchange_rate" numeric(18, 6) DEFAULT '1',
+	"interest_rate" numeric(8, 4) DEFAULT '0',
+	"interest_amount" numeric(18, 4) DEFAULT '0',
+	"payment_type" text NOT NULL,
+	"sale_source" text,
+	"sale_type" text,
+	"paid_amount" numeric(18, 4) DEFAULT '0',
+	"remaining_amount" numeric(18, 4) DEFAULT '0',
+	"status" text DEFAULT 'pending' NOT NULL,
+	"notes" text,
+	"issued_at" timestamp,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
+	"created_by" integer,
+	CONSTRAINT "sales_invoice_number_unique" UNIQUE("invoice_number")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "settings" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"key" text NOT NULL,
+	"value" text NOT NULL,
+	"description" text,
+	"updated_at" timestamp DEFAULT now(),
+	"updated_by" integer,
+	CONSTRAINT "settings_key_unique" UNIQUE("key")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "stock_movements" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"product_id" integer NOT NULL,
+	"warehouse_id" integer NOT NULL,
+	"movement_type" text NOT NULL,
+	"quantity_change" integer NOT NULL,
+	"quantity_before" integer NOT NULL,
+	"quantity_after" integer NOT NULL,
+	"reference_type" text,
+	"reference_id" integer,
+	"unit_id" integer,
+	"unit_name" text,
+	"unit_quantity" numeric(18, 6),
+	"notes" text,
+	"created_at" timestamp DEFAULT now(),
+	"created_by" integer
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "users" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"username" text NOT NULL,
+	"password" text NOT NULL,
+	"full_name" text NOT NULL,
+	"phone" text,
+	"role" text DEFAULT 'cashier' NOT NULL,
+	"assigned_branch_id" integer,
+	"assigned_warehouse_id" integer,
+	"is_active" boolean DEFAULT true,
+	"last_login_at" timestamp,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
+	CONSTRAINT "users_username_unique" UNIQUE("username")
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "warehouse_transfers" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"branch_id" integer NOT NULL,
@@ -246,26 +468,20 @@ CREATE TABLE IF NOT EXISTS "warehouse_transfers" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-ALTER TABLE "warehouses" ALTER COLUMN "branch_id" DROP NOT NULL;--> statement-breakpoint
-ALTER TABLE "branches" ADD COLUMN "default_warehouse_id" integer;--> statement-breakpoint
-ALTER TABLE "customers" ADD COLUMN "normalized_phone" text;--> statement-breakpoint
-ALTER TABLE "payments" ADD COLUMN "payment_reference" text;--> statement-breakpoint
-ALTER TABLE "payments" ADD COLUMN "cash_session_id" integer;--> statement-breakpoint
-ALTER TABLE "products" ADD COLUMN "tracks_expiry" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "sale_items" ADD COLUMN "unit_id" integer;--> statement-breakpoint
-ALTER TABLE "sale_items" ADD COLUMN "unit_name" text;--> statement-breakpoint
-ALTER TABLE "sale_items" ADD COLUMN "unit_conversion_factor" numeric(18, 6) DEFAULT '1' NOT NULL;--> statement-breakpoint
-ALTER TABLE "sale_items" ADD COLUMN "base_quantity" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
-ALTER TABLE "sale_items" ADD COLUMN "unit_cost_price" numeric(18, 4);--> statement-breakpoint
-ALTER TABLE "sales" ADD COLUMN "cash_session_id" integer;--> statement-breakpoint
-ALTER TABLE "sales" ADD COLUMN "sale_source" text;--> statement-breakpoint
-ALTER TABLE "sales" ADD COLUMN "sale_type" text;--> statement-breakpoint
-ALTER TABLE "sales" ADD COLUMN "issued_at" timestamp;--> statement-breakpoint
-ALTER TABLE "stock_movements" ADD COLUMN "unit_id" integer;--> statement-breakpoint
-ALTER TABLE "stock_movements" ADD COLUMN "unit_name" text;--> statement-breakpoint
-ALTER TABLE "stock_movements" ADD COLUMN "unit_quantity" numeric(18, 6);--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "assigned_branch_id" integer;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "assigned_warehouse_id" integer;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "warehouses" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"branch_id" integer,
+	"is_active" boolean DEFAULT true,
+	"created_at" timestamp DEFAULT now()
+);
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "cash_sessions" ADD CONSTRAINT "cash_sessions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION
@@ -274,6 +490,12 @@ END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "cash_sessions" ADD CONSTRAINT "cash_sessions_branch_id_branches_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branches"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "categories" ADD CONSTRAINT "categories_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -298,6 +520,12 @@ END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "credit_snapshots" ADD CONSTRAINT "credit_snapshots_customer_id_customers_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customers"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "customers" ADD CONSTRAINT "customers_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -345,6 +573,24 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
+ ALTER TABLE "installments" ADD CONSTRAINT "installments_sale_id_sales_id_fk" FOREIGN KEY ("sale_id") REFERENCES "public"."sales"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "installments" ADD CONSTRAINT "installments_customer_id_customers_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customers"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "installments" ADD CONSTRAINT "installments_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
  ALTER TABLE "invoice_sequences" ADD CONSTRAINT "invoice_sequences_branch_id_branches_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branches"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
@@ -387,6 +633,42 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
+ ALTER TABLE "payments" ADD CONSTRAINT "payments_sale_id_sales_id_fk" FOREIGN KEY ("sale_id") REFERENCES "public"."sales"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payments" ADD CONSTRAINT "payments_customer_id_customers_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customers"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payments" ADD CONSTRAINT "payments_cash_session_id_cash_sessions_id_fk" FOREIGN KEY ("cash_session_id") REFERENCES "public"."cash_sessions"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payments" ADD CONSTRAINT "payments_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "product_stock" ADD CONSTRAINT "product_stock_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "product_stock" ADD CONSTRAINT "product_stock_warehouse_id_warehouses_id_fk" FOREIGN KEY ("warehouse_id") REFERENCES "public"."warehouses"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
  ALTER TABLE "product_stock_entries" ADD CONSTRAINT "product_stock_entries_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
@@ -411,6 +693,18 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
+ ALTER TABLE "products" ADD CONSTRAINT "products_category_id_categories_id_fk" FOREIGN KEY ("category_id") REFERENCES "public"."categories"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "products" ADD CONSTRAINT "products_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
  ALTER TABLE "sale_item_stock_entries" ADD CONSTRAINT "sale_item_stock_entries_sale_item_id_sale_items_id_fk" FOREIGN KEY ("sale_item_id") REFERENCES "public"."sale_items"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
@@ -418,6 +712,24 @@ END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "sale_item_stock_entries" ADD CONSTRAINT "sale_item_stock_entries_product_stock_entry_id_product_stock_entries_id_fk" FOREIGN KEY ("product_stock_entry_id") REFERENCES "public"."product_stock_entries"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sale_items" ADD CONSTRAINT "sale_items_sale_id_sales_id_fk" FOREIGN KEY ("sale_id") REFERENCES "public"."sales"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sale_items" ADD CONSTRAINT "sale_items_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sale_items" ADD CONSTRAINT "sale_items_unit_id_product_units_id_fk" FOREIGN KEY ("unit_id") REFERENCES "public"."product_units"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -477,6 +789,66 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
+ ALTER TABLE "sales" ADD CONSTRAINT "sales_customer_id_customers_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customers"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sales" ADD CONSTRAINT "sales_branch_id_branches_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branches"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sales" ADD CONSTRAINT "sales_warehouse_id_warehouses_id_fk" FOREIGN KEY ("warehouse_id") REFERENCES "public"."warehouses"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sales" ADD CONSTRAINT "sales_cash_session_id_cash_sessions_id_fk" FOREIGN KEY ("cash_session_id") REFERENCES "public"."cash_sessions"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sales" ADD CONSTRAINT "sales_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "settings" ADD CONSTRAINT "settings_updated_by_users_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_warehouse_id_warehouses_id_fk" FOREIGN KEY ("warehouse_id") REFERENCES "public"."warehouses"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_unit_id_product_units_id_fk" FOREIGN KEY ("unit_id") REFERENCES "public"."product_units"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
  ALTER TABLE "warehouse_transfers" ADD CONSTRAINT "warehouse_transfers_branch_id_branches_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branches"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
@@ -512,6 +884,12 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "warehouses" ADD CONSTRAINT "warehouses_branch_id_branches_id_fk" FOREIGN KEY ("branch_id") REFERENCES "public"."branches"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "cash_sessions_user_idx" ON "cash_sessions" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "cash_sessions_branch_idx" ON "cash_sessions" USING btree ("branch_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "cash_sessions_status_idx" ON "cash_sessions" USING btree ("status");--> statement-breakpoint
@@ -542,6 +920,7 @@ CREATE INDEX IF NOT EXISTS "notifications_next_attempt_idx" ON "notifications" U
 CREATE INDEX IF NOT EXISTS "notifications_customer_idx" ON "notifications" USING btree ("customer_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "notifications_type_idx" ON "notifications" USING btree ("type");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "notifications_dedupe_idx" ON "notifications" USING btree ("dedupe_key");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "product_stock_product_warehouse_idx" ON "product_stock" USING btree ("product_id","warehouse_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "product_stock_entries_product_warehouse_idx" ON "product_stock_entries" USING btree ("product_id","warehouse_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "product_stock_entries_expiry_idx" ON "product_stock_entries" USING btree ("expiry_date");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "sale_item_stock_entries_sale_item_idx" ON "sale_item_stock_entries" USING btree ("sale_item_id");--> statement-breakpoint
@@ -551,28 +930,8 @@ CREATE INDEX IF NOT EXISTS "sale_return_items_sale_item_idx" ON "sale_return_ite
 CREATE INDEX IF NOT EXISTS "sale_returns_sale_idx" ON "sale_returns" USING btree ("sale_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "sale_returns_customer_idx" ON "sale_returns" USING btree ("customer_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "sale_returns_created_at_idx" ON "sale_returns" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "stock_movements_warehouse_idx" ON "stock_movements" USING btree ("warehouse_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "stock_movements_product_idx" ON "stock_movements" USING btree ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "stock_movements_created_at_idx" ON "stock_movements" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "warehouse_transfers_status_idx" ON "warehouse_transfers" USING btree ("status");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "warehouse_transfers_branch_idx" ON "warehouse_transfers" USING btree ("branch_id");--> statement-breakpoint
-DO $$ BEGIN
- ALTER TABLE "payments" ADD CONSTRAINT "payments_cash_session_id_cash_sessions_id_fk" FOREIGN KEY ("cash_session_id") REFERENCES "public"."cash_sessions"("id") ON DELETE no action ON UPDATE no action;
-EXCEPTION
- WHEN duplicate_object THEN null;
-END $$;
---> statement-breakpoint
-DO $$ BEGIN
- ALTER TABLE "sale_items" ADD CONSTRAINT "sale_items_unit_id_product_units_id_fk" FOREIGN KEY ("unit_id") REFERENCES "public"."product_units"("id") ON DELETE set null ON UPDATE no action;
-EXCEPTION
- WHEN duplicate_object THEN null;
-END $$;
---> statement-breakpoint
-DO $$ BEGIN
- ALTER TABLE "sales" ADD CONSTRAINT "sales_cash_session_id_cash_sessions_id_fk" FOREIGN KEY ("cash_session_id") REFERENCES "public"."cash_sessions"("id") ON DELETE no action ON UPDATE no action;
-EXCEPTION
- WHEN duplicate_object THEN null;
-END $$;
---> statement-breakpoint
-DO $$ BEGIN
- ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_unit_id_product_units_id_fk" FOREIGN KEY ("unit_id") REFERENCES "public"."product_units"("id") ON DELETE set null ON UPDATE no action;
-EXCEPTION
- WHEN duplicate_object THEN null;
-END $$;
+CREATE INDEX IF NOT EXISTS "warehouse_transfers_branch_idx" ON "warehouse_transfers" USING btree ("branch_id");

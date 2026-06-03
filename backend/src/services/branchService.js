@@ -5,8 +5,13 @@ import {
   ConflictError,
   ValidationError,
   AuthorizationError,
+  AppError,
+  translateDbConstraintError,
 } from '../utils/errors.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
+import { createLogger } from '../utils/logger.js';
+
+const branchLog = createLogger('BranchService');
 import permissionService, {
   PERMISSION_ERRORS,
   assertCan,
@@ -275,11 +280,21 @@ export class BranchService {
       .limit(1);
     if (wh) {
       await db.update(branches).set({ isActive: false }).where(eq(branches.id, id));
-      return { message: 'Branch deactivated (has warehouses)' };
+      return { message: 'تم تعطيل الفرع لارتباطه بمخازن.' };
     }
-    const [deleted] = await db.delete(branches).where(eq(branches.id, id)).returning();
-    if (!deleted) throw new NotFoundError('Branch');
-    return { message: 'Branch deleted' };
+    try {
+      const [deleted] = await db.delete(branches).where(eq(branches.id, id)).returning();
+      if (!deleted) throw new NotFoundError('Branch');
+      return { message: 'تم حذف الفرع بنجاح.' };
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      branchLog.error('Delete of branch failed', err);
+      throw (
+        translateDbConstraintError(err, {
+          fkMessage: 'لا يمكن حذف هذا الفرع لأنه مرتبط ببيانات مسجلة داخل النظام.',
+        }) || new AppError('تعذّر حذف الفرع بسبب خطأ غير متوقع. يرجى المحاولة مرة أخرى.', 500)
+      );
+    }
   }
 }
 

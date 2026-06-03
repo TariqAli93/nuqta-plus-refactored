@@ -319,10 +319,12 @@ export const useInventoryStore = defineStore('inventory', {
       try {
         const response = await api.delete(`/warehouses/${id}`);
         await this.fetchWarehouses();
-        notificationStore.success(response?.message || 'تم حذف المخزن');
+        notificationStore.success(response?.data?.message || 'تم حذف المخزن');
         return response.data;
       } catch (error) {
-        notificationStore.error(error?.message || 'فشل حذف المخزن');
+        // Prefer the backend's clear Arabic message over the raw axios error
+        // (e.g. "Request failed with status code 409").
+        notificationStore.error(error.response?.data?.message || 'فشل حذف المخزن');
         throw error;
       }
     },

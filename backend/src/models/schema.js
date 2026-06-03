@@ -367,8 +367,18 @@ export const saleItems = pgTable('sale_items', {
   saleId: integer('sale_id')
     .notNull()
     .references(() => sales.id, { onDelete: 'cascade' }),
+  // `productId` is nullable and intentionally kept WITHOUT a cascade: when a
+  // product is hard-deleted, its product_id on cancelled-invoice line items is
+  // set to NULL so the invoice survives as a self-contained archival record.
   productId: integer('product_id').references(() => products.id),
+  // ── Product snapshot ──────────────────────────────────────────────────────
+  // Frozen copy of the catalog fields at sale time so an invoice (especially a
+  // cancelled, archived one) renders correctly even after the product row is
+  // deleted. `productName`/`unitName`/`unitPrice` already act as the
+  // name/unit/price-at-sale snapshot; `productSku`/`barcode` complete it.
   productName: text('product_name').notNull(),
+  productSku: text('product_sku'),
+  barcode: text('barcode'),
   quantity: integer('quantity').notNull(),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),

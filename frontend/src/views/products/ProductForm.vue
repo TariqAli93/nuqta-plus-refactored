@@ -5,9 +5,7 @@
       :subtitle="isEdit ? 'تحديث معلومات المنتج' : 'إضافة منتج جديد إلى الكتالوج'"
       :icon="isEdit ? 'mdi-package-variant' : 'mdi-package-variant-plus'"
     >
-      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()">
-        رجوع
-      </v-btn>
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()"> رجوع </v-btn>
     </PageHeader>
 
     <v-card class="page-section">
@@ -196,165 +194,184 @@
 
             <!-- ─── Product units ───────────────────────────────────────── -->
             <v-col cols="12">
-              <v-card variant="outlined" class="pa-3">
-                <div class="d-flex align-center mb-2">
-                  <v-icon class="me-2">mdi-scale-balance</v-icon>
-                  <span class="text-subtitle-1 font-weight-medium">وحدات المنتج</span>
-                </div>
-                <div class="text-caption text-medium-emphasis mb-3">
-                  يتم حفظ المخزون داخلياً حسب الوحدة الأساسية. أضف وحدات إضافية مثل
-                  <strong>درزن</strong> أو <strong>كارتون</strong> لتسهيل البيع والاستلام.
-                </div>
-
-                <v-row dense>
-                  <v-col cols="12" md="4">
-                    <v-text-field
-                      v-model="baseUnit.name"
-                      label="الوحدة الأساسية"
-                      placeholder="قطعة"
-                      variant="outlined"
-                      density="comfortable"
-                      hint="مثال: قطعة، علبة، متر، كيلو، لتر"
-                      persistent-hint
-                      :rules="[rules.required]"
-                    />
-                  </v-col>
-                  <v-col cols="12" md="8" class="d-flex align-center">
-                    <div class="text-caption text-medium-emphasis">
-                      الوحدة الأساسية هي الوحدة التي يُحسب بها المخزون.
-                      السعر الافتراضي للوحدة الأساسية هو <strong>{{ formatNumber(formData.sellingPrice) }} {{ formData.currency }}</strong>.
+              <v-expansion-panels variant="outlined" class="mb-4">
+                <v-expansion-panel value="units">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center gap-2">
+                      <v-icon>mdi-scale-balance</v-icon>
+                      <span>وحدات المنتج</span>
                     </div>
-                  </v-col>
-                </v-row>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text class="pt-0">
+                    <v-card variant="outlined" class="pa-3">
+                      <div class="d-flex align-center mb-2">
+                        <v-icon class="me-2">mdi-scale-balance</v-icon>
+                        <span class="text-subtitle-1 font-weight-medium">وحدات المنتج</span>
+                      </div>
+                      <div class="text-caption text-medium-emphasis mb-3">
+                        يتم حفظ المخزون داخلياً حسب الوحدة الأساسية. أضف وحدات إضافية مثل
+                        <strong>درزن</strong> أو <strong>كارتون</strong> لتسهيل البيع والاستلام.
+                      </div>
 
-                <v-divider class="my-3" />
+                      <v-row dense>
+                        <v-col cols="12" md="4">
+                          <v-text-field
+                            v-model="baseUnit.name"
+                            label="الوحدة الأساسية"
+                            placeholder="قطعة"
+                            variant="outlined"
+                            density="comfortable"
+                            hint="مثال: قطعة، علبة، متر، كيلو، لتر"
+                            persistent-hint
+                            :rules="[rules.required]"
+                          />
+                        </v-col>
+                        <v-col cols="12" md="8" class="d-flex align-center">
+                          <div class="text-caption text-medium-emphasis">
+                            الوحدة الأساسية هي الوحدة التي يُحسب بها المخزون. السعر الافتراضي للوحدة
+                            الأساسية هو
+                            <strong
+                              >{{ formatNumber(formData.sellingPrice) }}
+                              {{ formData.currency }}</strong
+                            >.
+                          </div>
+                        </v-col>
+                      </v-row>
 
-                <div class="d-flex align-center justify-space-between mb-2">
-                  <div class="text-subtitle-2">وحدات إضافية</div>
-                  <v-btn
-                    prepend-icon="mdi-plus"
-                    variant="tonal"
-                    color="primary"
-                    size="small"
-                    @click="addUnit"
-                  >
-                    إضافة وحدة
-                  </v-btn>
-                </div>
+                      <v-divider class="my-3" />
 
-                <div v-if="extraUnits.length === 0" class="text-caption text-medium-emphasis mb-3">
-                  لا توجد وحدات إضافية. اضغط "إضافة وحدة" لتعريف درزن أو كارتون.
-                </div>
+                      <div class="d-flex align-center justify-space-between mb-2">
+                        <div class="text-subtitle-2">وحدات إضافية</div>
+                        <v-btn
+                          prepend-icon="mdi-plus"
+                          variant="tonal"
+                          color="primary"
+                          size="small"
+                          @click="addUnit"
+                        >
+                          إضافة وحدة
+                        </v-btn>
+                      </div>
 
-                <v-card
-                  v-for="(u, idx) in extraUnits"
-                  :key="`u-${idx}`"
-                  variant="tonal"
-                  color="surface"
-                  class="mb-3 pa-3"
-                >
-                  <v-row dense align="center">
-                    <v-col cols="12" md="3">
-                      <v-text-field
-                        v-model="u.name"
-                        label="اسم الوحدة"
-                        placeholder="درزن"
-                        variant="outlined"
-                        density="comfortable"
-                        :error-messages="unitNameError(idx)"
-                      />
-                    </v-col>
-                    <v-col cols="6" md="2">
-                      <v-text-field
-                        v-model.number="u.conversionFactor"
-                        :label="`يعادل كم ${baseUnit.name || 'قطعة'}؟`"
-                        :suffix="baseUnit.name || 'قطعة'"
-                        type="number"
-                        min="1"
-                        variant="outlined"
-                        density="comfortable"
-                        :error-messages="unitFactorError(u)"
-                      />
-                    </v-col>
-                    <v-col cols="6" md="2">
-                      <v-text-field
-                        v-model.number="u.salePrice"
-                        label="سعر البيع لهذه الوحدة"
-                        type="number"
-                        min="0"
-                        variant="outlined"
-                        density="comfortable"
-                        :hint="suggestedSalePrice(u)"
-                        persistent-hint
-                      />
-                    </v-col>
-                    <v-col cols="6" md="2">
-                      <v-text-field
-                        v-model.number="u.costPrice"
-                        label="سعر الكلفة لهذه الوحدة"
-                        type="number"
-                        min="0"
-                        variant="outlined"
-                        density="comfortable"
-                        hint="اختياري"
-                        persistent-hint
-                      />
-                    </v-col>
-                    <v-col cols="6" md="2">
-                      <v-text-field
-                        v-model="u.barcode"
-                        label="الباركود"
-                        variant="outlined"
-                        density="comfortable"
-                        hint="اختياري"
-                        persistent-hint
-                      />
-                    </v-col>
-                    <v-col cols="12" md="1" class="d-flex justify-end">
-                      <v-btn
-                        icon="mdi-delete-outline"
-                        variant="text"
-                        color="error"
-                        size="small"
-                        title="حذف الوحدة"
-                        @click="removeUnit(idx)"
-                      />
-                    </v-col>
-                  </v-row>
-                  <v-row dense class="mt-1">
-                    <v-col cols="12" sm="4">
-                      <v-checkbox
-                        v-model="u.isDefaultSale"
-                        density="compact"
-                        hide-details
-                        color="primary"
-                        label="افتراضي للبيع"
-                        @update:model-value="(v) => onDefaultSaleToggle(idx, v)"
-                      />
-                    </v-col>
-                    <v-col cols="12" sm="4">
-                      <v-checkbox
-                        v-model="u.isDefaultPurchase"
-                        density="compact"
-                        hide-details
-                        color="primary"
-                        label="افتراضي للشراء"
-                        @update:model-value="(v) => onDefaultPurchaseToggle(idx, v)"
-                      />
-                    </v-col>
-                    <v-col cols="12" sm="4">
-                      <v-switch
-                        v-model="u.isActive"
-                        density="compact"
-                        hide-details
-                        inset
-                        color="success"
-                        :label="u.isActive ? 'نشط' : 'غير نشط'"
-                      />
-                    </v-col>
-                  </v-row>
-                </v-card>
-              </v-card>
+                      <div
+                        v-if="extraUnits.length === 0"
+                        class="text-caption text-medium-emphasis mb-3"
+                      >
+                        لا توجد وحدات إضافية. اضغط "إضافة وحدة" لتعريف درزن أو كارتون.
+                      </div>
+
+                      <v-card
+                        v-for="(u, idx) in extraUnits"
+                        :key="`u-${idx}`"
+                        variant="tonal"
+                        color="surface"
+                        class="mb-3 pa-3"
+                      >
+                        <v-row dense align="center">
+                          <v-col cols="12" md="3">
+                            <v-text-field
+                              v-model="u.name"
+                              label="اسم الوحدة"
+                              placeholder="درزن"
+                              variant="outlined"
+                              density="comfortable"
+                              :error-messages="unitNameError(idx)"
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model.number="u.conversionFactor"
+                              :label="`يعادل كم ${baseUnit.name || 'قطعة'}؟`"
+                              :suffix="baseUnit.name || 'قطعة'"
+                              type="number"
+                              min="1"
+                              variant="outlined"
+                              density="comfortable"
+                              :error-messages="unitFactorError(u)"
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model.number="u.salePrice"
+                              label="سعر البيع لهذه الوحدة"
+                              type="number"
+                              min="0"
+                              variant="outlined"
+                              density="comfortable"
+                              :hint="suggestedSalePrice(u)"
+                              persistent-hint
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model.number="u.costPrice"
+                              label="سعر الكلفة لهذه الوحدة"
+                              type="number"
+                              min="0"
+                              variant="outlined"
+                              density="comfortable"
+                              hint="اختياري"
+                              persistent-hint
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model="u.barcode"
+                              label="الباركود"
+                              variant="outlined"
+                              density="comfortable"
+                              hint="اختياري"
+                              persistent-hint
+                            />
+                          </v-col>
+                          <v-col cols="12" md="1" class="d-flex justify-end">
+                            <v-btn
+                              icon="mdi-delete-outline"
+                              variant="text"
+                              color="error"
+                              size="small"
+                              title="حذف الوحدة"
+                              @click="removeUnit(idx)"
+                            />
+                          </v-col>
+                        </v-row>
+                        <v-row dense class="mt-1">
+                          <v-col cols="12" sm="4">
+                            <v-checkbox
+                              v-model="u.isDefaultSale"
+                              density="compact"
+                              hide-details
+                              color="primary"
+                              label="افتراضي للبيع"
+                              @update:model-value="(v) => onDefaultSaleToggle(idx, v)"
+                            />
+                          </v-col>
+                          <v-col cols="12" sm="4">
+                            <v-checkbox
+                              v-model="u.isDefaultPurchase"
+                              density="compact"
+                              hide-details
+                              color="primary"
+                              label="افتراضي للشراء"
+                              @update:model-value="(v) => onDefaultPurchaseToggle(idx, v)"
+                            />
+                          </v-col>
+                          <v-col cols="12" sm="4">
+                            <v-switch
+                              v-model="u.isActive"
+                              density="compact"
+                              hide-details
+                              inset
+                              color="success"
+                              :label="u.isActive ? 'نشط' : 'غير نشط'"
+                            />
+                          </v-col>
+                        </v-row>
+                      </v-card>
+                    </v-card>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
             </v-col>
             <v-col v-if="!isEdit" cols="12">
               <v-alert type="info" variant="tonal" density="comfortable" class="mb-0">
@@ -362,7 +379,8 @@
                   لإدخال كمية افتتاحية، استخدم صفحة إدارة المخزون بعد إنشاء المنتج.
                 </div>
                 <div class="text-caption">
-                  جميع تغييرات الكمية تتم عبر حركات المخزون (إضافة، خصم، نقل، تعديل) لضمان سجل تدقيق كامل.
+                  جميع تغييرات الكمية تتم عبر حركات المخزون (إضافة، خصم، نقل، تعديل) لضمان سجل تدقيق
+                  كامل.
                 </div>
               </v-alert>
             </v-col>
@@ -580,7 +598,11 @@ const unitNameError = (idx) => {
 };
 
 const unitFactorError = (u) => {
-  if (u?.conversionFactor === null || u?.conversionFactor === undefined || u?.conversionFactor === '') {
+  if (
+    u?.conversionFactor === null ||
+    u?.conversionFactor === undefined ||
+    u?.conversionFactor === ''
+  ) {
     return [];
   }
   const factor = Number(u.conversionFactor);
