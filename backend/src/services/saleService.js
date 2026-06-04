@@ -24,6 +24,8 @@ import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { generateDraftInvoicePlaceholder, calculateSaleTotals } from '../utils/helpers.js';
 import { eq, desc, and, or, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
+import { buildSearch, ncol, RANK } from '../utils/searchBuilder.js';
+import { normalizeIraqPhone } from '../utils/phone.js';
 import settingsService from './settingsService.js';
 import alertBus from '../events/alertBus.js';
 import { hasPermission } from '../auth/permissionMatrix.js';
@@ -38,6 +40,77 @@ import { PAYMENT_METHOD_CASH } from '../constants/sales.js';
 
 // Threshold below which a customer is considered "high risk" for an alert
 const HIGH_RISK_SCORE_THRESHOLD = 50;
+
+// Build the OR conditions used to match a product *inside* an invoice's items
+// (req #3). Shared by the EXISTS predicate and the matchedValue subselect so
+// both stay in sync. `si` is the sale_items alias bound in the subquery.
+function invoiceItemMatchParts({ text, code, likeText, likeCode }) {
+  const parts = [];
+  if (text) parts.push(sql`si.search_product_name LIKE ${likeText}`);
+  if (code) parts.push(sql`si.search_product_sku LIKE ${likeCode}`);
+  if (code) parts.push(sql`si.search_barcode = ${code}`);
+  return parts;
+}
+
+// Declarative sale/invoice search targets (req #3): invoice number, customer
+// name + phone, products inside the invoice, payment method, status, notes.
+const SALE_SEARCH_TARGETS = [
+  { label: 'invoiceNumber', rank: RANK.INVOICE_EXACT, kind: 'codeExact', norm: ncol('sales', 'search_invoice'), value: sales.invoiceNumber },
+  {
+    label: 'customerPhone',
+    rank: RANK.PHONE_EXACT,
+    kind: 'custom',
+    value: customers.phone,
+    predicate: ({ raw }) => {
+      const normalised = normalizeIraqPhone(raw);
+      return normalised ? sql`${customers.normalizedPhone} = ${normalised}` : null;
+    },
+  },
+  { label: 'customerName', rank: RANK.NAME_EXACT, kind: 'textExact', norm: ncol('customers', 'search_name'), value: customers.name },
+  { label: 'invoiceNumber', rank: RANK.CODE_PARTIAL, kind: 'codePartial', norm: ncol('sales', 'search_invoice'), value: sales.invoiceNumber },
+  { label: 'customerName', rank: RANK.NAME_PARTIAL, kind: 'textPartial', norm: ncol('customers', 'search_name'), value: customers.name },
+  {
+    label: 'productName',
+    rank: RANK.RELATED_MATCH,
+    kind: 'custom',
+    predicate: (ctx) => {
+      const parts = invoiceItemMatchParts(ctx);
+      if (!parts.length) return null;
+      return sql`EXISTS (SELECT 1 FROM ${saleItems} si WHERE si.sale_id = ${sales.id} AND (${sql.join(parts, sql` OR `)}))`;
+    },
+    value: (ctx) => {
+      const parts = invoiceItemMatchParts(ctx);
+      if (!parts.length) return sql`NULL`;
+      return sql`(SELECT si.product_name FROM ${saleItems} si WHERE si.sale_id = ${sales.id} AND (${sql.join(parts, sql` OR `)}) LIMIT 1)`;
+    },
+  },
+  {
+    label: 'customerPhone',
+    rank: RANK.PHONE_PARTIAL,
+    kind: 'custom',
+    value: customers.phone,
+    predicate: ({ raw }) => {
+      const digits = String(raw ?? '').replace(/\D/g, '');
+      if (digits.length < 3) return null;
+      return sql`${customers.normalizedPhone} LIKE ${`%${digits}%`}`;
+    },
+  },
+  {
+    label: 'paymentMethod',
+    rank: RANK.FIELD_MATCH,
+    kind: 'custom',
+    value: sales.paymentType,
+    predicate: ({ text }) => (text ? sql`lower(${sales.paymentType}) = ${text}` : null),
+  },
+  {
+    label: 'status',
+    rank: RANK.FIELD_MATCH,
+    kind: 'custom',
+    value: sales.status,
+    predicate: ({ text }) => (text ? sql`lower(${sales.status}) = ${text}` : null),
+  },
+  { label: 'notes', rank: RANK.DETAILS, kind: 'textPartial', norm: ncol('sales', 'search_notes'), value: sales.notes },
+];
 
 /**
  * Enforce the customer's recommended credit limit for installment/mixed sales.
@@ -603,9 +676,18 @@ export class SaleService {
 
   async getAll(filters = {}, actingUser = null) {
     const db = await getDb();
-    const { page = 1, limit = 10, status, startDate, endDate, paymentType } = filters;
+    const { page = 1, limit = 10, search, status, startDate, endDate, paymentType, minTotal, maxTotal } =
+      filters;
+
+    // Centralized, ranked text search over invoice number, customer name/phone,
+    // products inside the invoice, payment method, status and notes (req #3).
+    const searchClause = buildSearch(SALE_SEARCH_TARGETS, search);
 
     const conditions = [];
+
+    if (searchClause.where) {
+      conditions.push(searchClause.where);
+    }
 
     if (status) {
       conditions.push(eq(sales.status, status));
@@ -628,6 +710,14 @@ export class SaleService {
       conditions.push(eq(sales.customerId, filters.customer));
     }
 
+    // Invoice total range filter (req #14).
+    if (minTotal !== undefined && minTotal !== null && minTotal !== '') {
+      conditions.push(gte(sales.total, String(Number(minTotal))));
+    }
+    if (maxTotal !== undefined && maxTotal !== null && maxTotal !== '') {
+      conditions.push(lte(sales.total, String(Number(maxTotal))));
+    }
+
     // Branch scope — non-global-admins only see their branch. Global admins
     // may pass `branchId` explicitly to filter.
     const allowedBranches = branchFilterFor(actingUser);
@@ -640,8 +730,12 @@ export class SaleService {
       conditions.push(eq(sales.branchId, allowedBranches[0]));
     }
 
-    // Get total count
-    let countQuery = db.select({ count: sql`count(*)` }).from(sales);
+    // Get total count. The customers join is required because the search
+    // predicate may reference customer name / phone.
+    let countQuery = db
+      .select({ count: sql`count(*)` })
+      .from(sales)
+      .leftJoin(customers, eq(sales.customerId, customers.id));
     if (conditions.length > 0) {
       countQuery = countQuery.where(and(...conditions));
     }
@@ -649,6 +743,11 @@ export class SaleService {
     const total = Number(countResult?.count || 0);
 
     const offset = (page - 1) * limit;
+
+    // Strongest matches first when searching (req #9); else newest-first.
+    const orderBy = searchClause.active
+      ? [desc(searchClause.rankScore), desc(sales.createdAt)]
+      : [desc(sales.createdAt)];
 
     // Main query with joins + pagination
     let query = db
@@ -668,11 +767,15 @@ export class SaleService {
         createdBy: users.username,
         itemCount: sql`(SELECT COUNT(*) FROM ${saleItems} WHERE ${saleItems.saleId} = ${sales.id})`,
         returnedTotal: sql`COALESCE((SELECT SUM(${saleReturns.returnedValue}::numeric) FROM ${saleReturns} WHERE ${saleReturns.saleId} = ${sales.id}), 0)`,
+        // Search match metadata (req #18) — null/0 when not searching.
+        matchedField: searchClause.active ? searchClause.matchedField : sql`NULL`,
+        matchedValue: searchClause.active ? searchClause.matchedValue : sql`NULL`,
+        rankScore: searchClause.active ? searchClause.rankScore : sql`0`,
       })
       .from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
       .leftJoin(users, eq(sales.createdBy, users.id))
-      .orderBy(desc(sales.createdAt))
+      .orderBy(...orderBy)
       .limit(limit)
       .offset(offset);
 

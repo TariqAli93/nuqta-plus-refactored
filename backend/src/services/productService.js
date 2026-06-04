@@ -20,8 +20,9 @@ import {
   AppError,
   translateDbConstraintError,
 } from '../utils/errors.js';
-import { eq, like, or, and, ne, desc, sql } from 'drizzle-orm';
+import { eq, and, ne, gte, lte, desc, sql } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
+import { buildSearch, ncol, RANK } from '../utils/searchBuilder.js';
 
 const log = createLogger('ProductService');
 import alertBus from '../events/alertBus.js';
@@ -48,6 +49,33 @@ async function withTransaction(callback) {
     client.release();
   }
 }
+
+// Numeric equality predicate for price search. Returns null for non-numeric
+// terms so the target contributes nothing to the OR.
+function priceEq(column, raw) {
+  if (!/\d/.test(String(raw ?? ''))) return null;
+  const n = Number(String(raw).replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return sql`${column} = ${n}`;
+}
+
+// Declarative product search targets (consumed by the centralized buildSearch).
+// Order is irrelevant — ranking is driven by `rank`. Covers req #2 fields:
+// name, SKU, barcode, category name, unit, notes(description), purchase + sale
+// price. (Brand intentionally omitted — no brand entity exists.)
+const PRODUCT_SEARCH_TARGETS = [
+  { label: 'barcode', rank: RANK.BARCODE_EXACT, kind: 'codeExact', norm: ncol('products', 'search_barcode'), value: products.barcode },
+  { label: 'sku', rank: RANK.SKU_EXACT, kind: 'codeExact', norm: ncol('products', 'search_sku'), value: products.sku },
+  { label: 'name', rank: RANK.NAME_EXACT, kind: 'textExact', norm: ncol('products', 'search_name'), value: products.name },
+  { label: 'sku', rank: RANK.CODE_PARTIAL, kind: 'codePartial', norm: ncol('products', 'search_sku'), value: products.sku },
+  { label: 'name', rank: RANK.NAME_PARTIAL, kind: 'textPartial', norm: ncol('products', 'search_name'), value: products.name },
+  { label: 'category', rank: RANK.FIELD_MATCH, kind: 'textPartial', norm: ncol('categories', 'search_name'), value: categories.name },
+  { label: 'unit', rank: RANK.FIELD_MATCH, kind: 'textPartial', norm: ncol('products', 'search_unit'), value: products.unit },
+  { label: 'supplier', rank: RANK.FIELD_MATCH, kind: 'textPartial', norm: ncol('products', 'search_supplier'), value: products.supplier },
+  { label: 'salePrice', rank: RANK.FIELD_MATCH, kind: 'custom', value: products.sellingPrice, predicate: ({ raw }) => priceEq(products.sellingPrice, raw) },
+  { label: 'purchasePrice', rank: RANK.FIELD_MATCH, kind: 'custom', value: products.costPrice, predicate: ({ raw }) => priceEq(products.costPrice, raw) },
+  { label: 'notes', rank: RANK.DETAILS, kind: 'textPartial', norm: ncol('products', 'search_description'), value: products.description },
+];
 
 export class ProductService {
   async create(productData, userId) {
@@ -107,10 +135,12 @@ export class ProductService {
 
   async getAll(filters = {}) {
     const db = await getDb();
-    const { page = 1, limit = 10, search, categoryId, warehouseId } = filters;
+    const { page = 1, limit = 10, search, categoryId, warehouseId, status, unit, minPrice, maxPrice } =
+      filters;
 
-    // Normalize search - treat empty strings as undefined
-    const normalizedSearch = search && search.trim() ? search.trim() : undefined;
+    // Centralized, ranked, Arabic/English-aware search. Empty term => inactive,
+    // and we fall back to the default catalogue list (req #11).
+    const searchClause = buildSearch(PRODUCT_SEARCH_TARGETS, search);
 
     // Per-warehouse stock sub-select — returns 0 when no row exists yet.
     const warehouseStockSelect = warehouseId
@@ -155,6 +185,10 @@ export class ProductService {
         categoryId: products.categoryId,
         category: categories.name,
         status: products.status,
+        // Search match metadata (req #18) — null/0 when not searching.
+        matchedField: searchClause.active ? searchClause.matchedField : sql`NULL`,
+        matchedValue: searchClause.active ? searchClause.matchedValue : sql`NULL`,
+        rankScore: searchClause.active ? searchClause.rankScore : sql`0`,
       })
       .from(products)
       .leftJoin(categories, eq(products.categoryId, categories.id));
@@ -162,18 +196,28 @@ export class ProductService {
     // Build WHERE conditions
     const whereConditions = [];
 
-    if (normalizedSearch) {
-      whereConditions.push(
-        or(
-          like(products.name, `%${normalizedSearch}%`),
-          like(products.sku, `%${normalizedSearch}%`),
-          like(products.barcode, `%${normalizedSearch}%`)
-        )
-      );
+    if (searchClause.where) {
+      whereConditions.push(searchClause.where);
     }
 
     if (categoryId) {
       whereConditions.push(eq(products.categoryId, categoryId));
+    }
+
+    if (status) {
+      whereConditions.push(eq(products.status, status));
+    }
+
+    if (unit) {
+      whereConditions.push(eq(products.unit, unit));
+    }
+
+    // Sale-price range filter (req #14).
+    if (minPrice !== undefined && minPrice !== null && minPrice !== '') {
+      whereConditions.push(gte(products.sellingPrice, String(Number(minPrice))));
+    }
+    if (maxPrice !== undefined && maxPrice !== null && maxPrice !== '') {
+      whereConditions.push(lte(products.sellingPrice, String(Number(maxPrice))));
     }
 
     // Apply WHERE clause
@@ -185,8 +229,12 @@ export class ProductService {
       }
     }
 
-    // Get total count for pagination metadata
-    let countQuery = db.select({ count: sql`count(*)` }).from(products);
+    // Get total count for pagination metadata. The category join is required
+    // because the search predicate may reference categories.search_name.
+    let countQuery = db
+      .select({ count: sql`count(*)` })
+      .from(products)
+      .leftJoin(categories, eq(products.categoryId, categories.id));
     if (whereConditions.length > 0) {
       if (whereConditions.length === 1) {
         countQuery = countQuery.where(whereConditions[0]);
@@ -200,9 +248,15 @@ export class ProductService {
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
+    // When searching, surface the strongest matches first (req #9); otherwise
+    // keep the default newest-first ordering.
+    const orderBy = searchClause.active
+      ? [desc(searchClause.rankScore), desc(products.createdAt)]
+      : [desc(products.createdAt)];
+
     // PostgreSQL handles LIMIT/OFFSET with JOINs correctly
     const results = await baseQuery
-      .orderBy(desc(products.createdAt))
+      .orderBy(...orderBy)
       .limit(limit)
       .offset(offset);
 

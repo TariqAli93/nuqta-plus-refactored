@@ -13,19 +13,49 @@
     </PageHeader>
 
     <v-card class="page-section filter-toolbar pa-3">
-      <v-text-field
-        v-model="search"
-        prepend-inner-icon="mdi-magnify"
-        label="البحث عن عميل بالاسم أو الهاتف"
-        single-line
-        hide-details
-        density="comfortable"
-        variant="outlined"
-        clearable
-        aria-label="البحث عن عميل"
-        @input="handleSearch"
-        @click:clear="handleSearch"
-      ></v-text-field>
+      <div class="search-toolbar">
+        <SearchBar
+          :model-value="query"
+          :loading="isSearching"
+          placeholder="ابحث بالاسم، الهاتف، العنوان، الملاحظات..."
+          aria-label="البحث عن عميل"
+          @update:model-value="onQueryChange"
+          @search="runNow"
+          @clear="clear"
+        />
+      </div>
+
+      <AdvancedFilters
+        class="mt-3"
+        :chips="filterChips"
+        @clear="onClearFilters"
+        @remove="onRemoveFilter"
+      >
+        <v-row dense>
+          <v-col cols="12" sm="6" md="4">
+            <v-text-field
+              v-model="cityFilter"
+              label="المدينة"
+              clearable
+              density="comfortable"
+              variant="outlined"
+              hide-details
+              prepend-inner-icon="mdi-city-variant-outline"
+              @update:model-value="onCityChange"
+            ></v-text-field>
+          </v-col>
+          <v-col cols="12" sm="6" md="4" class="d-flex align-center">
+            <v-switch
+              v-model="hasDebtFilter"
+              label="عليه دين فقط"
+              color="primary"
+              density="comfortable"
+              hide-details
+              @update:model-value="onHasDebtChange"
+            ></v-switch>
+          </v-col>
+        </v-row>
+      </AdvancedFilters>
     </v-card>
 
     <v-card class="page-section">
@@ -45,23 +75,44 @@
           تصدير
         </v-btn>
       </div>
+      <v-alert
+        v-if="error"
+        type="error"
+        variant="tonal"
+        density="comfortable"
+        class="mx-3 mt-3"
+        closable
+        @click:close="dismissError"
+      >
+        تعذر تنفيذ البحث حالياً، حاول مرة أخرى.
+        <template #append>
+          <v-btn size="small" variant="text" @click="refresh">إعادة المحاولة</v-btn>
+        </template>
+      </v-alert>
+
+      <TableSkeleton v-if="initialLoading" :rows="8" :columns="headers.length" class="pa-3" />
       <v-data-table
+        v-else
         :headers="headers"
         :items="customerStore.customers"
-        :loading="customerStore.loading"
+        :loading="tableLoading"
         :items-per-page="customerStore.pagination.limit"
         :page="customerStore.pagination.page"
         :items-length="customerStore.pagination.total"
         server-items-length
         hide-default-footer
         density="comfortable"
-        @update:items-per-page="changeItemsPerPage"
       >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
         <template #no-data>
           <EmptyState
+            v-if="hasActiveQuery"
+            title="لا توجد نتائج مطابقة"
+            description="حاول البحث بالاسم أو الرقم أو الباركود"
+            icon="mdi-magnify-close"
+            compact
+          />
+          <EmptyState
+            v-else
             title="لا يوجد عملاء"
             description="ابدأ بإضافة عميل جديد"
             icon="mdi-account-group"
@@ -77,9 +128,26 @@
           />
         </template>
         <template #[`item.name`]="{ item }">
-          <RouterLink :to="`/customers/${item.id}`" class="text-primary text-decoration-none">
-            {{ item.name }}
-          </RouterLink>
+          <div class="d-flex flex-column py-1">
+            <RouterLink :to="`/customers/${item.id}`" class="text-primary text-decoration-none">
+              <template v-for="(seg, i) in highlightOf(item.name)" :key="i">
+                <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+                <template v-else>{{ seg.text }}</template>
+              </template>
+            </RouterLink>
+            <MatchBadge
+              v-if="item.matchedField"
+              :field="item.matchedField"
+              :value="item.matchedValue"
+              class="mt-1 align-self-start"
+            />
+          </div>
+        </template>
+        <template #[`item.phone`]="{ item }">
+          <template v-for="(seg, i) in highlightOf(item.phone)" :key="i">
+            <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+            <template v-else>{{ seg.text }}</template>
+          </template>
         </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
@@ -119,8 +187,8 @@
 
       <PaginationControls
         :pagination="customerStore.pagination"
-        @update:page="changePage"
-        @update:items-per-page="changeItemsPerPage"
+        @update:page="setPage"
+        @update:items-per-page="setPageSize"
       />
     </v-card>
 
@@ -150,6 +218,11 @@ import TableSkeleton from '@/components/TableSkeleton.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
+import SearchBar from '@/components/SearchBar.vue';
+import AdvancedFilters from '@/components/AdvancedFilters.vue';
+import MatchBadge from '@/components/MatchBadge.vue';
+import { useServerSearch } from '@/composables/useServerSearch';
+import { highlightSegments } from '@/utils/highlight';
 import { useExport } from '@/composables/useExport';
 import { useUndo } from '@/composables/useUndo';
 import { useNotificationStore } from '@/stores/notification';
@@ -162,10 +235,12 @@ const canDeleteCustomers = computed(() =>
   userRole.value ? uiAccess.canDeleteCustomers(userRole.value) : false
 );
 
-const search = ref('');
 const deleteDialog = ref(false);
 const selectedCustomer = ref(null);
 const deleting = ref(false);
+
+const cityFilter = ref(null);
+const hasDebtFilter = ref(false);
 
 const headers = [
   { title: 'الاسم', key: 'name' },
@@ -174,34 +249,57 @@ const headers = [
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
 
-const handleSearch = () => {
-  customerStore.pagination.page = 1;
-  customerStore.fetch({
-    search: search.value,
-    page: 1,
+const { query, isSearching, error, onQueryChange, runNow, clear, setFilters, clearFilters, setPage, setPageSize, refresh } =
+  useServerSearch({
     limit: customerStore.pagination.limit,
+    initialFilters: { city: null, hasDebt: null },
+    load: (params, opts) => customerStore.fetch(params, { ...opts, silent: true }),
+    apply: (res) => {
+      customerStore.customers = res?.data || [];
+      if (res?.meta) {
+        customerStore.pagination = {
+          page: Number(res.meta.page) || 1,
+          limit: Number(res.meta.limit) || customerStore.pagination.limit,
+          total: Number(res.meta.total) || 0,
+          totalPages: Number(res.meta.totalPages) || 0,
+        };
+      }
+    },
   });
+
+const tableLoading = computed(() => isSearching.value || customerStore.loading);
+const initialLoading = computed(
+  () => tableLoading.value && (customerStore.customers?.length || 0) === 0
+);
+
+const filterChips = computed(() => {
+  const chips = [];
+  if (cityFilter.value) chips.push({ key: 'city', label: `المدينة: ${cityFilter.value}` });
+  if (hasDebtFilter.value) chips.push({ key: 'hasDebt', label: 'عليه دين' });
+  return chips;
+});
+
+const hasActiveQuery = computed(() => !!query.value.trim() || filterChips.value.length > 0);
+
+const highlightOf = (value) => highlightSegments(value, query.value);
+
+const onCityChange = () => setFilters({ city: cityFilter.value || null });
+const onHasDebtChange = () => setFilters({ hasDebt: hasDebtFilter.value ? true : null });
+
+const onRemoveFilter = (key) => {
+  if (key === 'city') cityFilter.value = null;
+  if (key === 'hasDebt') hasDebtFilter.value = false;
+  setFilters({ [key]: null });
 };
 
-const changePage = (page) => {
-  const pageNum = Number(page);
-  customerStore.pagination.page = pageNum;
-  customerStore.fetch({
-    search: search.value,
-    page: pageNum,
-    limit: customerStore.pagination.limit,
-  });
+const onClearFilters = () => {
+  cityFilter.value = null;
+  hasDebtFilter.value = false;
+  clearFilters();
 };
 
-const changeItemsPerPage = (limit) => {
-  const limitNum = Number(limit);
-  customerStore.pagination.limit = limitNum;
-  customerStore.pagination.page = 1;
-  customerStore.fetch({
-    search: search.value,
-    page: 1,
-    limit: limitNum,
-  });
+const dismissError = () => {
+  error.value = null;
 };
 
 const confirmDelete = (customer) => {
@@ -234,6 +332,7 @@ const handleDelete = async () => {
   try {
     await customerStore.deleteCustomer(customerId);
     deleteDialog.value = false;
+    refresh();
 
     // Register undo
     registerUndo(
@@ -252,9 +351,22 @@ const handleDelete = async () => {
 };
 
 onMounted(() => {
-  customerStore.fetch({
-    page: 1,
-    limit: customerStore.pagination.limit,
-  });
+  refresh();
 });
 </script>
+
+<style scoped lang="scss">
+.search-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.search-hl {
+  background-color: rgba(var(--v-theme-warning), 0.38);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 700;
+}
+</style>

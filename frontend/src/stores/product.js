@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
+import { cleanParams, isCanceledRequest } from '@/utils/requestParams';
 
 export const useProductStore = defineStore('product', {
   state: () => ({
@@ -16,11 +17,16 @@ export const useProductStore = defineStore('product', {
   }),
 
   actions: {
-    async fetch(params = {}) {
+    async fetch(params = {}, options = {}) {
+      const { signal, silent = false } = options;
       this.loading = true;
       const notificationStore = useNotificationStore();
       try {
-        const response = await api.get('/products', { params });
+        const response = await api.get('/products', {
+          params: cleanParams(params),
+          signal,
+          meta: { silent },
+        });
         this.products = response?.data || [];
 
         // Ensure pagination values are numbers
@@ -48,8 +54,14 @@ export const useProductStore = defineStore('product', {
 
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل المنتجات');
-        this.products = [];
+        // Superseded/aborted request — keep current results, stay quiet.
+        if (isCanceledRequest(error)) throw error;
+        // Silent (live-search) callers render their own inline error and keep
+        // the previous results visible (req #12/#13).
+        if (!silent) {
+          notificationStore.error(error.response?.data?.message || 'فشل تحميل المنتجات');
+          this.products = [];
+        }
         throw error;
       } finally {
         this.loading = false;

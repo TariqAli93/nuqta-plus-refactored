@@ -19,9 +19,23 @@ export default async function productRoutes(fastify) {
     onRequest: [fastify.authenticate, fastify.authorize('products:read')],
     handler: productController.getAll,
     schema: {
-      description: 'Get all products',
+      description: 'Get all products (ranked search + filters)',
       tags: ['products'],
       security: [{ bearerAuth: [] }],
+      querystring: {
+        type: 'object',
+        properties: {
+          search: { type: 'string' },
+          page: { type: 'integer', minimum: 1, default: 1 },
+          limit: { type: 'integer', minimum: 1, maximum: 1000000, default: 10 },
+          categoryId: { type: 'integer' },
+          warehouseId: { type: 'integer' },
+          status: { type: 'string' },
+          unit: { type: 'string' },
+          minPrice: { type: 'number', minimum: 0 },
+          maxPrice: { type: 'number', minimum: 0 },
+        },
+      },
     },
   });
 

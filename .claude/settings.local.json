@@ -34,7 +34,12 @@
       "Bash(git stash *)",
       "Bash(VITE_TARGET=web npx vite build --mode production)",
       "Bash(pnpm install *)",
-      "Bash(pnpm lint *)"
+      "Bash(pnpm lint *)",
+      "Bash(Get-ChildItem -Path \"D:\\\\dev_projects\\\\nuqta-plus-refactored\\\\backend\" -Recurse -Depth 2)",
+      "Bash(Select-Object -First 50)",
+      "Bash(Format-List FullName)",
+      "Bash(Get-ChildItem -Path \"D:\\\\dev_projects\\\\nuqta-plus-refactored\\\\frontend\" -Recurse -Directory)",
+      "Bash(Select-Object -First 30 FullName)"
     ]
   }
 }

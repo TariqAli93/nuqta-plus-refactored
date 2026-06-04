@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
+import { cleanParams, isCanceledRequest } from '@/utils/requestParams';
 
 export const useSaleStore = defineStore('sale', {
   state: () => ({
@@ -31,11 +32,16 @@ export const useSaleStore = defineStore('sale', {
      * Fetch all sales with optional filters
      * @param {Object} params - Query parameters for filtering
      */
-    async fetch(params = {}) {
+    async fetch(params = {}, options = {}) {
+      const { signal, silent = false } = options;
       this.loading = true;
       const notificationStore = useNotificationStore();
       try {
-        const response = await api.get('/sales', { params });
+        const response = await api.get('/sales', {
+          params: cleanParams(params),
+          signal,
+          meta: { silent },
+        });
 
         this.sales = response?.data || [];
 
@@ -51,9 +57,11 @@ export const useSaleStore = defineStore('sale', {
 
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل تحميل المبيعات';
-        notificationStore.error(errorMessage);
-        this.sales = [];
+        if (isCanceledRequest(error)) throw error;
+        if (!silent) {
+          notificationStore.error(error.response?.data?.message || 'فشل تحميل المبيعات');
+          this.sales = [];
+        }
         throw error;
       } finally {
         this.loading = false;

@@ -12,6 +12,7 @@ import {
   maskConnectionString,
   getDiagnostics,
 } from './utils/bootstrapDiagnostics.js';
+import { ensureSearchInfrastructure } from './db/searchInfrastructure.js';
 
 const { Pool, Client } = pg;
 
@@ -369,6 +370,21 @@ async function initDB() {
     logBootstrapEvent('warn', REASON.MIGRATIONS_DONE,
       `Drizzle reported an error but users table is present — proceeding (${drizzleMigrateError.message})`);
     bootstrapState.migrationsApplied = true;
+  }
+
+  // ── Search infrastructure ────────────────────────────────────────────────
+  // Idempotent: pg_trgm extension, nuqta_normalize() functions, generated
+  // search_* columns, and trigram/btree indexes powering the search system.
+  // Never throws — degraded search is preferable to a failed bootstrap.
+  try {
+    const searchInfra = await ensureSearchInfrastructure(pool);
+    logBootstrapEvent('info', REASON.MIGRATIONS_DONE,
+      'Search infrastructure ensured',
+      { trgm: searchInfra.trgm, applied: searchInfra.applied, failed: searchInfra.failed });
+  } catch (searchErr) {
+    logBootstrapEvent('warn', REASON.MIGRATIONS_DONE,
+      `Search infrastructure setup encountered an error (continuing): ${searchErr.message}`,
+      { error: searchErr });
   }
 
   setReason(REASON.READY);

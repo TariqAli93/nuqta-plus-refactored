@@ -70,9 +70,12 @@ export function initAxiosBaseUrl(connectionStore) {
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    // بدء تتبع الطلب في نظام التحميل
+    // بدء تتبع الطلب في نظام التحميل.
+    // Requests flagged `meta.silent` (e.g. live search) opt out of the global
+    // loading bar — they render their own inline loading state — and out of the
+    // global error toast/dialog. Start/end must stay balanced, so we gate both.
     const loadingStore = useLoadingStore();
-    loadingStore.startRequest();
+    if (!config.meta?.silent) loadingStore.startRequest();
 
     const authStore = useAuthStore();
     const token = authStore.token;
@@ -91,7 +94,7 @@ api.interceptors.request.use(
   (error) => {
     // في حالة خطأ في الطلب، إنهاء تتبع التحميل
     const loadingStore = useLoadingStore();
-    loadingStore.endRequest();
+    if (!error.config?.meta?.silent) loadingStore.endRequest();
 
     return Promise.reject(error);
   }
@@ -102,14 +105,28 @@ api.interceptors.response.use(
   (response) => {
     // إنهاء تتبع الطلب في حالة النجاح
     const loadingStore = useLoadingStore();
-    loadingStore.endRequest();
+    if (!response.config?.meta?.silent) loadingStore.endRequest();
 
     return response.data;
   },
   (error) => {
     // إنهاء تتبع الطلب في حالة الخطأ
     const loadingStore = useLoadingStore();
-    loadingStore.endRequest();
+    const isSilent = !!error.config?.meta?.silent;
+    if (!isSilent) loadingStore.endRequest();
+
+    // Aborted/superseded requests (e.g. a debounced search replaced by a newer
+    // query) are not real errors — reject quietly so the caller can ignore them
+    // via axios.isCancel(), with no toast.
+    if (axios.isCancel(error) || error.code === 'ERR_CANCELED') {
+      return Promise.reject(error);
+    }
+
+    // Silent requests manage their own error UX (inline state). Skip the global
+    // toast/dialog entirely (req #12 — never surface technical errors here).
+    if (isSilent) {
+      return Promise.reject(error);
+    }
 
     const notificationStore = useNotificationStore();
 

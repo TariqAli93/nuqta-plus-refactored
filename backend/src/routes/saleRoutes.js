@@ -36,9 +36,25 @@ export default async function saleRoutes(fastify) {
     onRequest: [fastify.authenticate, fastify.authorize('sales:read')],
     handler: saleController.getAll,
     schema: {
-      description: 'Get all sales',
+      description: 'Get all sales (ranked search + filters)',
       tags: ['sales'],
       security: [{ bearerAuth: [] }],
+      querystring: {
+        type: 'object',
+        properties: {
+          search: { type: 'string' },
+          page: { type: 'integer', minimum: 1, default: 1 },
+          limit: { type: 'integer', minimum: 1, maximum: 200, default: 10 },
+          status: { type: 'string' },
+          paymentType: { type: 'string' },
+          startDate: { type: 'string' },
+          endDate: { type: 'string' },
+          customer: { type: 'integer' },
+          branchId: { type: 'integer' },
+          minTotal: { type: 'number', minimum: 0 },
+          maxTotal: { type: 'number', minimum: 0 },
+        },
+      },
     },
   });
 

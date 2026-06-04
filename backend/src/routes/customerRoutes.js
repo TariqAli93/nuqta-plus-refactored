@@ -19,15 +19,17 @@ export default async function customerRoutes(fastify) {
     onRequest: [fastify.authenticate, fastify.authorize('customers:read')],
     handler: customerController.getAll,
     schema: {
-      description: 'Get all customers',
+      description: 'Get all customers (ranked search + filters)',
       tags: ['customers'],
       security: [{ bearerAuth: [] }],
       querystring: {
         type: 'object',
         properties: {
-          page: { type: 'number' },
-          limit: { type: 'number' },
           search: { type: 'string' },
+          page: { type: 'integer', minimum: 1, default: 1 },
+          limit: { type: 'integer', minimum: 1, maximum: 200, default: 10 },
+          city: { type: 'string' },
+          hasDebt: { type: 'boolean' },
         },
       },
     },

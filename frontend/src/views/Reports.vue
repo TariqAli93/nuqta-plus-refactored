@@ -7,19 +7,17 @@
     />
 
     <ReportHeader
+      :report="report"
+      report-type="dashboard"
       :date-from="filters.dateFrom"
       :date-to="filters.dateTo"
       :currency="filters.currency"
       :branch-label="currentBranchLabel"
+      :user-name="currentUserName"
       :generated-at="report?.meta?.generatedAt || ''"
+      :can-view-profit="canViewProfit"
       :loading="loading"
-      :exporting-excel="exportingExcel"
-      :exporting-pdf="exportingPdf"
-      :has-data="!!report"
       @refresh="load"
-      @export-excel="downloadExcel"
-      @export-pdf="downloadPdf"
-      @print="printArabicPdf"
     />
 
     <ReportFilters
@@ -152,8 +150,6 @@ const report = computed(() => reportStore.data);
 const aging = computed(() => reportStore.aging);
 const agingLoading = ref(false);
 const error = ref('');
-const exportingExcel = ref(false);
-const exportingPdf = ref(false);
 
 const defaultFilters = () => ({
   branchId: null,
@@ -174,6 +170,10 @@ const canViewProfit = computed(() => {
     authStore.hasPermission(['manage:sales'])
   );
 });
+
+const currentUserName = computed(
+  () => authStore.user?.fullName || authStore.user?.username || '',
+);
 
 const currentBranchLabel = computed(() => {
   const id = filters.value.branchId;
@@ -250,120 +250,6 @@ async function load() {
   } finally {
     agingLoading.value = false;
   }
-}
-
-function saveBlob(blob, filename) {
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  window.URL.revokeObjectURL(url);
-}
-
-async function downloadExcel() {
-  exportingExcel.value = true;
-  try {
-    const blob = await reportStore.exportExcel({
-      ...filters.value,
-      reportType: 'accounting-report',
-    });
-    saveBlob(blob, 'تقرير-محاسبي.xls');
-  } catch (e) {
-    error.value = e?.message || e?.error || 'تعذّر تصدير ملف Excel';
-  } finally {
-    exportingExcel.value = false;
-  }
-}
-
-async function downloadPdf() {
-  exportingPdf.value = true;
-  try {
-    const blob = await reportStore.exportPdf({
-      ...filters.value,
-      reportType: 'accounting-report',
-    });
-    saveBlob(blob, 'تقرير-محاسبي.pdf');
-  } catch (e) {
-    error.value = e?.message || e?.error || 'تعذّر تصدير ملف PDF';
-  } finally {
-    exportingPdf.value = false;
-  }
-}
-
-const moneyFmt = (n) =>
-  Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
-const nullableMoney = (n) =>
-  n === null || n === undefined ? 'غير متاح' : moneyFmt(n);
-
-function printArabicPdf() {
-  const d = report.value;
-  if (!d) return;
-  const rows = Object.entries(d.kpisByCurrency || {})
-    .map(
-      ([cur, k]) => `
-      <tr>
-        <td>${cur}</td>
-        <td>${moneyFmt(k.sales)}</td>
-        <td>${moneyFmt(k.totalPaid)}</td>
-        <td>${moneyFmt(k.unpaidBalances)}</td>
-        <td>${canViewProfit.value ? nullableMoney(k.netProfit) : '—'}</td>
-      </tr>`,
-    )
-    .join('');
-
-  const html = `
-    <html dir="rtl" lang="ar">
-    <head>
-      <meta charset="utf-8" />
-      <title>تقرير محاسبي</title>
-      <style>
-        body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#1f2937}
-        h1{margin:0 0 8px}
-        .meta{margin-bottom:18px;color:#4b5563}
-        .card{border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px}
-        table{width:100%;border-collapse:collapse}
-        th,td{border:1px solid #e5e7eb;padding:10px;text-align:center}
-        th{background:#f3f4f6}
-        .footer{margin-top:16px;color:#6b7280;font-size:12px}
-      </style>
-    </head>
-    <body>
-      <h1>التقرير المحاسبي</h1>
-      <div class="meta">
-        الفلاتر: من ${filters.value.dateFrom} إلى ${filters.value.dateTo}
-        | العملة: ${filters.value.currency}
-        | الفرع: ${currentBranchLabel.value}
-      </div>
-      <div class="card">
-        <h3>ملخص المؤشرات</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>العملة</th>
-              <th>إجمالي المبيعات</th>
-              <th>المدفوع</th>
-              <th>المتبقي</th>
-              <th>صافي الربح</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <div class="card">
-        <h3>ملاحظات</h3>
-        ${(d.meta?.notes || []).map((n) => `<div>- ${translateNote(n)}</div>`).join('')}
-      </div>
-      <div class="footer">تم إنشاء التقرير بتاريخ ${new Date().toLocaleString('ar-IQ')}</div>
-    </body>
-    </html>`;
-
-  const win = window.open('', '_blank', 'width=1200,height=900');
-  if (!win) return;
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  win.print();
 }
 
 onMounted(async () => {

@@ -15,11 +15,43 @@ import {
   translateDbConstraintError,
 } from '../utils/errors.js';
 import { normalizeIraqPhone } from '../utils/phone.js';
-import { eq, like, or, desc, sql, and, asc, ne } from 'drizzle-orm';
+import { eq, desc, sql, and, asc, ne, gt, getTableColumns } from 'drizzle-orm';
 import { isGlobalAdmin } from './scopeService.js';
 import { createLogger } from '../utils/logger.js';
+import { buildSearch, ncol, RANK } from '../utils/searchBuilder.js';
 
 const log = createLogger('CustomerService');
+
+// Declarative customer search targets (req #4: name, phone, address, notes).
+// Phone matching reuses the strong Iraq-phone normaliser so "0773 123 4567",
+// "+964773 123 4567" and "9647731234567" all resolve to the same row.
+const CUSTOMER_SEARCH_TARGETS = [
+  {
+    label: 'phone',
+    rank: RANK.PHONE_EXACT,
+    kind: 'custom',
+    value: customers.phone,
+    predicate: ({ raw }) => {
+      const normalised = normalizeIraqPhone(raw);
+      return normalised ? sql`${customers.normalizedPhone} = ${normalised}` : null;
+    },
+  },
+  { label: 'name', rank: RANK.NAME_EXACT, kind: 'textExact', norm: ncol('customers', 'search_name'), value: customers.name },
+  { label: 'name', rank: RANK.NAME_PARTIAL, kind: 'textPartial', norm: ncol('customers', 'search_name'), value: customers.name },
+  {
+    label: 'phone',
+    rank: RANK.PHONE_PARTIAL,
+    kind: 'custom',
+    value: customers.phone,
+    predicate: ({ raw }) => {
+      const digits = String(raw ?? '').replace(/\D/g, '');
+      if (digits.length < 3) return null;
+      return sql`${customers.normalizedPhone} LIKE ${`%${digits}%`}`;
+    },
+  },
+  { label: 'address', rank: RANK.FIELD_MATCH, kind: 'textPartial', norm: ncol('customers', 'search_address'), value: customers.address },
+  { label: 'notes', rank: RANK.DETAILS, kind: 'textPartial', norm: ncol('customers', 'search_notes'), value: customers.notes },
+];
 
 /**
  * Build a ConflictError for a duplicate phone, with the existing customer
@@ -84,35 +116,28 @@ export class CustomerService {
 
   async getAll(filters = {}) {
     const db = await getDb();
-    const { page = 1, limit = 10, search } = filters;
+    const { page = 1, limit = 10, search, city, hasDebt } = filters;
 
-    // Build the search predicate once. Phone matching ORs three forms:
-    //   1. raw match against the user-entered `phone` (handles non-Iraq
-    //      phones and partial typed digits the user remembers)
-    //   2. normalized match against `normalized_phone` using the same
-    //      normaliser the API uses on save — so "0773 123 4567",
-    //      "+964773 123 4567" and "9647731234567" all find the same row
-    //   3. fall-back: digits-only LIKE on normalized_phone for partials
-    //      (e.g. user typed "31234" hoping to match a phone ending in
-    //      that — we strip non-digits from the search and substring-match)
-    const searchTerm = typeof search === 'string' ? search.trim() : '';
-    const buildWhere = () => {
-      if (!searchTerm) return null;
-      const digitsOnly = searchTerm.replace(/\D/g, '');
-      const normalised = normalizeIraqPhone(searchTerm);
-      const conds = [like(customers.name, `%${searchTerm}%`)];
-      conds.push(like(customers.phone, `%${searchTerm}%`));
-      if (digitsOnly.length >= 3) {
-        conds.push(like(customers.normalizedPhone, `%${digitsOnly}%`));
-      }
-      if (normalised) {
-        conds.push(eq(customers.normalizedPhone, normalised));
-      }
-      return or(...conds);
-    };
+    // Centralized, ranked search over name / phone / address / notes (req #4).
+    // Empty term => inactive, falling back to the default newest-first list.
+    const searchClause = buildSearch(CUSTOMER_SEARCH_TARGETS, search);
 
-    let query = db.select().from(customers);
-    const where = buildWhere();
+    const conditions = [];
+    if (searchClause.where) conditions.push(searchClause.where);
+    if (city) conditions.push(eq(customers.city, city));
+    if (hasDebt === true || hasDebt === 'true' || hasDebt === '1') {
+      conditions.push(gt(customers.totalDebt, '0'));
+    }
+    const where = conditions.length === 0 ? null : conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    let query = db
+      .select({
+        ...getTableColumns(customers),
+        matchedField: searchClause.active ? searchClause.matchedField : sql`NULL`,
+        matchedValue: searchClause.active ? searchClause.matchedValue : sql`NULL`,
+        rankScore: searchClause.active ? searchClause.rankScore : sql`0`,
+      })
+      .from(customers);
     if (where) query = query.where(where);
 
     // Get total count for pagination metadata
@@ -121,9 +146,13 @@ export class CustomerService {
     const [countResult] = await countQuery;
     const total = Number(countResult?.count || 0);
 
-    // Get paginated results using offset and limit
+    // Strongest matches first when searching, else newest-first (req #9/#11).
+    const orderBy = searchClause.active
+      ? [desc(searchClause.rankScore), desc(customers.createdAt)]
+      : [desc(customers.createdAt)];
+
     const results = await query
-      .orderBy(desc(customers.createdAt))
+      .orderBy(...orderBy)
       .limit(limit)
       .offset((page - 1) * limit);
 

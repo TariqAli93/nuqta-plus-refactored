@@ -52,14 +52,17 @@
         </div>
 
         <ReportExportActions
+          :report="report"
+          :report-type="reportType"
+          :date-from="dateFrom"
+          :date-to="dateTo"
+          :currency="currency"
+          :branch-label="branchLabel"
+          :user-name="userName"
+          :generated-at="generatedAt"
+          :can-view-profit="canViewProfit"
           :loading="loading"
-          :exporting-excel="exportingExcel"
-          :exporting-pdf="exportingPdf"
-          :disabled="!hasData"
           @refresh="$emit('refresh')"
-          @export-excel="$emit('export-excel')"
-          @export-pdf="$emit('export-pdf')"
-          @print="$emit('print')"
         />
       </div>
     </v-card-text>
@@ -71,18 +74,19 @@ import { computed } from 'vue';
 import ReportExportActions from './ReportExportActions.vue';
 
 const props = defineProps({
+  report: { type: Object, default: null },
+  reportType: { type: String, default: 'dashboard' },
   dateFrom: { type: String, default: '' },
   dateTo: { type: String, default: '' },
   currency: { type: String, default: 'ALL' },
   branchLabel: { type: String, default: 'كل الفروع' },
+  userName: { type: String, default: '' },
   generatedAt: { type: String, default: '' },
+  canViewProfit: { type: Boolean, default: true },
   loading: Boolean,
-  exportingExcel: Boolean,
-  exportingPdf: Boolean,
-  hasData: Boolean,
 });
 
-defineEmits(['refresh', 'export-excel', 'export-pdf', 'print']);
+defineEmits(['refresh']);
 
 const formatDate = (s) => {
   if (!s) return '—';
