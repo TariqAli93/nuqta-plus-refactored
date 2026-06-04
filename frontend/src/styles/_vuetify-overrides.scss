@@ -125,9 +125,15 @@ $v-data-table-header-bg-dark: rgba(255, 255, 255, 0.02);
       &.active-nav-item {
         color: rgba(var(--v-theme-primary), 1);
 
+        // Make the active label clearly stand out from siblings.
+        .v-list-item-title {
+          font-weight: $font-weight-bold !important;
+          opacity: 1 !important;
+        }
+
         .v-list-item-icon {
           &::before {
-            background-color: rgba(var(--v-theme-primary), 0.1);
+            background-color: rgba(var(--v-theme-primary), 0.12);
             visibility: visible;
             opacity: 1;
             transform: scale(1);
@@ -139,7 +145,7 @@ $v-data-table-header-bg-dark: rgba(255, 255, 255, 0.02);
             color: rgba(var(--v-theme-primary), 1);
 
             &::before {
-              background-color: rgba(var(--v-theme-primary), 0.1);
+              background-color: rgba(var(--v-theme-primary), 0.18);
             }
           }
         }

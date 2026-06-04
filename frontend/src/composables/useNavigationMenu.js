@@ -5,8 +5,10 @@ import { hasPermission as rbacHasPermission } from '@/auth/permissionMatrix.js';
 /**
  * Navigation menu composable.
  *
- * Three top-level sections (Operations / Inventory / Administration) to keep
- * the sidebar short and scannable. Each item can declare:
+ * The sidebar is organised by *business domain* (Sales / Products / Inventory /
+ * Finance / Administration) instead of an abstract "Operations" bucket, so a
+ * non-technical shop owner can predict where each task lives. Each item can
+ * declare:
  *
  *   - `permission`: RBAC permission required (checked via permissionMatrix)
  *   - `feature`:    feature flag that must be enabled
@@ -16,17 +18,23 @@ import { hasPermission as rbacHasPermission } from '@/auth/permissionMatrix.js';
  *   - `group`:      sub-items for a collapsible group
  *
  * A section is hidden entirely when all of its items are hidden.
+ *
+ * NOTE: titles here are display labels only — every `to` maps to an existing
+ * route. Renaming a label never changes a path or a permission gate.
  */
 export function useNavigationMenu() {
   const authStore = useAuthStore();
 
   const sections = [
+    // ── الرئيسية ───────────────────────────────────────────────────────────
     {
       title: 'لوحة التحكم',
       icon: 'mdi-view-dashboard',
       to: '/',
       permission: null,
     },
+
+    // نقطة البيع — أكثر مهمة يومية للكاشير، تبقى بارزة ومستقلة.
     {
       title: 'نقطة البيع',
       icon: 'mdi-point-of-sale',
@@ -38,47 +46,32 @@ export function useNavigationMenu() {
       capability: 'canUsePOS',
     },
 
-    // ── Operations ─────────────────────────────────────────────────────────
+    // ── المبيعات ───────────────────────────────────────────────────────────
     {
-      title: 'العمليات',
-      icon: 'mdi-cash-register',
-      to: '/operations',
+      title: 'المبيعات',
+      icon: 'mdi-receipt-text-outline',
+      // Placeholder path: group headers are activators, not links. Using a
+      // non-route value keeps getPageTitle resolving to the precise sub-item.
+      to: '#sales',
       group: {
         items: [
-          { title: 'المبيعات', icon: 'mdi-cash-register', to: '/sales', permission: 'view:sales' },
           {
-            title: 'العملاء',
-            icon: 'mdi-account-group',
-            to: '/customers',
-            permission: 'view:customers',
+            title: 'سجل المبيعات',
+            icon: 'mdi-format-list-bulleted',
+            to: '/sales',
+            permission: 'view:sales',
           },
           {
-            title: 'المنتجات',
-            icon: 'mdi-package-variant',
-            to: '/products',
-            permission: 'view:products',
-          },
-          {
-            title: 'التصنيفات',
-            icon: 'mdi-shape',
-            to: '/categories',
-            permission: 'view:categories',
-          },
-          {
-            title: 'التقارير',
-            icon: 'mdi-chart-box',
-            to: '/reports',
-            permission: 'view:reports',
-          },
-          {
-            title: 'المصاريف',
-            icon: 'mdi-cash-minus',
-            to: '/expenses',
-            permission: 'expenses:read',
+            // Installment-sale entry point (was reachable only by URL before).
+            title: 'بيع بالتقسيط',
+            icon: 'mdi-calendar-clock',
+            to: '/sales/new',
+            feature: 'installments',
+            capability: 'canUseInstallments',
           },
           {
             title: 'الورديات',
-            icon: 'mdi-cash-register',
+            icon: 'mdi-account-clock',
             to: '/sales/shifts',
             permission: 'view:sales',
             feature: 'pos',
@@ -87,11 +80,42 @@ export function useNavigationMenu() {
       },
     },
 
-    // ── Inventory (only when enabled) ──────────────────────────────────────
+    // ── العملاء ────────────────────────────────────────────────────────────
+    {
+      title: 'العملاء',
+      icon: 'mdi-account-group',
+      to: '/customers',
+      permission: 'view:customers',
+    },
+
+    // ── المنتجات ───────────────────────────────────────────────────────────
+    {
+      title: 'المنتجات',
+      icon: 'mdi-package-variant-closed',
+      to: '#products',
+      group: {
+        items: [
+          {
+            title: 'قائمة المنتجات',
+            icon: 'mdi-package-variant',
+            to: '/products',
+            permission: 'view:products',
+          },
+          {
+            title: 'الأصناف',
+            icon: 'mdi-shape',
+            to: '/categories',
+            permission: 'view:categories',
+          },
+        ],
+      },
+    },
+
+    // ── المخزون (only when enabled) ────────────────────────────────────────
     {
       title: 'المخزون',
       icon: 'mdi-warehouse',
-      to: '/inventory',
+      to: '#inventory',
       feature: 'inventory',
       permission: 'view:inventory',
       group: {
@@ -126,7 +150,7 @@ export function useNavigationMenu() {
             feature: 'inventoryTransfers',
           },
           {
-            title: 'منخفض المخزون',
+            title: 'نواقص المخزون',
             icon: 'mdi-alert',
             to: '/inventory/low-stock',
             permission: 'view:inventory',
@@ -141,14 +165,46 @@ export function useNavigationMenu() {
       },
     },
 
-    // ── Administration (admins only) ───────────────────────────────────────
+    // ── المالية ────────────────────────────────────────────────────────────
+    {
+      title: 'المالية',
+      icon: 'mdi-cash-multiple',
+      to: '#finance',
+      group: {
+        items: [
+          {
+            // Debt collection (was reachable only by URL before).
+            title: 'تحصيل الديون',
+            icon: 'mdi-hand-coin-outline',
+            to: '/collections',
+            permission: 'view:sales',
+          },
+          {
+            title: 'المصاريف',
+            icon: 'mdi-cash-minus',
+            to: '/expenses',
+            permission: 'expenses:read',
+          },
+        ],
+      },
+    },
+
+    // ── التقارير ───────────────────────────────────────────────────────────
+    {
+      title: 'التقارير',
+      icon: 'mdi-chart-box',
+      to: '/reports',
+      permission: 'view:reports',
+    },
+
+    // ── الإدارة (admins only) ──────────────────────────────────────────────
     {
       title: 'الإدارة',
-      icon: 'mdi-tools',
+      icon: 'mdi-cog',
       to: '/admin',
       group: {
         items: [
-          { title: 'المستخدمون', icon: 'mdi-account', to: '/users', permission: 'view:users' },
+          { title: 'المستخدمون', icon: 'mdi-account-cog', to: '/users', permission: 'view:users' },
           {
             title: 'الفروع والمخازن',
             icon: 'mdi-store',
@@ -158,13 +214,13 @@ export function useNavigationMenu() {
             anyFeature: ['multiBranch', 'multiWarehouse'],
           },
           {
-            title: 'الإعدادات',
-            icon: 'mdi-cog',
+            title: 'إعدادات النظام',
+            icon: 'mdi-tune',
             to: '/settings',
             permission: 'view:settings',
           },
           {
-            title: 'إعدادات الميزات',
+            title: 'الميزات',
             icon: 'mdi-toggle-switch',
             to: '/settings/feature-flags',
             permission: 'manage_feature_toggles',

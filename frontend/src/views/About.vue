@@ -121,10 +121,10 @@
                   <div class="mb-2 text-subtitle-2 text-medium-emphasis">رقم الهاتف</div>
                   <div class="text-center text-body-1 font-weight-bold" dir="ltr">
                     <a
-                      href="tel:+9647884841993"
+                      href="tel:+9647824082356"
                       class="text-decoration-none"
-                      @click.prevent="openExternal('tel:+9647884841993')"
-                      >+964 788 484 1993</a
+                      @click.prevent="openExternal('tel:+9647824082356')"
+                      >+964 782 408 2356</a
                     >
                   </div>
                 </v-card>
