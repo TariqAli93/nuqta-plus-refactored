@@ -47,6 +47,7 @@
 import { computed } from 'vue';
 import EmptyState from '@/components/EmptyState.vue';
 import KpiCard from './KpiCard.vue';
+import { formatCurrency } from '@/utils/formatters';
 
 const props = defineProps({
   kpisByCurrency: {
@@ -69,9 +70,6 @@ const props = defineProps({
 
 const kpiCurrencies = computed(() => Object.keys(props.kpisByCurrency || {}));
 
-const formatNumber = (n) =>
-  Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
-
 const lowStockCount = computed(
   () => (props.inventory?.lowStockProducts || []).length,
 );
@@ -85,7 +83,7 @@ function cardsFor(cur) {
     {
       key: 'sales',
       label: 'إجمالي المبيعات',
-      value: `${formatNumber(k.sales)} ${cur}`,
+      value: formatCurrency(k.sales, cur),
       icon: 'mdi-cart-arrow-right',
       color: 'primary',
       note: 'صافي قبل الضرائب والخصومات',
@@ -93,7 +91,7 @@ function cardsFor(cur) {
     {
       key: 'paid',
       label: 'المبالغ المحصّلة',
-      value: `${formatNumber(k.totalPaid)} ${cur}`,
+      value: formatCurrency(k.totalPaid, cur),
       icon: 'mdi-cash-check',
       color: 'success',
       note: 'من جميع طرق الدفع',
@@ -102,7 +100,7 @@ function cardsFor(cur) {
       key: 'expenses',
       label: 'المصاريف',
       value: props.expensesSummary?.supported
-        ? `${formatNumber(props.expensesSummary.totalExpenses)} ${cur}`
+        ? formatCurrency(props.expensesSummary.totalExpenses, cur)
         : 'غير متاح',
       icon: 'mdi-cash-minus',
       color: 'warning',
@@ -119,7 +117,7 @@ function cardsFor(cur) {
     cards.push({
       key: 'netProfit',
       label: 'صافي الربح',
-      value: np === null || np === undefined ? 'غير متاح' : `${formatNumber(np)} ${cur}`,
+      value: np === null || np === undefined ? 'غير متاح' : formatCurrency(np, cur),
       icon: 'mdi-chart-line',
       color: np !== null && np !== undefined && np < 0 ? 'error' : 'success',
       note: 'الإيرادات − تكلفة البضاعة − المصاريف',
@@ -132,7 +130,7 @@ function cardsFor(cur) {
     {
       key: 'unpaid',
       label: 'الديون المستحقة',
-      value: `${formatNumber(k.unpaidBalances)} ${cur}`,
+      value: formatCurrency(k.unpaidBalances, cur),
       icon: 'mdi-account-cash-outline',
       color: 'info',
       note: 'الأرصدة غير المدفوعة من المبيعات',
@@ -143,7 +141,7 @@ function cardsFor(cur) {
       value: `${k.overdueInstallments || 0}`,
       icon: 'mdi-alert-circle-outline',
       color: (k.overdueInstallments || 0) > 0 ? 'error' : 'success',
-      note: `بقيمة ${formatNumber(k.lateAmounts)} ${cur}`,
+      note: `بقيمة ${formatCurrency(k.lateAmounts, cur)}`,
       warning: (k.overdueInstallments || 0) > 0 ? 'يوجد أقساط فائتة الموعد' : '',
     },
     {

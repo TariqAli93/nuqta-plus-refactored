@@ -433,6 +433,7 @@ import AdvancedFilters from '@/components/AdvancedFilters.vue';
 import MatchBadge from '@/components/MatchBadge.vue';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { highlightSegments } from '@/utils/highlight';
+import { formatCurrency } from '@/utils/formatters';
 import { useExport } from '@/composables/useExport';
 import { useFeatureGate } from '@/composables/useFeatureGate';
 import { useNotificationStore } from '@/stores/notification';
@@ -580,11 +581,6 @@ const headers = [
   { title: 'بواسطة', key: 'createdBy', sortable: false },
   { title: 'الاجرائات', key: 'actions', sortable: false },
 ];
-
-const formatCurrency = (amount, currency) => {
-  const symbol = currency === 'USD' ? '$' : 'IQD';
-  return `${symbol} ${parseFloat(amount).toLocaleString()}`;
-};
 
 const toYmd = (date) => {
   const d = new Date(date);

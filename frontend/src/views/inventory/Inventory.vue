@@ -245,6 +245,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useProductStore } from '@/stores/product';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import { formatCurrency as formatMoney } from '@/utils/formatters';
 import {
   getInventoryMovementTypeLabel,
   manualInventoryMovementTypes,
@@ -258,7 +259,15 @@ const router = useRouter();
 const route = useRoute();
 
 const canAdjust = computed(() => authStore.hasPermission?.('inventory:adjust') === true);
-const canRequestTransfer = computed(() => authStore.hasPermission?.('inventory:transfer') === true);
+// Mirror the StockTransfer route/menu gate (feature flag + capability) in
+// addition to the permission, so the transfer buttons never lead to a
+// feature-disabled route that would silently redirect to the dashboard.
+const canRequestTransfer = computed(
+  () =>
+    authStore.hasPermission?.('inventory:transfer') === true &&
+    authStore.hasFeature?.('inventoryTransfers') === true &&
+    authStore.can?.('canTransferStock') === true
+);
 
 const search = ref('');
 const lowStockOnly = ref(false);
@@ -286,11 +295,6 @@ const filteredStock = computed(() =>
     };
   })
 );
-
-const formatMoney = (value, currency = 'IQD') => {
-  const n = Number(value || 0);
-  return `${n.toLocaleString('en-US')} ${currency}`;
-};
 
 const reload = async () => {
   if (!inventoryStore.selectedWarehouseId) return;

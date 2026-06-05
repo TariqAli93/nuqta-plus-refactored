@@ -2,7 +2,7 @@
   <div class="page-shell">
     <PageHeader
       title="إدارة التصنيفات"
-      subtitle="تنظيم منتجاتك ضمن فئات"
+      subtitle="تنظيم منتجاتك ضمن تصنيفات"
       icon="mdi-shape"
     >
       <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openDialog()"

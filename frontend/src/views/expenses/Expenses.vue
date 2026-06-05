@@ -20,7 +20,7 @@
     <div v-if="summary" class="summary-grid page-section">
       <StatCard
         label="إجمالي المصاريف"
-        :value="moneyFmt(summary.total)"
+        :value="formatCurrency(summary.total)"
         icon="mdi-sigma"
         icon-color="primary"
         :hint="`${summary.count || 0} عملية`"
@@ -28,8 +28,8 @@
       <StatCard
         v-for="row in summary.byCurrency || []"
         :key="`cur-${row.currency}`"
-        :label="row.currency"
-        :value="moneyFmt(row.total)"
+        :label="getCurrencySymbol(row.currency)"
+        :value="formatCurrency(row.total, row.currency)"
         icon="mdi-currency-usd"
         icon-color="success"
       />
@@ -114,7 +114,7 @@
           <TableSkeleton :rows="5" :columns="headers.length" />
         </template>
         <template #[`item.amount`]="{ item }">
-          <span class="font-weight-bold">{{ moneyFmt(item.amount) }} {{ item.currency }}</span>
+          <span class="font-weight-bold">{{ formatCurrency(item.amount, item.currency) }}</span>
         </template>
         <template #[`item.category`]="{ item }">
           <v-chip size="small" variant="tonal">{{ categoryLabel(item.category) }}</v-chip>
@@ -253,6 +253,7 @@ import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import StatCard from '@/components/StatCard.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
+import { formatCurrency, getCurrencySymbol } from '@/utils/formatters';
 
 const expensesStore = useExpensesStore();
 const authStore = useAuthStore();
@@ -315,10 +316,6 @@ const formData = reactive({
   branchId: null,
   note: '',
 });
-
-function moneyFmt(n) {
-  return Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
-}
 
 async function reload() {
   const params = { ...filters };
@@ -383,7 +380,7 @@ async function save() {
 }
 
 async function confirmDelete(row) {
-  if (!window.confirm(`حذف المصروف بقيمة ${moneyFmt(row.amount)} ${row.currency}؟`)) return;
+  if (!window.confirm(`حذف المصروف بقيمة ${formatCurrency(row.amount, row.currency)}؟`)) return;
   try {
     await expensesStore.remove(row.id);
     await reload();

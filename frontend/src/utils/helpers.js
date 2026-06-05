@@ -17,12 +17,10 @@ export const toYmdWithTime = (date) => {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 };
 
-export const formatCurrency = (amount, currency) =>
-  new Intl.NumberFormat('ar', {
-    style: 'currency',
-    currency: currency || 'IQD',
-    maximumFractionDigits: (currency || 'IQD') === 'USD' ? 2 : 0,
-  }).format(amount || 0);
+// Currency formatting is centralized in ./formatters — re-export the canonical
+// implementation so existing imports from '@/utils/helpers' stay valid and
+// produce the same output as everywhere else.
+export { formatCurrency, getCurrencySymbol } from './formatters';
 
 // Short currency format for thermal receipts
 export const formatCurrencyShort = (val, currency = 'IQD') => {

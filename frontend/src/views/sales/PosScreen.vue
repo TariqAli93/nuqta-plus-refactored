@@ -224,12 +224,23 @@
 
       <!-- Lines -->
       <div class="cart__lines" aria-live="polite">
-        <div v-if="items.length === 0" class="cart__empty">
-          <div class="cart__empty-icon-wrap">
-            <v-icon size="40" class="cart__empty-icon">mdi-cart-outline</v-icon>
-          </div>
-          <div class="cart__empty-title">السلة فارغة</div>
-          <div class="cart__empty-sub">اختر منتجاً أو امسح باركود لبدء البيع.</div>
+        <!-- Loading skeleton while a saved draft is being fetched into the cart -->
+        <ul
+          v-if="continuingDraftId && items.length === 0"
+          class="cart__lines-list"
+          aria-hidden="true"
+        >
+          <li v-for="n in 3" :key="`cart-sk-${n}`" class="line line--skeleton"></li>
+        </ul>
+
+        <div v-else-if="items.length === 0" class="cart__empty">
+          <EmptyState
+            compact
+            icon="mdi-cart-outline"
+            :icon-size="40"
+            title="السلة فارغة"
+            description="اختر منتجاً أو امسح باركود لبدء البيع."
+          />
           <div class="cart__hints">
             <span class="cart__hint"><kbd>F2</kbd> بحث</span>
             <span class="cart__hint"><kbd>F4</kbd> باركود</span>
@@ -831,7 +842,9 @@ import { useFeatureGate } from '@/composables/useFeatureGate';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import OpenShiftDialog from '@/components/cashSession/OpenShiftDialog.vue';
 import CloseShiftDialog from '@/components/cashSession/CloseShiftDialog.vue';
+import EmptyState from '@/components/EmptyState.vue';
 import api from '@/plugins/axios';
+import { formatCurrency as formatMoney } from '@/utils/formatters';
 
 // ── Stores ──────────────────────────────────────────────────────────────────
 const productStore = useProductStore();
@@ -1231,13 +1244,8 @@ const changeStateClass = computed(() => {
 });
 
 // ── Formatting ─────────────────────────────────────────────────────────────
-const formatMoney = (value, cur) => {
-  const n = Number(value || 0);
-  const c = cur || currency.value;
-  return `${n.toLocaleString('en-US', {
-    maximumFractionDigits: c === 'USD' ? 2 : 0,
-  })} ${c}`;
-};
+// Currency formatting is centralized in '@/utils/formatters' (imported above
+// as formatMoney). All call sites pass the relevant currency explicitly.
 
 // Compact label for quick-add chips (e.g., 1k, 10k, 1M).
 const shortAmount = (a) => {
@@ -1715,7 +1723,7 @@ onUnmounted(() => {
   --pos-primary-hover: rgba(var(--v-theme-primary), 0.14);
 
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 460px;
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 460px);
   gap: var(--pos-space-4);
   height: calc(100vh - 120px);
   min-height: 600px;
@@ -1727,6 +1735,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   background: var(--pos-surface);
   border: 1px solid var(--pos-border);
   border-radius: var(--pos-radius-lg);
@@ -1736,6 +1745,9 @@ onUnmounted(() => {
 .pos__products {
   display: grid;
   grid-template-rows: auto 1fr;
+  /* Constrain the single column to the panel width so the inner product grid
+     can't blow out to its max-content on narrow layouts. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--pos-space-2);
   padding: var(--pos-space-3);
   height: 100%;
@@ -1764,10 +1776,13 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--pos-space-2);
   flex-wrap: wrap;
-  margin-bottom: var(--pos-space-2);
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: rgba(var(--v-theme-on-surface), 0.04);
+  /* Distinct status banner at the top of the products panel. Negative margins
+     cancel the toolbar's top/side padding so it spans the full width and reads
+     as its own "shift" zone, separated from search/filter by a bottom border. */
+  margin: calc(-1 * var(--pos-space-3)) calc(-1 * var(--pos-space-4)) var(--pos-space-3);
+  padding: var(--pos-space-2) var(--pos-space-4);
+  border-bottom: 1px solid var(--pos-border);
+  background: var(--pos-surface-tint);
   font-size: 0.85rem;
 
   &__metric {
@@ -1902,6 +1917,9 @@ onUnmounted(() => {
   overflow-y: auto;
   align-content: start;
   min-height: 0;
+  /* Prevent the grid (a grid/flex item) from blowing out past its container
+     on narrow single-column layouts — lets auto-fill size to the real width. */
+  min-width: 0;
   scrollbar-gutter: stable;
 }
 
@@ -1951,8 +1969,13 @@ onUnmounted(() => {
   }
   &--out,
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.6;
     cursor: not-allowed;
+  }
+  /* Out-of-stock: badge gets an error fill (its number is already red via
+     the `stock-out` class set by stockClass()). */
+  &--out .product__stock {
+    background: rgba(var(--v-theme-error), 0.12);
   }
   &--skeleton {
     height: 104px;
@@ -2040,6 +2063,7 @@ onUnmounted(() => {
 
 .product__price {
   font-weight: 700;
+  font-size: 1.05rem;
   color: var(--pos-primary);
   font-variant-numeric: tabular-nums;
 }
@@ -2085,7 +2109,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: var(--pos-space-3) var(--pos-space-4);
   border-bottom: 1px solid var(--pos-border);
   flex-shrink: 0;
 }
@@ -2148,40 +2172,12 @@ onUnmounted(() => {
   padding: 6px 0;
 }
 
+/* Empty cart uses the shared <EmptyState> for app-wide consistency; the
+   keyboard-shortcut hints sit below it (and are hidden on touch). */
 .cart__empty {
-  padding: 32px 16px;
-  text-align: center;
-  color: rgba(var(--v-theme-on-surface), 0.7);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-}
-
-.cart__empty-icon-wrap {
-  width: 76px;
-  height: 76px;
-  border-radius: 50%;
-  background: var(--pos-surface-tint);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 8px;
-}
-
-.cart__empty-icon {
-  color: rgba(var(--v-theme-on-surface), 0.5);
-}
-
-.cart__empty-title {
-  font-size: 1rem;
-  font-weight: 700;
-  margin-top: 4px;
-}
-
-.cart__empty-sub {
-  font-size: 0.82rem;
-  color: rgba(var(--v-theme-on-surface), 0.55);
 }
 
 .cart__hints {
@@ -2190,6 +2186,11 @@ onUnmounted(() => {
   flex-wrap: wrap;
   justify-content: center;
   margin-top: 16px;
+
+  /* Keyboard shortcuts aren't useful on touch devices */
+  @media (pointer: coarse) {
+    display: none;
+  }
 }
 
 .cart__hint {
@@ -2219,11 +2220,28 @@ onUnmounted(() => {
 
 .cart__lines-list {
   list-style: none;
-  padding: 0 8px;
+  padding: 0 var(--pos-space-3);
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Loading placeholder lines shown while a draft is fetched into the cart.
+   Reuses the shared `shimmer` keyframes defined for product skeletons. */
+.line--skeleton {
+  min-height: 64px;
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--pos-surface-soft) 0%,
+    var(--pos-surface-tint) 50%,
+    var(--pos-surface-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite ease-in-out;
+  pointer-events: none;
 }
 
 /* ── Single line: name+meta on top, qty+total at bottom, X badge on edge ── */
@@ -2232,7 +2250,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr;
   gap: 6px;
-  padding: 10px 12px 10px 36px; /* leave room for X */
+  padding: var(--pos-space-3) var(--pos-space-3) var(--pos-space-3) 36px; /* leave room for X */
   background: var(--pos-surface-soft);
   border: 1px solid var(--pos-border);
   border-radius: var(--pos-radius-md);
@@ -2470,7 +2488,8 @@ onUnmounted(() => {
   border-top: 1px solid var(--pos-border);
   background: linear-gradient(180deg, transparent, var(--pos-surface-soft));
   flex-shrink: 0;
-  overflow-y: auto;
+  /* No overflow here — the lines list (.cart__lines) is the scroller, so the
+     totals + checkout button stay pinned and never scroll out of view. */
 }
 
 .cart__total-rows {
@@ -2750,6 +2769,10 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   padding-top: 4px;
+  /* Safety cap: if both numpad + options are open on a short viewport, only the
+     keypad scrolls — the totals and checkout button below stay pinned. */
+  max-height: 30vh;
+  overflow-y: auto;
 }
 
 .numpad__keys {
@@ -3110,10 +3133,7 @@ onUnmounted(() => {
 
 /* ══════════════════ Responsive ══════════════════ */
 @media (max-width: 1280px) {
-  .pos {
-    grid-template-columns: minmax(0, 1fr) 330px;
-  }
-
+  /* Cart width is fluid via clamp() on .pos — no fixed override needed here. */
   .products__grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   }
@@ -3125,22 +3145,27 @@ onUnmounted(() => {
 }
 
 @media (max-width: 960px) {
+  /* Single column, fixed to the viewport height (no page scroll): products
+     fill the top and scroll internally; the cart is pinned below with its
+     checkout always visible. minmax(0,1fr) stops the grid blowing out. */
   .pos {
-    grid-template-columns: 1fr;
-    height: auto;
-    min-height: unset;
-    gap: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    /* Fit between the app bar (~65px) and the global footer (~65px) + container
+       padding so the cart's checkout stays on-screen without a page scroll. */
+    height: calc(100vh - 162px);
+    min-height: 440px;
+    gap: var(--pos-space-3);
   }
 
   .pos__products {
-    height: calc(100vh - 140px);
-    min-height: 420px;
+    min-height: 0;
   }
 
   .products__grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 8px;
-    padding: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--pos-space-2);
+    padding: var(--pos-space-2);
   }
 
   .product--featured {
@@ -3151,35 +3176,24 @@ onUnmounted(() => {
     max-width: 140px;
   }
 
-  /* Cart becomes a bottom sheet */
+  /* Cart is the bottom row: bounded so its lines scroll inside and the
+     checkout footer (flex-shrink:0) stays visible at the bottom. */
   .pos__cart {
-    position: fixed;
-    inset: auto 0 0 0;
-    width: 100%;
-    max-height: 92vh;
-    height: auto;
-    border-radius: var(--pos-radius-lg) var(--pos-radius-lg) 0 0;
-    transform: translateY(100%);
-    transition: transform 0.25s ease;
-    z-index: 20;
-    box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.25);
-
-    &.is-open {
-      transform: translateY(0);
-    }
+    max-height: 50vh;
   }
 
-  .cart__lines {
-    max-height: 28vh;
-  }
-
-  .pay__methods {
-    gap: 6px;
+  /* The drag handle only made sense for the old bottom-sheet — hide it. */
+  .pos.is-mobile .cart__handle {
+    display: none;
   }
 
   .cart__pay {
     padding: 10px;
     gap: 8px;
+  }
+
+  .pay__methods {
+    gap: 6px;
   }
 
   .numpad__key {
@@ -3191,6 +3205,26 @@ onUnmounted(() => {
   .pay__checkout {
     height: 48px !important;
     font-size: 0.92rem !important;
+  }
+}
+
+/* Small screens: denser product grid; a featured card no longer spans 2 cols */
+@media (max-width: 600px) {
+  /* Keep a readable card floor (140px) so name + price + stock stay legible. */
+  .products__grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--pos-space-1);
+  }
+
+  .product--featured {
+    grid-column: auto;
+  }
+}
+
+/* Large desktops: pack a few more product cards per row */
+@media (min-width: 1920px) {
+  .products__grid {
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   }
 }
 </style>

@@ -203,10 +203,11 @@ const recentSales = ref([]);
 const countSales = ref(0);
 
 const todayLabel = computed(() =>
-  new Date().toLocaleDateString('ar-EG', {
+  new Date().toLocaleDateString('ar-IQ', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
+    numberingSystem: 'latn',
   })
 );
 
@@ -318,7 +319,7 @@ const formatCurrency = (amount, curr) => {
 };
 
 const formatDate = (date) =>
-  new Date(date).toLocaleDateString('ar', {
+  new Date(date).toLocaleDateString('ar-IQ', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',

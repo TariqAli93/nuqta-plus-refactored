@@ -39,7 +39,9 @@
       "Bash(Select-Object -First 50)",
       "Bash(Format-List FullName)",
       "Bash(Get-ChildItem -Path \"D:\\\\dev_projects\\\\nuqta-plus-refactored\\\\frontend\" -Recurse -Directory)",
-      "Bash(Select-Object -First 30 FullName)"
+      "Bash(Select-Object -First 30 FullName)",
+      "PowerShell(Write-Output \"---what is on 41732---\"; try { $r = Invoke-RestMethod -Uri \"http://127.0.0.1:41732/health\" -TimeoutSec 4; $r | ConvertTo-Json -Compress } catch { Write-Output \"health failed: $\\($_.Exception.Message\\)\" }; try { $s = Invoke-RestMethod -Uri \"http://127.0.0.1:41732/server-info\" -TimeoutSec 4; \"server-info: \" + \\($s | ConvertTo-Json -Compress\\) } catch { Write-Output \"server-info failed: $\\($_.Exception.Message\\)\" })",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

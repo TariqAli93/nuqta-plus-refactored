@@ -200,7 +200,7 @@ const getRoleColor = (roleName) => {
 const formatDate = (dateString) => {
   if (!dateString) return 'غير محدد';
   const date = new Date(dateString);
-  return date.toLocaleDateString('ar', {
+  return date.toLocaleDateString('ar-IQ', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -223,11 +223,11 @@ const getPermissionLabel = (permission) => {
     'update:products': 'تعديل المنتجات',
     'delete:products': 'حذف المنتجات',
     'manage:products': 'إدارة المنتجات',
-    'read:categories': 'عرض الفئات',
-    'create:categories': 'إضافة فئات',
-    'update:categories': 'تعديل الفئات',
-    'delete:categories': 'حذف الفئات',
-    'manage:categories': 'إدارة الفئات',
+    'read:categories': 'عرض التصنيفات',
+    'create:categories': 'إضافة تصنيفات',
+    'update:categories': 'تعديل التصنيفات',
+    'delete:categories': 'حذف التصنيفات',
+    'manage:categories': 'إدارة التصنيفات',
     'read:sales': 'عرض المبيعات',
     'create:sales': 'إضافة مبيعات',
     'update:sales': 'تعديل المبيعات',
@@ -251,7 +251,7 @@ const getPermissionLabel = (permission) => {
     'view:sales': 'عرض صفحة المبيعات',
     'view:customers': 'عرض صفحة العملاء',
     'view:products': 'عرض صفحة المنتجات',
-    'view:categories': 'عرض صفحة الفئات',
+    'view:categories': 'عرض صفحة التصنيفات',
     'view:reports': 'عرض صفحة التقارير',
     'view:users': 'عرض صفحة المستخدمين',
     'view:roles': 'عرض صفحة الأدوار',

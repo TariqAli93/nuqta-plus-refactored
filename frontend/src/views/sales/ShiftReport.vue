@@ -366,6 +366,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { formatCurrency as formatMoney } from '@/utils/formatters';
 import { useCashSessionStore } from '@/stores/cashSession';
 import { useInventoryStore } from '@/stores/inventory';
 import PaginationControls from '@/components/PaginationControls.vue';
@@ -469,14 +470,9 @@ const openDetails = async (id) => {
 };
 
 // ── Formatting helpers ────────────────────────────────────────────────────
-const formatMoney = (v, cur = 'USD') => {
-  const num = Number(v) || 0;
-  if (cur === 'IQD') return `${Math.round(num).toLocaleString('en-US')} د.ع`;
-  return `$${num.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-};
+// Currency formatting is centralized in '@/utils/formatters' (imported above
+// as formatMoney). Summary cards that omit a currency now default to IQD
+// instead of rendering a '$' amount.
 
 const formatDate = (iso) => {
   if (!iso) return '';

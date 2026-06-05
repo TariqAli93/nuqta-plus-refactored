@@ -209,7 +209,7 @@
           </div>
         </template>
         <template #[`item.sellingPrice`]="{ item }">
-          {{ formatNumber(item.sellingPrice) }} {{ item.currency }}
+          {{ formatCurrency(item.sellingPrice, item.currency) }}
         </template>
         <template #[`item.status`]="{ item }">
           <v-chip :color="getStatusColor(item.status)" size="small">
@@ -285,6 +285,7 @@ import AdvancedFilters from '@/components/AdvancedFilters.vue';
 import MatchBadge from '@/components/MatchBadge.vue';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { highlightSegments } from '@/utils/highlight';
+import { formatCurrency } from '@/utils/formatters';
 import { useExport } from '@/composables/useExport';
 import { useUndo } from '@/composables/useUndo';
 import { useNotificationStore } from '@/stores/notification';
@@ -418,16 +419,6 @@ const getStatusText = (status) => {
   };
 
   return texts[status] || status;
-};
-
-// دالة تنسيق الأرقام مع الفواصل
-const formatNumber = (value) => {
-  const num = Number(value);
-  return num.toLocaleString('ar-IQ', {
-    style: 'currency',
-    currency: 'IQD',
-    numberingSystem: 'latn',
-  });
 };
 
 const resolvedStock = (item) => {

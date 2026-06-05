@@ -83,6 +83,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { formatCurrency } from '@/utils/formatters';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -101,7 +102,7 @@ const closingCash = ref('');
 const notes = ref('');
 const error = ref('');
 
-const currency = computed(() => props.session?.currency || 'USD');
+const currency = computed(() => props.session?.currency || 'IQD');
 
 const variance = computed(() => {
   const counted = Number(closingCash.value);
@@ -136,12 +137,6 @@ watch(
     }
   }
 );
-
-const formatCurrency = (val, cur = 'USD') => {
-  const num = Number(val) || 0;
-  if (cur === 'IQD') return `${num.toLocaleString('en-US')} د.ع`;
-  return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
 
 const onConfirm = () => {
   if (!isValid.value) {

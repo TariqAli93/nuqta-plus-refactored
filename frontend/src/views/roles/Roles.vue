@@ -350,7 +350,7 @@ function translateResource(res) {
     customers: 'العملاء',
     products: 'المنتجات',
     sales: 'المبيعات',
-    categories: 'الفئات',
+    categories: 'التصنيفات',
     settings: 'الإعدادات',
     reports: 'التقارير',
     dashboard: 'لوحة التحكم',

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
+import { buildArabicErrorMessage } from '@/utils/errorTranslator';
 import { hasPermission, matchesPermissionPattern } from '@/auth/permissionMatrix.js';
 
 function readJSON(key) {
@@ -272,7 +273,12 @@ export const useAuthStore = defineStore('auth', {
     async login(credentials) {
       const notificationStore = useNotificationStore();
       try {
-        const response = await api.post('/auth/login', credentials);
+        // `silent` opts this request out of the global error toast/dialog — the
+        // login screen renders the (localized) error inline, so the message is
+        // shown exactly once instead of twice.
+        const response = await api.post('/auth/login', credentials, {
+          meta: { silent: true },
+        });
 
         if (!response.data?.token || !response.data?.user) {
           throw new Error('Invalid response from server');
@@ -309,9 +315,17 @@ export const useAuthStore = defineStore('auth', {
         notificationStore.success('تم تسجيل الدخول بنجاح');
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || error.message || 'فشل تسجيل الدخول';
-        notificationStore.error(errorMessage);
-        throw error;
+        // Surface a single, localized message. The caller (login screen) shows
+        // it inline; the global toast is suppressed via the `silent` flag above.
+        let message;
+        if (error?.response?.status === 401) {
+          message = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+        } else if (!error?.response) {
+          message = 'تعذّر الاتصال بالخادم. تحقق من الشبكة وحاول مرة أخرى';
+        } else {
+          message = buildArabicErrorMessage(error) || 'تعذّر تسجيل الدخول. حاول مرة أخرى';
+        }
+        throw new Error(message);
       }
     },
 

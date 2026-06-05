@@ -207,6 +207,7 @@
 import { computed, ref, watch } from 'vue';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
+import { formatCurrency as fmtCurrency } from '@/utils/formatters';
 
 const props = defineProps({
   customerId: { type: [Number, String, null], default: null },
@@ -365,12 +366,7 @@ const formatPercent = (p) => {
 
 defineExpose({ exceedsLimit, snapshot, assessment, recalculate });
 
-const formatCurrency = (amount) =>
-  new Intl.NumberFormat('ar', {
-    style: 'currency',
-    currency: props.currency || 'IQD',
-    maximumFractionDigits: props.currency === 'USD' ? 2 : 0,
-  }).format(Number(amount) || 0);
+const formatCurrency = (amount) => fmtCurrency(amount, props.currency);
 
 const formatDate = (ts) => {
   if (!ts) return '';

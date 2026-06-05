@@ -54,22 +54,22 @@
                     :class="{ 'bg-primary-lighten-5': true }"
                     @click="handleCategoryEnter"
                   >
-                    <v-list-item-prepend>
+                    <template #prepend>
                       <v-icon color="primary">mdi-plus-circle</v-icon>
-                    </v-list-item-prepend>
+                    </template>
                     <v-list-item-title class="text-primary font-weight-medium">
                       اضغط Enter للإنشاء: "{{ categorySearch }}"
                     </v-list-item-title>
                   </v-list-item>
                   <v-list-item v-else-if="creatingCategory">
-                    <v-list-item-prepend>
+                    <template #prepend>
                       <v-progress-circular
                         indeterminate
                         color="primary"
                         size="20"
                         width="2"
                       ></v-progress-circular>
-                    </v-list-item-prepend>
+                    </template>
                     <v-list-item-title>
                       جاري إنشاء التصنيف "{{ categorySearch }}"...
                     </v-list-item-title>
@@ -194,7 +194,7 @@
 
             <!-- ─── Product units ───────────────────────────────────────── -->
             <v-col cols="12">
-              <v-expansion-panels variant="outlined" class="mb-4">
+              <v-expansion-panels class="mb-4">
                 <v-expansion-panel value="units">
                   <v-expansion-panel-title>
                     <div class="d-flex align-center gap-2">

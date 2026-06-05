@@ -13,6 +13,7 @@
           <v-list-item
             v-for="installment in alertStore.overdueInstallments.slice(0, 5)"
             :key="installment.id"
+            :value="`installment-${installment.id}`"
             :to="{ name: 'SaleDetails', params: { id: installment.saleId } }"
           >
             <template #prepend>
@@ -129,24 +130,18 @@
 
 <script setup>
 import { useAlertStore } from '@/stores/alert';
+import { formatCurrency } from '@/utils/formatters';
 
 const alertStore = useAlertStore();
-
-const formatCurrency = (amount, currency = 'IQD') => {
-  const symbol = currency === 'USD' ? '$' : 'د.ع';
-  return `${symbol} ${parseFloat(amount || 0).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-};
 
 const formatDate = (dateString) => {
   if (!dateString) return 'غير محدد';
   const date = new Date(dateString);
-  return date.toLocaleDateString('ar', {
+  return date.toLocaleDateString('ar-IQ', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+    numberingSystem: 'latn',
   });
 };
 </script>

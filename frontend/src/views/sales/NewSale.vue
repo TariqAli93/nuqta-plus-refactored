@@ -588,6 +588,7 @@ import {
   useInventoryStore,
 } from '@/stores';
 import { useAuthStore } from '@/stores/auth';
+import { formatCurrency as fmtCurrency } from '@/utils/formatters';
 import CustomerSelector from '@/components/CustomerSelector.vue';
 import CreditScoreCard from '@/components/CreditScoreCard.vue';
 import PageHeader from '@/components/PageHeader.vue';
@@ -1489,15 +1490,9 @@ onMounted(async () => {
   }
 });
 
-/* 💱 تنسيق العملة */
-const formatCurrency = (amount, currency = null) => {
-  const cur = currency || sale.value.currency;
-  return new Intl.NumberFormat('ar', {
-    style: 'currency',
-    currency: cur,
-    maximumFractionDigits: cur === 'USD' ? 2 : 0,
-  }).format(amount || 0);
-};
+/* 💱 تنسيق العملة — يفوّض للمنسّق المركزي مع الإبقاء على عملة الفاتورة كافتراضي */
+const formatCurrency = (amount, currency = null) =>
+  fmtCurrency(amount, currency || sale.value.currency);
 
 // إضافة دوال تنسيق الأرقام
 const formatNumber = (value) => {

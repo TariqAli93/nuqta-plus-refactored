@@ -1,6 +1,10 @@
 import { ref, computed } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 import api from '@/plugins/axios';
+import {
+  formatCurrency as centralFormatCurrency,
+  getCurrencySymbol as centralGetCurrencySymbol,
+} from '@/utils/formatters';
 
 /**
  * Composable for currency conversion and formatting
@@ -124,32 +128,15 @@ export function useCurrency() {
    * @param {string} currency - Currency code (defaults to defaultCurrency)
    * @returns {string} Formatted currency string
    */
-  const formatCurrency = (amount, currency = null) => {
-    const targetCurrency = currency || defaultCurrency.value;
-    const symbol = getCurrencySymbol(targetCurrency);
-    const formatted = parseFloat(amount || 0).toLocaleString('en-US', {
-      style: 'decimal',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-      numberingSystem: 'latn',
-    });
-    return `${formatted} ${symbol}`;
-  };
+  const formatCurrency = (amount, currency = null) =>
+    centralFormatCurrency(amount, currency || defaultCurrency.value || 'IQD');
 
   /**
-   * Get currency symbol
+   * Get currency symbol — delegates to the central symbol map.
    * @param {string} currency - Currency code
    * @returns {string} Currency symbol
    */
-  const getCurrencySymbol = (currency) => {
-    const symbols = {
-      IQD: 'د.ع',
-      USD: '$',
-      EUR: '€',
-      GBP: '£',
-    };
-    return symbols[currency] || currency;
-  };
+  const getCurrencySymbol = (currency) => centralGetCurrencySymbol(currency);
 
   /**
    * Convert and format amount to default currency

@@ -20,7 +20,7 @@ export function formatDate(date, options = {}) {
     numberingSystem: 'latn',
   };
 
-  return new Intl.DateTimeFormat('ar', { ...defaultOptions, ...options }).format(dateObj);
+  return new Intl.DateTimeFormat('ar-IQ', { ...defaultOptions, ...options }).format(dateObj);
 }
 
 /**
@@ -54,17 +54,34 @@ export function formatNumber(number, decimals = 2) {
 }
 
 /**
- * Format currency
- * @param {Number} amount - Amount to format
- * @param {String} currency - Currency code (IQD, USD)
- * @param {Number} decimals - Number of decimal places
+ * Currency symbol map — the single source of truth for currency symbols.
+ * IQD intentionally maps to 'د.ع' (never '$') regardless of any per-currency
+ * symbol stored in settings, so amounts render consistently across the app.
+ * @param {String} currency - Currency code (IQD, USD, EUR, GBP)
+ * @returns {String} Currency symbol
  */
-export function formatCurrency(amount, currency = 'IQD', decimals = 2) {
-  if (amount === null || amount === undefined || isNaN(amount)) return '0';
+export function getCurrencySymbol(currency) {
+  const symbols = { IQD: 'د.ع', USD: '$', EUR: '€', GBP: '£' };
+  return symbols[currency] || currency || 'د.ع';
+}
 
-  const symbol = currency === 'USD' ? '$' : 'د.ع';
-
-  return `${symbol} ${formatNumber(amount, decimals)}`;
+/**
+ * Canonical currency formatter — the single source of truth used across the
+ * whole app. Output is "<number> <symbol>" (e.g. "200,000 د.ع", "1,500.00 $").
+ * IQD uses 0 fraction digits, other currencies use 2.
+ * @param {Number} amount - Amount to format
+ * @param {String} currency - Currency code (defaults to IQD)
+ * @returns {String} Formatted currency string
+ */
+export function formatCurrency(amount, currency = 'IQD') {
+  const cur = currency || 'IQD';
+  const num = Number(amount) || 0;
+  const decimals = cur === 'USD' ? 2 : 0;
+  const formatted = num.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `${formatted} ${getCurrencySymbol(cur)}`;
 }
 
 /**

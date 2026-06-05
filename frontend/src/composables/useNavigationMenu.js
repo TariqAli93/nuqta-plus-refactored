@@ -102,7 +102,7 @@ export function useNavigationMenu() {
             permission: 'view:products',
           },
           {
-            title: 'الأصناف',
+            title: 'التصنيفات',
             icon: 'mdi-shape',
             to: '/categories',
             permission: 'view:categories',
@@ -295,14 +295,30 @@ export function useNavigationMenu() {
     return null;
   };
 
+  // Titles for routes that are intentionally NOT in the sidebar menu, so the
+  // app-bar still shows a correct heading instead of falling back to the
+  // dashboard label.
+  const extraTitles = {
+    '/profile': 'الملف الشخصي',
+    '/notifications': 'التنبيهات',
+    '/forbidden': 'ممنوع الوصول',
+    '/setup': 'إعداد النظام',
+  };
+
   const getPageTitle = (path) => {
-    // Longest-prefix match so /inventory/movements still picks up a label
     const exact = findMenuItemByPath(path);
     if (exact) return exact.title;
 
+    if (extraTitles[path]) return extraTitles[path];
+
+    // Longest-prefix match on a path-segment boundary so a parent like
+    // '/sales' still labels '/sales/new', while '/' (dashboard) never
+    // swallows unrelated routes such as '/profile' or '/notifications'.
     const allItems = sections.flatMap((s) => (s.group ? s.group.items : [s]));
     const match = allItems
-      .filter((i) => i.to && path.startsWith(i.to))
+      .filter(
+        (i) => i.to && i.to !== '/' && (path === i.to || path.startsWith(`${i.to}/`))
+      )
       .sort((a, b) => b.to.length - a.to.length)[0];
     return match?.title || 'نقطة بلس';
   };
