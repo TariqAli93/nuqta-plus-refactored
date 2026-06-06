@@ -145,15 +145,15 @@
           v-for="p in filteredProducts"
           v-else
           :key="p.id"
-          v-memo="[p.id, availableOf(p), p.sellingPrice, p.name, isFeatured(p)]"
+          v-memo="[p.id, availableOf(p), p.sellingPrice, p.name, isFeatured(p), isService(p)]"
           class="product"
           :class="{
-            'product--out': availableOf(p) <= 0,
+            'product--out': !isSellable(p),
             'product--featured': isFeatured(p),
           }"
-          :disabled="availableOf(p) <= 0 || expiryStatusOf(p) === 'منتهي'"
+          :disabled="!isSellable(p) || expiryStatusOf(p) === 'منتهي'"
           :title="p.name"
-          :tabindex="availableOf(p) <= 0 || expiryStatusOf(p) === 'منتهي' ? -1 : 0"
+          :tabindex="!isSellable(p) || expiryStatusOf(p) === 'منتهي' ? -1 : 0"
           role="gridcell"
           @click="addProduct(p)"
           @keydown.enter.prevent="addProduct(p)"
@@ -174,7 +174,8 @@
           </div>
           <div class="product__foot">
             <span class="product__price">{{ formatMoney(p.sellingPrice, p.currency) }}</span>
-            <span class="product__stock" :class="stockClass(p)">{{ availableOf(p) }}</span>
+            <span v-if="isService(p)" class="product__stock product__stock--service">خدمة</span>
+            <span v-else class="product__stock" :class="stockClass(p)">{{ availableOf(p) }}</span>
           </div>
         </button>
       </div>
@@ -1148,6 +1149,12 @@ const onMethodChange = (m) => {
 // ── Derived product helpers ────────────────────────────────────────────────
 const availableOf = (p) => Number(p?.warehouseStock ?? p?.totalStock ?? p?.stock ?? 0) || 0;
 
+// Service products are never stocked — they are always sellable and never
+// blocked by an availability check.
+const isService = (p) => p?.productType === 'service';
+// A product is sellable when it's a service (no stock gate) or has stock.
+const isSellable = (p) => isService(p) || availableOf(p) > 0;
+
 const stockClass = (p) => {
   const q = availableOf(p);
   if (q <= 0) return 'stock-out';
@@ -1289,6 +1296,11 @@ watch(() => inventoryStore.selectedWarehouseId, loadProducts);
 
 // ── Cart interactions ──────────────────────────────────────────────────────
 const addProduct = (product) => {
+  // Services bypass every stock/expiry gate — they have no inventory.
+  if (isService(product)) {
+    addItem(product);
+    return;
+  }
   if (expiryStatusOf(product) === 'منتهي') {
     notify.warning('لا توجد كمية صالحة للبيع لهذا المنتج');
     return;
@@ -2083,6 +2095,11 @@ onUnmounted(() => {
   }
   &.stock-out {
     color: rgb(var(--v-theme-error));
+  }
+  &--service {
+    color: rgb(var(--v-theme-secondary));
+    background: rgba(var(--v-theme-secondary), 0.12);
+    font-weight: 600;
   }
 }
 

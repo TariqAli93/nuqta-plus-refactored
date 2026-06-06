@@ -97,6 +97,12 @@ export class ProductService {
     // on the products row itself.
     const { units: unitsInput, ...productOnly } = productData || {};
 
+    // Service products have no purchase cost — the cost column is NOT NULL, so
+    // default it to 0 when the (optional) value is absent. Inventory products
+    // always arrive with a positive cost (enforced by productCreateSchema).
+    const isService = productOnly.productType === 'service';
+    if (productOnly.costPrice == null) productOnly.costPrice = 0;
+
     // Stock quantity is intentionally NOT written here — opening balance must
     // be entered via the inventory movement API (`/inventory/adjust`) so an
     // auditable movement record is created. The frontend redirects the user to
@@ -120,9 +126,13 @@ export class ProductService {
       return created;
     });
 
-    // Pre-create per-warehouse stock rows (quantity 0). Inventory movements
-    // own all subsequent updates to those rows.
-    await inventoryService.ensureProductStockRows(newProduct.id);
+    // Pre-create per-warehouse stock rows (quantity 0) for inventory products.
+    // Inventory movements own all subsequent updates to those rows. Service
+    // products are never stocked, so they get no stock rows and stay out of
+    // inventory reports.
+    if (!isService) {
+      await inventoryService.ensureProductStockRows(newProduct.id);
+    }
 
     saveDatabase();
     alertBus.emit('alerts.changed', 'product.created');
@@ -135,7 +145,7 @@ export class ProductService {
 
   async getAll(filters = {}) {
     const db = await getDb();
-    const { page = 1, limit = 10, search, categoryId, warehouseId, status, unit, minPrice, maxPrice } =
+    const { page = 1, limit = 10, search, categoryId, warehouseId, status, unit, minPrice, maxPrice, productType } =
       filters;
 
     // Centralized, ranked, Arabic/English-aware search. Empty term => inactive,
@@ -172,6 +182,7 @@ export class ProductService {
         costPrice: products.costPrice,
         sellingPrice: products.sellingPrice,
         currency: products.currency,
+        productType: products.productType,
         stock: totalStockSelect.as('stock'),
         warehouseStock: warehouseStockSelect.as('warehouseStock'),
         totalStock: totalStockSelect.as('totalStock'),
@@ -206,6 +217,11 @@ export class ProductService {
 
     if (status) {
       whereConditions.push(eq(products.status, status));
+    }
+
+    // Product-type filter (الكل / المخزنية / الخدمات). Omitted → both kinds.
+    if (productType === 'inventory' || productType === 'service') {
+      whereConditions.push(eq(products.productType, productType));
     }
 
     if (unit) {
@@ -324,6 +340,7 @@ export class ProductService {
         costPrice: products.costPrice,
         sellingPrice: products.sellingPrice,
         currency: products.currency,
+        productType: products.productType,
         stock: totalStockSelect.as('stock'),
         totalStock: totalStockSelect.as('totalStock'),
         minStock: products.minStock,
@@ -395,6 +412,14 @@ export class ProductService {
       }
       return row;
     });
+
+    // If this product is (now) an inventory product, make sure its per-warehouse
+    // stock rows exist. This is the case for normal inventory edits and, more
+    // importantly, repairs a product that was converted service → inventory and
+    // therefore never had stock rows created. Idempotent (onConflictDoNothing).
+    if (updated.productType !== 'service') {
+      await inventoryService.ensureProductStockRows(updated.id);
+    }
 
     saveDatabase();
     alertBus.emit('alerts.changed', 'product.updated');
@@ -562,7 +587,8 @@ export class ProductService {
       })
       .from(products)
       .leftJoin(productStock, eq(productStock.productId, products.id))
-      .where(eq(products.isActive, true))
+      // Service products are never stocked — keep them out of low-stock alerts.
+      .where(and(eq(products.isActive, true), ne(products.productType, 'service')))
       .groupBy(products.id);
 
     return rows

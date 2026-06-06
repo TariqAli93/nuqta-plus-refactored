@@ -12,6 +12,40 @@
       <v-card-text>
         <v-form ref="form" @submit.prevent="handleSubmit">
           <v-row>
+            <!-- ─── Product type (inventory vs service) ─────────────────── -->
+            <v-col cols="12">
+              <div class="text-subtitle-2 mb-2">نوع المنتج</div>
+              <v-btn-toggle
+                v-model="formData.productType"
+                mandatory
+                divided
+                color="primary"
+                density="comfortable"
+              >
+                <v-btn value="inventory" prepend-icon="mdi-package-variant">منتج مخزني</v-btn>
+                <v-btn value="service" prepend-icon="mdi-room-service-outline">خدمة</v-btn>
+              </v-btn-toggle>
+              <v-alert
+                v-if="isService"
+                type="info"
+                variant="tonal"
+                density="comfortable"
+                class="mt-3 mb-0"
+              >
+                الخدمة لا تتطلب كمية ولا تؤثر على المخزون. يكفي إدخال الاسم وسعر البيع.
+              </v-alert>
+              <v-alert
+                v-if="isEdit && originalProductType === 'inventory' && isService"
+                type="warning"
+                variant="tonal"
+                density="comfortable"
+                class="mt-3 mb-0"
+              >
+                تنبيه: بعد تحويل هذا المنتج إلى خدمة، لن يُستخدم المخزون الحالي ولن يُخصم أي كمية عند
+                البيع.
+              </v-alert>
+            </v-col>
+
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="formData.name"
@@ -98,8 +132,10 @@
                 v-if="!isEdit || isAdmin || costPriceUnlocked"
                 :model-value="formatNumber(formData.costPrice)"
                 :suffix="formData.currency"
-                label="سعر التكلفة"
-                :rules="[rules.required]"
+                :label="isService ? 'تكلفة الخدمة (اختياري)' : 'سعر التكلفة'"
+                :rules="isService ? [] : [rules.required]"
+                :hint="isService ? 'اتركه فارغاً إن لم يكن للخدمة تكلفة — يُحسب الربح حينها من سعر البيع' : ''"
+                :persistent-hint="isService"
                 @update:model-value="handleCostPriceInput"
               ></v-text-field>
               <v-text-field
@@ -142,7 +178,7 @@
                 placeholder="piece"
               ></v-text-field>
             </v-col>
-            <v-col cols="12" md="3">
+            <v-col v-if="!isService" cols="12" md="3">
               <v-text-field
                 v-model.number="formData.minStock"
                 label="الحد الأدنى للمخزون"
@@ -151,7 +187,7 @@
                 persistent-hint
               ></v-text-field>
             </v-col>
-            <v-col cols="12" md="3">
+            <v-col v-if="!isService" cols="12" md="3">
               <v-text-field
                 v-model.number="formData.lowStockThreshold"
                 label="عتبة التنبيه (منخفض المخزون)"
@@ -178,7 +214,7 @@
                 :label="formData.isActive ? 'نشط' : 'غير نشط'"
               ></v-switch>
             </v-col>
-            <v-col cols="12" md="6">
+            <v-col v-if="!isService" cols="12" md="6">
               <v-switch
                 v-model="formData.tracksExpiry"
                 color="primary"
@@ -192,8 +228,8 @@
               <v-textarea v-model="formData.description" label="الوصف" rows="3"></v-textarea>
             </v-col>
 
-            <!-- ─── Product units ───────────────────────────────────────── -->
-            <v-col cols="12">
+            <!-- ─── Product units (inventory only — services have no units) ─ -->
+            <v-col v-if="!isService" cols="12">
               <v-expansion-panels class="mb-4">
                 <v-expansion-panel value="units">
                   <v-expansion-panel-title>
@@ -373,7 +409,7 @@
                 </v-expansion-panel>
               </v-expansion-panels>
             </v-col>
-            <v-col v-if="!isEdit" cols="12">
+            <v-col v-if="!isEdit && !isService" cols="12">
               <v-alert type="info" variant="tonal" density="comfortable" class="mb-0">
                 <div class="font-weight-medium">
                   لإدخال كمية افتتاحية، استخدم صفحة إدارة المخزون بعد إنشاء المنتج.
@@ -518,6 +554,9 @@ const formData = ref({
   barcode: '',
   categoryId: null,
   description: '',
+  // 'inventory' = stocked good (default, legacy behaviour); 'service' = a
+  // non-stocked offering (e.g. تصليح شاشة) with no quantity and no stock impact.
+  productType: 'inventory',
   costPrice: settingsStore.settings?.defaultCostPrice || 0,
   sellingPrice: settingsStore.settings?.defaultSellingPrice || 0,
   currency: settingsStore.settings?.defaultCurrency || 'IQD',
@@ -528,6 +567,13 @@ const formData = ref({
   status: settingsStore.settings?.defaultStatus || 'available',
   tracksExpiry: false,
 });
+
+// True when the user is creating/editing a service. Drives which stock-related
+// fields are shown and whether quantity/stock validation applies.
+const isService = computed(() => formData.value.productType === 'service');
+// The product's type when the edit form first loaded — used to warn the user
+// that converting inventory → service abandons the existing stock.
+const originalProductType = ref('inventory');
 
 // ── Product units (base + extras) ────────────────────────────────────────
 // `baseUnit` is the unit stock is stored in (e.g. قطعة). `extraUnits` are
@@ -793,7 +839,8 @@ const handleSubmit = async () => {
       // The store returns the raw axios response; the product payload is at
       // `response.data` (or `response` itself when an interceptor unwraps it).
       const newProduct = response?.data?.data || response?.data || response;
-      if (canAdjustInventory.value && newProduct?.id) {
+      // Services are never stocked — skip the opening-stock prompt for them.
+      if (!isService.value && canAdjustInventory.value && newProduct?.id) {
         createdProduct.value = newProduct;
         openingStockDialog.value = true;
       } else {
@@ -1050,7 +1097,11 @@ onMounted(async () => {
         // Defaults for newly added metadata fields if absent on legacy products.
         unit: metadataOnly.unit || formData.value.unit,
         isActive: metadataOnly.isActive !== false,
+        // Legacy products predate the type column — treat them as inventory.
+        productType: metadataOnly.productType || 'inventory',
       };
+      // Remember the loaded type so we can warn on an inventory → service switch.
+      originalProductType.value = formData.value.productType;
 
       // Hydrate the units section from the loaded product. Legacy products
       // come back with no units; we leave the default base unit in place.

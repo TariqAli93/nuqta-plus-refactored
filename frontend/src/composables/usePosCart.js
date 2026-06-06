@@ -104,8 +104,12 @@ export function usePosCart() {
    */
   const addItem = (product, qty = 1, unitOverride = null) => {
     if (!product?.id) return;
+    // Service products are never stocked: skip the availability gate, and use
+    // 0 for the per-unit cap which (by the existing convention below) means
+    // "no cap" — quantity can grow freely (e.g. تصليح شاشتين).
+    const isService = product.productType === 'service';
     const baseAvailable = resolveStock(product);
-    if (baseAvailable <= 0) {
+    if (!isService && baseAvailable <= 0) {
       notify.warning(`"${product.name}" غير متوفر`);
       return;
     }
@@ -113,7 +117,7 @@ export function usePosCart() {
     const units = resolveUnits(product);
     const selectedUnit = unitOverride || pickDefaultUnit(units);
     const factor = getUnitConversionFactor(selectedUnit);
-    const unitAvailable = getUnitAvailableStock(baseAvailable, selectedUnit);
+    const unitAvailable = isService ? 0 : getUnitAvailableStock(baseAvailable, selectedUnit);
 
     const existing = items.find(
       (i) => i.productId === product.id && (i.unitId || null) === (selectedUnit?.id || null)

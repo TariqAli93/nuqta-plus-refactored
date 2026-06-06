@@ -55,6 +55,9 @@ export class WarehouseTransferService {
 
     const db = await getDb();
 
+    // Services have no stock — they can never be transferred between warehouses.
+    await InventoryService.assertProductIsInventory(db, productId);
+
     // Transfer inherits the source branch — that's the branch whose admin will approve.
     const branchId = fromWh.branchId;
 

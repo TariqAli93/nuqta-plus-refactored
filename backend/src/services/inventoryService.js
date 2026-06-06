@@ -12,7 +12,7 @@ import {
 } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, ne, desc, sql, inArray } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
 import { resolveUnitSnapshot } from './productUnitService.js';
 
@@ -38,6 +38,21 @@ async function withTransaction(callback) {
   } finally {
     client.release();
   }
+}
+
+/**
+ * Resolve which of the given sale items reference a SERVICE product. Service
+ * products are never stock-checked, deducted, or restocked, so every stock
+ * path (validate, deduct, restore) skips them. Returns a Set of productIds.
+ */
+async function fetchServiceProductIds(tx, items) {
+  const ids = [...new Set((items || []).map((i) => i.productId).filter(Boolean))];
+  if (ids.length === 0) return new Set();
+  const rows = await tx
+    .select({ id: products.id })
+    .from(products)
+    .where(and(inArray(products.id, ids), eq(products.productType, 'service')));
+  return new Set(rows.map((r) => r.id));
 }
 
 /**
@@ -193,7 +208,9 @@ export class InventoryService {
         productStock,
         and(eq(productStock.productId, products.id), eq(productStock.warehouseId, warehouseId))
       )
-      .where(eq(products.isActive, true));
+      // Service products are not stocked — exclude them from inventory/stock
+      // reports so they never appear as if they were goods on hand.
+      .where(and(eq(products.isActive, true), ne(products.productType, 'service')));
 
     const threshold = (r) =>
       r.lowStockThreshold != null && r.lowStockThreshold > 0 ? r.lowStockThreshold : r.minStock || 0;
@@ -248,6 +265,26 @@ export class InventoryService {
   }
 
   /**
+   * Guard: stock operations (manual adjustment, opening balance, transfers)
+   * apply ONLY to inventory products. Services have no stock, so any attempt to
+   * adjust/transfer one is rejected here — the UI pickers already hide services
+   * (they read from the warehouse-stock list), this is the API-level backstop.
+   * `executor` is a transaction or the db handle.
+   */
+  static async assertProductIsInventory(executor, productId) {
+    const [row] = await executor
+      .select({ productType: products.productType })
+      .from(products)
+      .where(eq(products.id, productId))
+      .limit(1);
+    if (row?.productType === 'service') {
+      const err = new ValidationError('لا يمكن تنفيذ عمليات مخزون على منتج من نوع خدمة');
+      err.code = 'STOCK_OP_NOT_ALLOWED_ON_SERVICE';
+      throw err;
+    }
+  }
+
+  /**
    * Manual adjustment — increases or decreases stock for (productId, warehouseId).
    * @param {{productId, warehouseId, quantityChange, reason, allowNegative?, userId?}} input
    */
@@ -290,6 +327,8 @@ export class InventoryService {
     }
 
     const result = await withTransaction(async (tx) => {
+      // Services have no stock — reject any adjustment against one.
+      await InventoryService.assertProductIsInventory(tx, productId);
       // Resolve unit (defaults to base when unitId is null) so the user can
       // type "5 كارتون" in the UI and we still write the correct base count.
       const unit = await resolveUnitSnapshot(tx, productId, unitId);
@@ -365,6 +404,8 @@ export class InventoryService {
     }
 
     return withTransaction(async (tx) => {
+      // Services have no stock — reject any transfer against one.
+      await InventoryService.assertProductIsInventory(tx, productId);
       const unit = await resolveUnitSnapshot(tx, productId, unitId);
       const baseQuantity = Math.round(quantity * unit.conversionFactor);
       if (!Number.isInteger(baseQuantity) || baseQuantity <= 0) {
@@ -477,10 +518,15 @@ export class InventoryService {
           name: products.name,
           isActive: products.isActive,
           status: products.status,
+          productType: products.productType,
         })
         .from(products)
         .where(eq(products.id, productId))
         .limit(1);
+
+      // Service products carry no stock — they are never validated against a
+      // per-warehouse quantity (and have no product_stock row to check).
+      if (product?.productType === 'service') continue;
 
       const base = {
         productId,
@@ -550,8 +596,13 @@ export class InventoryService {
     // "no sellable quantity" message.
     await InventoryService.validateSaleStock(tx, { warehouseId, items });
 
+    // Service lines have no stock — skip FIFO deduction and the stock movement
+    // entirely for them. The sale_item row is still recorded by saleService.
+    const serviceIds = await fetchServiceProductIds(tx, items);
+
     for (const item of items) {
       if (!item.productId) continue;
+      if (serviceIds.has(item.productId)) continue;
       let need = Number(item.quantity) || 0;
       const today = new Date().toISOString().slice(0, 10);
       let entries = await tx
@@ -717,8 +768,12 @@ export class InventoryService {
     { saleId, warehouseId, items, userId, movementType = 'sale_cancel' }
   ) {
     if (!warehouseId) return; // Legacy sales without a warehouse — skip silently
+    // Service lines were never deducted, so there is nothing to restore —
+    // skip them to avoid materializing phantom stock on cancel/return.
+    const serviceIds = await fetchServiceProductIds(tx, items);
     for (const item of items) {
       if (!item.productId) continue;
+      if (serviceIds.has(item.productId)) continue;
       await applyStockChangeTx(tx, {
         productId: item.productId,
         warehouseId,

@@ -1,4 +1,4 @@
-import inventoryService from '../services/inventoryService.js';
+import inventoryService, { InventoryService } from '../services/inventoryService.js';
 import warehouseTransferService from '../services/warehouseTransferService.js';
 import warehouseService from '../services/warehouseService.js';
 import { stockAdjustmentSchema, stockTransferSchema } from '../utils/validation.js';
@@ -39,6 +39,9 @@ export class InventoryController {
 
   async adjustStock(request, reply) {
     const validated = stockAdjustmentSchema.parse(request.body);
+    // Reject services up-front with the documented code, before any
+    // warehouse/scope checks — services carry no stock to adjust.
+    await InventoryService.assertProductIsInventory(await getDb(), validated.productId);
     await enforceWarehouseScope(request.user, validated.warehouseId);
     const data = await inventoryService.adjustStock({
       ...validated,
@@ -49,6 +52,10 @@ export class InventoryController {
 
   async transferStock(request, reply) {
     const validated = stockTransferSchema.parse(request.body);
+
+    // Reject services up-front with the documented code, before any
+    // warehouse-existence/approval routing — services are never transferable.
+    await InventoryService.assertProductIsInventory(await getDb(), validated.productId);
 
     // Global admins can transfer immediately (bypass approval). Anyone else
     // must go through the approval flow by creating a transfer request.

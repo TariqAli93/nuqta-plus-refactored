@@ -67,6 +67,22 @@
               @update:model-value="onStatusChange"
             ></v-select>
           </v-col>
+          <v-col cols="12" sm="6" md="4">
+            <v-select
+              v-model="productTypeFilter"
+              :items="productTypeOptions"
+              item-title="title"
+              item-value="value"
+              label="نوع المنتج"
+              placeholder="الكل"
+              clearable
+              density="comfortable"
+              variant="outlined"
+              hide-details
+              prepend-inner-icon="mdi-shape-plus-outline"
+              @update:model-value="onTypeChange"
+            ></v-select>
+          </v-col>
           <v-col cols="6" sm="3" md="2">
             <v-text-field
               v-model.number="minPrice"
@@ -194,8 +210,21 @@
             <template v-else>{{ seg.text }}</template>
           </template>
         </template>
+        <template #[`item.productType`]="{ item }">
+          <v-chip
+            :color="isServiceItem(item) ? 'purple' : 'blue-grey'"
+            size="small"
+            variant="tonal"
+            :prepend-icon="isServiceItem(item) ? 'mdi-room-service-outline' : 'mdi-package-variant'"
+          >
+            {{ isServiceItem(item) ? 'خدمة' : 'منتج' }}
+          </v-chip>
+        </template>
         <template #[`item.stock`]="{ item }">
-          <div class="flex items-center gap-1">
+          <span v-if="isServiceItem(item)" class="text-caption text-medium-emphasis">
+            لا ينطبق
+          </span>
+          <div v-else class="flex items-center gap-1">
             <v-chip
               :color="isLowStock(item) ? 'error' : 'success'"
               size="small"
@@ -311,6 +340,7 @@ const selectedProduct = ref(null);
 // search composable's filter state).
 const selectedCategory = ref(null);
 const statusFilter = ref(null);
+const productTypeFilter = ref(null);
 const minPrice = ref(null);
 const maxPrice = ref(null);
 
@@ -320,6 +350,14 @@ const statusOptions = [
   { title: 'متوقف', value: 'discontinued' },
 ];
 
+// Product-type filter: null = الكل (both kinds).
+const productTypeOptions = [
+  { title: 'منتجات مخزنية', value: 'inventory' },
+  { title: 'خدمات', value: 'service' },
+];
+const productTypeLabel = (v) =>
+  v === 'service' ? 'خدمات' : v === 'inventory' ? 'منتجات مخزنية' : '';
+
 const currentWarehouseId = () => inventoryStore.selectedWarehouseId || undefined;
 
 // Centralized debounced/cancelable/cached search. `warehouseId` is injected per
@@ -328,7 +366,7 @@ const currentWarehouseId = () => inventoryStore.selectedWarehouseId || undefined
 const { query, isSearching, error, onQueryChange, runNow, clear, setFilters, clearFilters, setPage, setPageSize, refresh } =
   useServerSearch({
     limit: productStore.pagination.limit,
-    initialFilters: { categoryId: null, status: null, minPrice: null, maxPrice: null },
+    initialFilters: { categoryId: null, status: null, productType: null, minPrice: null, maxPrice: null },
     load: (params, opts) =>
       productStore.fetch({ ...params, warehouseId: currentWarehouseId() }, { ...opts, silent: true }),
     apply: (res) => {
@@ -357,6 +395,9 @@ const filterChips = computed(() => {
   if (statusFilter.value) {
     chips.push({ key: 'status', label: `الحالة: ${getStatusText(statusFilter.value)}` });
   }
+  if (productTypeFilter.value) {
+    chips.push({ key: 'productType', label: `النوع: ${productTypeLabel(productTypeFilter.value)}` });
+  }
   if (minPrice.value) chips.push({ key: 'minPrice', label: `السعر من: ${minPrice.value}` });
   if (maxPrice.value) chips.push({ key: 'maxPrice', label: `السعر إلى: ${maxPrice.value}` });
   return chips;
@@ -366,12 +407,14 @@ const highlightOf = (value) => highlightSegments(value, query.value);
 
 const onCategoryChange = () => setFilters({ categoryId: selectedCategory.value || null });
 const onStatusChange = () => setFilters({ status: statusFilter.value || null });
+const onTypeChange = () => setFilters({ productType: productTypeFilter.value || null });
 const onPriceChange = () =>
   setFilters({ minPrice: minPrice.value || null, maxPrice: maxPrice.value || null });
 
 const onRemoveFilter = (key) => {
   if (key === 'categoryId') selectedCategory.value = null;
   if (key === 'status') statusFilter.value = null;
+  if (key === 'productType') productTypeFilter.value = null;
   if (key === 'minPrice') minPrice.value = null;
   if (key === 'maxPrice') maxPrice.value = null;
   setFilters({ [key]: null });
@@ -380,6 +423,7 @@ const onRemoveFilter = (key) => {
 const onClearFilters = () => {
   selectedCategory.value = null;
   statusFilter.value = null;
+  productTypeFilter.value = null;
   minPrice.value = null;
   maxPrice.value = null;
   clearFilters();
@@ -392,6 +436,7 @@ const dismissError = () => {
 const headers = [
   { title: 'الاسم', key: 'name' },
   { title: 'رمز المنتج', key: 'sku' },
+  { title: 'النوع', key: 'productType', sortable: false },
   { title: 'التصنيف', key: 'category' },
   { title: 'سعر البيع', key: 'sellingPrice' },
   { title: 'المخزون', key: 'stock' },
@@ -421,6 +466,8 @@ const getStatusText = (status) => {
   return texts[status] || status;
 };
 
+const isServiceItem = (item) => item?.productType === 'service';
+
 const resolvedStock = (item) => {
   if (inventoryStore.selectedWarehouseId && item.warehouseStock != null) {
     return item.warehouseStock;
@@ -429,6 +476,8 @@ const resolvedStock = (item) => {
 };
 
 const isLowStock = (item) => {
+  // Services carry no stock, so they are never "low".
+  if (isServiceItem(item)) return false;
   const qty = resolvedStock(item);
   const threshold =
     item.lowStockThreshold && item.lowStockThreshold > 0

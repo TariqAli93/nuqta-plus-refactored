@@ -31,6 +31,7 @@ export default async function productRoutes(fastify) {
           categoryId: { type: 'integer' },
           warehouseId: { type: 'integer' },
           status: { type: 'string' },
+          productType: { type: 'string', enum: ['inventory', 'service'] },
           unit: { type: 'string' },
           minPrice: { type: 'number', minimum: 0 },
           maxPrice: { type: 'number', minimum: 0 },

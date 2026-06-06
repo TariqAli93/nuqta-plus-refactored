@@ -78,6 +78,12 @@ export const products = pgTable('products', {
   costPrice: numeric('cost_price', { precision: 18, scale: 4 }).notNull(),
   sellingPrice: numeric('selling_price', { precision: 18, scale: 4 }).notNull(),
   currency: text('currency').notNull().default('USD'),
+  // Product kind: 'inventory' (stocked goods — the default and legacy
+  // behaviour) or 'service' (e.g. "تصليح شاشة"). Service products are never
+  // stock-checked or deducted on a sale and are excluded from inventory
+  // reports. Defaults to 'inventory' so every pre-existing product keeps its
+  // current behaviour.
+  productType: text('product_type').notNull().default('inventory'),
   stock: integer('stock').default(0),
   minStock: integer('min_stock').default(0),
   unit: text('unit').default('piece'),

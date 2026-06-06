@@ -101,11 +101,18 @@ export const productSchema = z.object({
   barcode: z.string().optional(),
   categoryId: z.number().int().positive().optional(),
   description: z.string().optional(),
-  costPrice: z.coerce.number().positive('Cost price must be positive'),
+  // Cost price is optional at the schema level so SERVICE products (which have
+  // no purchase cost) can be created without one. Inventory products still
+  // require a positive cost — enforced by `productCreateSchema` below.
+  costPrice: z.coerce.number().nonnegative('Cost price must be zero or more').optional(),
   sellingPrice: z.coerce.number().positive('Selling price must be positive'),
   currency: z.enum(['USD', 'IQD'], {
     errorMap: () => ({ message: 'Currency must be USD or IQD' }),
   }),
+  // Product kind. 'inventory' (default) is a stocked good with the existing
+  // quantity/stock behaviour; 'service' is a non-stocked offering (e.g.
+  // "تصليح شاشة") that is never stock-checked or deducted on a sale.
+  productType: z.enum(['inventory', 'service']).optional(),
   // minStock / lowStockThreshold are alert thresholds, not stock balances —
   // they describe the product, so they stay on the product form.
   minStock: z.number().int().nonnegative().optional(),
@@ -120,6 +127,21 @@ export const productSchema = z.object({
   // none is flagged, the entry with `conversionFactor === 1`) becomes the
   // base unit. Sending an empty array clears all non-base units.
   units: z.array(productUnitInputSchema).optional(),
+});
+
+// Create-time schema: keeps the original guarantee that an INVENTORY product
+// always carries a positive cost price, while letting a SERVICE product omit
+// it (defaults to 0 in the service layer). Update stays lenient via
+// `productSchema.partial()` so partial edits never trip this rule.
+export const productCreateSchema = productSchema.superRefine((data, ctx) => {
+  const type = data.productType || 'inventory';
+  if (type === 'inventory' && (data.costPrice == null || data.costPrice <= 0)) {
+    ctx.addIssue({
+      path: ['costPrice'],
+      code: z.ZodIssueCode.custom,
+      message: 'Cost price must be positive',
+    });
+  }
 });
 
 // Quantity-like keys that must never be accepted on product create/update.

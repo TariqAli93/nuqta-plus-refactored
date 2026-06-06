@@ -1,5 +1,5 @@
 import { ProductService } from '../services/productService.js';
-import { productSchema, PRODUCT_FORBIDDEN_STOCK_KEYS } from '../utils/validation.js';
+import { productSchema, productCreateSchema, PRODUCT_FORBIDDEN_STOCK_KEYS } from '../utils/validation.js';
 import { ValidationError } from '../utils/errors.js';
 
 const productService = new ProductService();
@@ -23,7 +23,7 @@ function rejectStockKeys(body) {
 export class ProductController {
   async create(request, reply) {
     rejectStockKeys(request.body);
-    const validatedData = productSchema.parse(request.body);
+    const validatedData = productCreateSchema.parse(request.body);
     const product = await productService.create(validatedData, request.user.id);
     return reply.code(201).send({
       success: true,
