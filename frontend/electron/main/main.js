@@ -903,8 +903,9 @@ ipcMain.handle('license:getMachineId', () => {
   try {
     return { success: true, machineId: getMachineId() };
   } catch (err) {
+    // FINGERPRINT_UNAVAILABLE — informational display only, fail soft.
     logger.error('Failed to get machine ID:', err);
-    return { success: false, machineId: null };
+    return { success: false, machineId: null, code: err.code || null };
   }
 });
 
@@ -912,10 +913,12 @@ ipcMain.handle('license:getMachineId', () => {
 ipcMain.handle('license:status', () => {
   try {
     const result = checkStored();
-    const machineId = getMachineId();
+    let machineId = null;
+    try { machineId = getMachineId(); } catch { /* fingerprint unavailable */ }
     return {
       success: true,
       valid: result.valid,
+      code: result.code || null,
       error: result.error || null,
       license: result.valid ? result.license : null,
       machineId,
@@ -934,12 +937,24 @@ app.whenReady().then(async () => {
   try {
     const result = checkStored();
     licenseValid = result.valid;
-    if (!result.valid) {
-      logger.warn(`License check failed: ${result.error}`);
+    const d = result.diag || {};
+    if (result.valid) {
+      logger.info(`License valid (matched via ${d.matchedVia}); bound=${d.boundPrefix}… storage=${d.storageDir}`);
     } else {
-      logger.info('License is valid, starting app normally');
+      // The stored lock is NEVER modified here — a mismatch/corrupt/unreadable
+      // fingerprint just routes to the activation window with the existing file
+      // left intact, so nothing is silently re-bound.
+      logger.warn(
+        `License check failed [${result.code}]: ${result.error} | ` +
+        `lockExists=${d.lockExists} bound=${d.boundPrefix ?? '—'} ` +
+        `current=${d.currentPrefix ?? '—'} source=${d.canonicalSource ?? '—'}`
+      );
+      if (result.code === 'FINGERPRINT_UNAVAILABLE' || result.code === 'STORAGE_CORRUPT' || result.code === 'STORAGE_TAMPERED') {
+        logger.warn('License lock left untouched (recoverable error — no re-bind).');
+      }
     }
   } catch (err) {
+    // Defensive: checkStored is designed not to throw, but never crash startup.
     logger.error(`License check threw: ${err.message}`);
     licenseValid = false;
   }

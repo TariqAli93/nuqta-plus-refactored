@@ -28,6 +28,7 @@ import {
   HEALTH_FETCH_TIMEOUT_MS,
   PORT_PROBE_TIMEOUT_MS,
 } from '../../../packages/shared/index.js';
+import { queryServiceState } from './serviceController.js';
 
 // Electron always probes 127.0.0.1 (the loopback interface) regardless of
 // which interface the backend binds to (0.0.0.0 in production).
@@ -196,6 +197,81 @@ export async function verifyVersion(logger) {
   return { ok: true, version };
 }
 
+// ─── Service-mode version reconciliation ────────────────────────────────────
+
+/**
+ * Recovery path when, in SERVICE mode, the backend answering on the port
+ * reports a version different from EXPECTED_BACKEND_VERSION.
+ *
+ * Two distinct causes, two distinct outcomes:
+ *
+ *   - Service RUNNING → it is serving a stale build. The typical trigger is an
+ *     update that swapped the files on disk while the old node.exe stayed alive
+ *     in memory. Restart the service ONCE to load the new files, then re-verify.
+ *
+ *   - Service STOPPED / not-installed but something still answers → a FOREIGN
+ *     or orphan process (e.g. a leftover `node src/server.js` dev backend) is
+ *     squatting the port. Electron must never kill arbitrary processes, so we
+ *     return an actionable error. The installer frees the port at install time
+ *     (NuqtaFreeBackendPort); at runtime the operator must stop it or reboot.
+ *
+ * @returns {{ status: 'ready'|'error', version: string|null, error?: string }}
+ */
+async function reconcileServiceVersion(backendManager, logger, reportedVersion) {
+  let state = 'unknown';
+  try {
+    state = await queryServiceState();
+  } catch (err) {
+    logger.warn(`queryServiceState failed during version reconcile: ${err.message}`);
+  }
+
+  if (state === 'running') {
+    logger.warn(
+      `NuqtaPlusBackend is running a stale backend (reports v${reportedVersion}, ` +
+        `expected v${EXPECTED_BACKEND_VERSION}) — restarting once to load updated files`
+    );
+    try {
+      await backendManager.StopBackend();
+      await backendManager.StartBackend();
+    } catch (err) {
+      logger.error(err, { phase: 'svc-stale-restart' });
+    }
+
+    if (await waitUntilHealthy(logger)) {
+      const re = await verifyVersion(logger);
+      if (re.ok) {
+        backendManager._serviceRunningCached = true;
+        logger.info(`Service recovered after restart — now on v${re.version}`);
+        return { status: 'ready', version: re.version };
+      }
+      return {
+        status: 'error',
+        version: re.version,
+        error:
+          `NuqtaPlusBackend still reports v${re.version} after a restart, but Electron ` +
+          `expects v${EXPECTED_BACKEND_VERSION}. The installed backend files are the wrong ` +
+          `version — reinstall or re-run the server update.`,
+      };
+    }
+    return {
+      status: 'error',
+      version: null,
+      error: 'NuqtaPlusBackend did not become healthy after a restart attempt.',
+    };
+  }
+
+  // Service is not the responder — a foreign/orphan process holds the port.
+  return {
+    status: 'error',
+    version: reportedVersion,
+    error:
+      `Port ${BACKEND_PORT} is held by a process that is NOT the NuqtaPlusBackend service ` +
+      `(service state: ${state}); it reports v${reportedVersion} but Electron expects ` +
+      `v${EXPECTED_BACKEND_VERSION}. A stale or foreign backend is squatting the port — ` +
+      `stop that process (or reboot) so the Windows service can take over, then relaunch.`,
+  };
+}
+
 // ─── Main entry point ───────────────────────────────────────────────────────
 
 /**
@@ -220,9 +296,18 @@ export async function ensureBackendRunning(backendManager, logger) {
   if (await checkHealth()) {
     logger.info('Backend already running — verifying ownership');
     const { ok, version, error } = await verifyVersion(logger);
-    if (!ok) return { status: 'error', version, error };
-    if (isServiceMode) backendManager._serviceRunningCached = true;
-    return { status: 'ready', version };
+    if (ok) {
+      if (isServiceMode) backendManager._serviceRunningCached = true;
+      return { status: 'ready', version };
+    }
+    // Version mismatch on an already-running backend. In service mode this is
+    // almost always either a stale service (files upgraded, old process still
+    // in memory) or a foreign/orphan process squatting the port. Reconcile
+    // instead of returning the bare warning.
+    if (isServiceMode) {
+      return await reconcileServiceVersion(backendManager, logger, version);
+    }
+    return { status: 'error', version, error };
   }
 
   // (b) Port occupied but /health failed → foreign process holding our port.

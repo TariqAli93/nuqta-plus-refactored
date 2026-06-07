@@ -100,6 +100,36 @@ function verifyPayload(payload, signature, publicKeyPem) {
   return verifier.verify(publicKeyPem, signature, 'base64');
 }
 
+// ── Machine-id comparison ─────────────────────────────────────────────────────
+
+/**
+ * Canonical form for comparing a machine id stored in a license against one
+ * computed locally. Tolerates casing, surrounding whitespace and stray
+ * newlines so a hand-copied or re-encoded id still compares equal.
+ */
+function canonicalizeMachineId(id) {
+  return String(id == null ? '' : id).trim().toLowerCase();
+}
+
+/**
+ * Resolve a machine-binding check. `binding` may be:
+ *   - a function(boundId) → boolean | { matched, via }  (real hardware matcher)
+ *   - a string                                           (direct, normalised)
+ *   - an array of strings                                (membership, normalised)
+ * @returns {{ matched: boolean, via: string|null }}
+ */
+function resolveMachineMatch(binding, boundId) {
+  if (typeof binding === 'function') {
+    const r = binding(boundId);
+    if (r && typeof r === 'object') return { matched: !!r.matched, via: r.via ?? null };
+    return { matched: !!r, via: r ? 'matcher' : null };
+  }
+  const bound = canonicalizeMachineId(boundId);
+  const list = Array.isArray(binding) ? binding : [binding];
+  const hit = list.some((c) => canonicalizeMachineId(c) === bound);
+  return { matched: hit, via: hit ? 'direct' : null };
+}
+
 export {
   isValidDate,
   formatDate,
@@ -111,4 +141,6 @@ export {
   signaturePayload,
   signPayload,
   verifyPayload,
+  canonicalizeMachineId,
+  resolveMachineMatch,
 };

@@ -134,6 +134,21 @@ onMounted(async () => {
   } catch {
     // silently ignore — machine ID display is informational only
   }
+
+  // If a license is already stored but currently invalid, explain why up-front.
+  // This never modifies the stored lock — it only reads status.
+  try {
+    const st = await window.licenseAPI.getStatus();
+    if (st && st.success && !st.valid && st.code && st.code !== 'NO_LICENSE') {
+      const recoverable =
+        st.code === 'FINGERPRINT_UNAVAILABLE' ||
+        st.code === 'STORAGE_CORRUPT' ||
+        st.code === 'STORAGE_TAMPERED';
+      status.value = { type: recoverable ? 'warning' : 'error', message: translateError(st.error) };
+    }
+  } catch {
+    // status is best-effort — never block the activation screen
+  }
 });
 
 async function copyMachineId() {
@@ -161,6 +176,11 @@ const ERROR_MAP = {
   'License has expired': 'انتهت صلاحية الترخيص.',
   'System clock appears to have been rolled back': 'يبدو أن ساعة النظام تم التلاعب بها.',
   'License storage integrity check failed': 'فشل التحقق من سلامة ملف الترخيص.',
+  'License storage integrity check failed — file may be tampered':
+    'فشل التحقق من سلامة ملف الترخيص — قد يكون الملف معدّلاً.',
+  'License storage is corrupted': 'ملف الترخيص تالف. يرجى إعادة التفعيل أو التواصل مع الدعم.',
+  "Could not read this machine's hardware fingerprint":
+    'تعذّر قراءة بصمة الجهاز مؤقتاً. أعد المحاولة، وإذا استمرّت المشكلة تواصل مع الدعم.',
   'No license stored': 'لا يوجد ترخيص محفوظ.',
 };
 

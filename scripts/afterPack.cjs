@@ -70,6 +70,8 @@ const REQUIRED_AFTER_COPY = [
   'service/stop-service.cmd',
   'service/restart-service.cmd',
   'service/status-service.cmd',
+  'service/verify-version.ps1',
+  'service/free-port.ps1',
 ];
 
 exports.default = async function afterPack(context) {

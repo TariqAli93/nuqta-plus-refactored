@@ -6,10 +6,10 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { parseLicenseInput, verifyLicense } from './verify-license.js';
-import { getMachineId } from './machine-id.js';
+import { getMachineId, matchMachineId, getMachineDiagnostics } from './machine-id.js';
 import {
   storeLicense, loadLicense, removeLicense,
-  getLastRun, updateLastRun,
+  getLastRun, updateLastRun, getStorageInfo,
 } from './license-storage.js';
 
 // const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,11 +60,12 @@ function printResult(result) {
  */
 function activate(input) {
   const publicKey = loadPublicKey();
-  const machineId = getMachineId();
   const lastRun = getLastRun();
 
   const license = parseLicenseInput(input);
-  const result = verifyLicense(license, publicKey, machineId, lastRun);
+  // Bind check via the hardware matcher so a legacy (v1) license still activates
+  // on the machine it belongs to, without forcing a re-issue.
+  const result = verifyLicense(license, publicKey, matchMachineId, lastRun);
 
   if (result.valid) {
     storeLicense(license);
@@ -74,21 +75,83 @@ function activate(input) {
   return result;
 }
 
+const prefix = (s) => (s ? String(s).slice(0, 12) : null);
+
 /**
  * Check the currently stored license without re-activating.
+ *
+ * Never throws and never rewrites/removes the lock. Returns a structured result
+ * with a machine-readable `code` and safe `diag` (prefixes & flags only) so the
+ * caller can distinguish a real machine mismatch from an unreadable fingerprint
+ * or a corrupt store — and react without silently re-binding.
  */
 function checkStored() {
-  const license = loadLicense();  // throws on tamper
-  if (!license) return { valid: false, error: 'No license stored' };
+  const storage = getStorageInfo();
+
+  // 1. Load the stored license. A corrupt/tampered store is a RECOVERABLE error,
+  //    not "unlicensed" — surface it clearly and leave the file untouched.
+  let license;
+  try {
+    license = loadLicense();
+  } catch (err) {
+    return {
+      valid: false,
+      code: err.code || 'STORAGE_CORRUPT',
+      error: err.message,
+      diag: { storageDir: storage.storageDir, lockExists: storage.exists, lockReadable: false },
+    };
+  }
+
+  if (!license) {
+    return {
+      valid: false,
+      code: 'NO_LICENSE',
+      error: 'No license stored',
+      diag: { storageDir: storage.storageDir, lockExists: false, lockReadable: false },
+    };
+  }
 
   const publicKey = loadPublicKey();
-  const machineId = getMachineId();
   const lastRun = getLastRun();
+  const result = verifyLicense(license, publicKey, matchMachineId, lastRun);
 
-  const result = verifyLicense(license, publicKey, machineId, lastRun);
-  if (result.valid) updateLastRun();
+  if (result.valid) {
+    updateLastRun();
+    return {
+      ...result,
+      code: 'OK',
+      diag: {
+        storageDir: storage.storageDir,
+        lockExists: true,
+        lockReadable: true,
+        matchedVia: result.via,
+        boundPrefix: prefix(license.machineId),
+      },
+    };
+  }
 
-  return result;
+  // Invalid. For a machine mismatch, add fingerprint diagnostics and, if NO
+  // hardware anchor could be read at all, report that distinctly (a transient,
+  // recoverable condition — not a real "different machine").
+  const diag = {
+    storageDir: storage.storageDir,
+    lockExists: true,
+    lockReadable: true,
+    boundPrefix: prefix(license.machineId),
+  };
+
+  if (result.code === 'MACHINE_MISMATCH') {
+    const md = getMachineDiagnostics();
+    diag.canonicalSource = md.canonicalSource;
+    diag.currentPrefix = md.canonicalPrefix;
+    diag.sources = md.sources;
+    if (!md.available) {
+      return { valid: false, code: 'FINGERPRINT_UNAVAILABLE',
+        error: 'Could not read this machine\'s hardware fingerprint', diag };
+    }
+  }
+
+  return { ...result, diag };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────

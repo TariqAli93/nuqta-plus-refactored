@@ -1,171 +1,348 @@
 'use strict';
 
 import os from 'node:os';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+/*
+ * Machine fingerprinting for license binding.
+ *
+ * v2 (current): the canonical machine id is the SHA-256 of a SINGLE stable
+ * hardware/OS anchor:
+ *   - Windows : SMBIOS UUID (Win32_ComputerSystemProduct, via CIM) — motherboard
+ *               bound, so it resists disk-image cloning and survives an OS
+ *               reinstall; MachineGuid (registry, via reg.exe) is the fallback
+ *               for VMs / boards that report no usable SMBIOS UUID.
+ *   - macOS   : IOPlatformUUID
+ *   - Linux   : /etc/machine-id
+ * Unstable inputs (network MAC / adapter order, "first" disk serial) are NO
+ * LONGER part of the canonical id — they were the cause of intermittent
+ * "License is bound to a different machine" errors, especially on Windows 11
+ * 24H2+ where `wmic` is removed and every lookup silently fell back to a slow
+ * PowerShell call that could time out and flip the whole hash.
+ *
+ * v1 (legacy): the previous algorithm hashed CPU + MAC + disk-serial + SMBIOS
+ * UUID together. Already-issued licenses are bound to that hash, so we can still
+ * REPRODUCE it (see getLegacyCandidateIds) and accept it during verification —
+ * existing licenses keep working without any forced re-binding.
+ */
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const HASH_NS_V2 = 'nuqtaplus:machine:v2';
+
+// Absolute, non-PATH-hijackable paths to the Windows tools we shell out to.
+const WIN_DIR = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+const SYS32 = path.join(WIN_DIR, 'System32');
+const REG_EXE = path.join(SYS32, 'reg.exe');
+const PS_EXE = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+
+// SMBIOS UUIDs that some firmware reports instead of a real one.
+const BAD_UUIDS = new Set([
+  '00000000-0000-0000-0000-000000000000',
+  'ffffffff-ffff-ffff-ffff-ffffffffffff',
+  '03000200-0400-0500-0006-000700080009',
+]);
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function tryExec(cmd) {
+function sha256hex(s) {
+  return crypto.createHash('sha256').update(s).digest('hex');
+}
+
+/** Canonical form for any identifier compared as a string: trim + lowercase. */
+function canon(s) {
+  return String(s == null ? '' : s).trim().toLowerCase();
+}
+
+function v2Hash(kind, value) {
+  return sha256hex(`${HASH_NS_V2}|${kind}|${canon(value)}`);
+}
+
+function isUsableUuid(uuid) {
+  const c = canon(uuid);
+  if (!c) return false;
+  if (BAD_UUIDS.has(c)) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c);
+}
+
+function tryExecFile(file, args, timeout = 8000) {
   try {
-    return execSync(cmd, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return execFileSync(file, args, {
+      encoding: 'utf8',
+      timeout,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
   } catch {
     return '';
   }
 }
 
-function extractValue(output, key) {
-  // Handles "Key=Value" (wmic /VALUE) and "Key : Value" (systeminfo) formats
-  for (const line of output.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.toLowerCase().startsWith(key.toLowerCase())) {
-      const sep = trimmed.indexOf('=');
-      if (sep !== -1) return trimmed.slice(sep + 1).trim();
-      const col = trimmed.indexOf(':');
-      if (col !== -1) return trimmed.slice(col + 1).trim();
-    }
+// ── Stable anchor readers ─────────────────────────────────────────────────────
+
+/** Windows: HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid (stable per OS install). */
+function readMachineGuid() {
+  if (os.platform() !== 'win32') return '';
+  const out = tryExecFile(REG_EXE, [
+    'query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid', '/reg:64',
+  ], 4000);
+  const m = out.match(/MachineGuid\s+REG_\w+\s+([0-9a-fA-F-]{32,40})/i);
+  return m ? m[1].trim() : '';
+}
+
+let _wmiCache; // { uuid, cpu, disk } — one PowerShell round-trip, memoised per process.
+
+/**
+ * Windows: fetch SMBIOS UUID + ProcessorId + first disk serial in a SINGLE
+ * PowerShell/CIM call (wmic is removed on 24H2+). Memoised so we never spawn
+ * PowerShell more than once per process. Retried once if the UUID (our primary
+ * binding anchor) comes back unusable, so a transient WMI hiccup at boot does
+ * not silently change the fingerprint.
+ */
+function readWmiBundle() {
+  if (_wmiCache) return _wmiCache;
+  if (os.platform() !== 'win32') {
+    _wmiCache = { uuid: '', cpu: '', disk: '' };
+    return _wmiCache;
   }
+  const script =
+    "$u=(Get-CimInstance Win32_ComputerSystemProduct).UUID;" +
+    "$c=(Get-CimInstance Win32_Processor | Select-Object -First 1).ProcessorId;" +
+    "$d=(Get-CimInstance Win32_DiskDrive | Select-Object -First 1).SerialNumber;" +
+    "Write-Output \"UUID=$u\"; Write-Output \"CPU=$c\"; Write-Output \"DISK=$d\"";
+  let result = { uuid: '', cpu: '', disk: '' };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const out = tryExecFile(PS_EXE, ['-NoProfile', '-NonInteractive', '-Command', script], 7000);
+    const pick = (key) => {
+      const m = out.match(new RegExp(`^${key}=(.*)$`, 'm'));
+      return m ? m[1].trim() : '';
+    };
+    result = { uuid: pick('UUID'), cpu: pick('CPU'), disk: pick('DISK') };
+    if (isUsableUuid(result.uuid)) break;
+  }
+  _wmiCache = result;
+  return _wmiCache;
+}
+
+function readDarwinPlatformUuid() {
+  if (os.platform() !== 'darwin') return '';
+  const out = tryExecFile('/usr/sbin/ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice']);
+  const m = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+  return m ? m[1].trim() : '';
+}
+
+function readLinuxMachineId() {
+  if (os.platform() === 'win32' || os.platform() === 'darwin') return '';
+  for (const p of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+    try {
+      const v = fs.readFileSync(p, 'utf8').trim();
+      if (v) return v;
+    } catch { /* next */ }
+  }
+  // DMI product UUID (often needs root, best-effort).
+  try {
+    const v = fs.readFileSync('/sys/class/dmi/id/product_uuid', 'utf8').trim();
+    if (v) return v;
+  } catch { /* ignore */ }
   return '';
 }
 
-// ── Component collectors ─────────────────────────────────────────────────────
-
-function getCpuId() {
-  const platform = os.platform();
-
-  if (platform === 'win32') {
-    const out = tryExec('wmic cpu get ProcessorId /VALUE');
-    const id = extractValue(out, 'ProcessorId');
-    if (id) return id;
-    // Fallback to PowerShell
-    const ps = tryExec('powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).ProcessorId"');
-    if (ps) return ps;
-  }
-
-  if (platform === 'linux') {
-    // Try /proc/cpuinfo "model name" + "cpu family" + "stepping"
-    const cpuinfo = tryExec('cat /proc/cpuinfo');
-    const model = extractValue(cpuinfo, 'model name');
-    const family = extractValue(cpuinfo, 'cpu family');
-    const stepping = extractValue(cpuinfo, 'stepping');
-    if (model) return `${model}:${family}:${stepping}`;
-  }
-
-  if (platform === 'darwin') {
-    const brand = tryExec('sysctl -n machdep.cpu.brand_string');
-    if (brand) return brand;
-  }
-
-  // Universal fallback: first CPU model from os.cpus()
-  const cpus = os.cpus();
-  return cpus.length ? cpus[0].model : 'unknown-cpu';
-}
-
-function getMacAddress() {
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name]) {
-      // Skip internal/loopback and all-zero MACs
-      if (iface.internal) continue;
-      if (iface.mac === '00:00:00:00:00:00') continue;
-      return iface.mac;
-    }
-  }
-  return 'no-mac';
-}
-
-function getDiskSerial() {
-  const platform = os.platform();
-
-  if (platform === 'win32') {
-    const out = tryExec('wmic diskdrive get SerialNumber /VALUE');
-    const serial = extractValue(out, 'SerialNumber');
-    if (serial) return serial;
-    const ps = tryExec('powershell -NoProfile -Command "(Get-CimInstance Win32_DiskDrive | Select-Object -First 1).SerialNumber"');
-    if (ps) return ps.trim();
-  }
-
-  if (platform === 'linux') {
-    // Try lsblk first
-    const lsblk = tryExec('lsblk --nodeps -no serial 2>/dev/null | head -1');
-    if (lsblk) return lsblk;
-    // Fallback: /dev/sda or /dev/vda
-    const udev = tryExec('udevadm info --query=property --name=/dev/sda 2>/dev/null | grep ID_SERIAL_SHORT');
-    if (udev) return udev.split('=')[1] || '';
-  }
-
-  if (platform === 'darwin') {
-    const out = tryExec('system_profiler SPStorageDataType 2>/dev/null');
-    // Look for "Volume UUID" or "Device Name" – both are stable enough
-    const uuid = extractValue(out, 'Volume UUID');
-    if (uuid) return uuid;
-  }
-
-  return 'no-disk-serial';
-}
-
-function getSystemUUID() {
-  const platform = os.platform();
-
-  if (platform === 'win32') {
-    const out = tryExec('wmic csproduct get UUID /VALUE');
-    const uuid = extractValue(out, 'UUID');
-    if (uuid && uuid !== 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF') return uuid;
-    const ps = tryExec('powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystemProduct).UUID"');
-    if (ps) return ps.trim();
-  }
-
-  if (platform === 'linux') {
-    // /etc/machine-id is always readable and stable
-    const mid = tryExec('cat /etc/machine-id 2>/dev/null');
-    if (mid) return mid;
-    // DMI product_uuid needs root but try anyway
-    const dmi = tryExec('cat /sys/class/dmi/id/product_uuid 2>/dev/null');
-    if (dmi) return dmi;
-  }
-
-  if (platform === 'darwin') {
-    const out = tryExec('ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null');
-    const match = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
-    if (match) return match[1];
-  }
-
-  return 'no-system-uuid';
-}
-
-// ── Public API ───────────────────────────────────────────────────────────────
+// ── Canonical (v2) machine id ─────────────────────────────────────────────────
 
 /**
- * Compute a stable, deterministic machine identifier.
- * Combines CPU, MAC, disk serial, and system UUID into a single SHA-256 hash.
+ * Anchor sources for this platform, in priority order. Each `read` is a lazy
+ * thunk so the canonical id can stop at the first (cheapest) available anchor
+ * without paying for the slower ones.
+ */
+function anchorReaders() {
+  const platform = os.platform();
+  if (platform === 'win32') {
+    return [
+      { kind: 'win-smbios', read: () => readWmiBundle().uuid, valid: isUsableUuid },       // motherboard UUID (clone-resistant)
+      { kind: 'win-machineguid', read: readMachineGuid, valid: (v) => !!v },               // registry fallback (VMs / no SMBIOS UUID)
+    ];
+  }
+  if (platform === 'darwin') {
+    return [{ kind: 'darwin-platform-uuid', read: readDarwinPlatformUuid, valid: (v) => !!v }];
+  }
+  return [{ kind: 'linux-machine-id', read: readLinuxMachineId, valid: (v) => !!v }];
+}
+
+/**
+ * All v2 ids this machine can legitimately present, in priority order.
+ * Each entry derives from a real, stable identifier the machine owns.
+ * NOTE: this evaluates every anchor (including slow ones) — use only on the
+ * verification fallback path, never on the hot startup path.
+ */
+function getV2Candidates() {
+  const out = [];
+  for (const a of anchorReaders()) {
+    const v = a.read();
+    if (a.valid(v)) out.push({ kind: a.kind, id: v2Hash(a.kind, v) });
+  }
+  return out;
+}
+
+/**
+ * The canonical machine id. Deterministic and stable across restarts, network
+ * changes, VPN/VM adapters and offline state. This is what is shown in the
+ * activation window and what new licenses should be bound to.
+ *
+ * Stops at the first available anchor (Windows SMBIOS UUID via CIM; the result
+ * is memoised so it is read at most once per process). Falls back to MachineGuid
+ * only when no usable SMBIOS UUID exists (e.g. some VMs).
+ *
+ * Throws { code: 'FINGERPRINT_UNAVAILABLE' } only if NO stable anchor can be
+ * read at all — callers must treat that as a recoverable error and must NOT
+ * re-bind or discard an existing license.
  */
 function getMachineId() {
-  const components = [
-    getCpuId(),
-    getMacAddress(),
-    getDiskSerial(),
-    getSystemUUID(),
-  ];
+  for (const a of anchorReaders()) {
+    const v = a.read();
+    if (a.valid(v)) return v2Hash(a.kind, v);
+  }
+  const err = new Error('Hardware fingerprint source is unavailable');
+  err.code = 'FINGERPRINT_UNAVAILABLE';
+  throw err;
+}
 
-  // Normalize: lowercase, strip whitespace, join with separator
-  const normalized = components
-    .map(c => c.toLowerCase().replace(/\s+/g, ''))
-    .join('::');
+// ── Legacy (v1) reproduction — backward compatibility only ────────────────────
 
-  return crypto.createHash('sha256').update(normalized).digest('hex');
+/** Exact normalisation the v1 algorithm used: lowercase + strip ALL whitespace. */
+function v1Norm(c) {
+  return String(c == null ? '' : c).toLowerCase().replace(/\s+/g, '');
+}
+
+function v1Hash(cpu, mac, disk, uuid) {
+  return sha256hex([cpu, mac, disk, uuid].map(v1Norm).join('::'));
+}
+
+/** Every non-internal MAC currently visible (the v1 hash used whichever was first). */
+function listMacCandidates() {
+  const macs = new Set();
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.internal) continue;
+      if (!iface.mac || iface.mac === '00:00:00:00:00:00') continue;
+      macs.add(iface.mac);
+    }
+  }
+  return macs;
 }
 
 /**
- * Return the raw components (useful for debugging).
+ * Reproduce the set of v1 ids this machine could have been bound to. The only
+ * genuinely unstable v1 input was the MAC (adapter order), so we enumerate every
+ * visible MAC plus the "no-mac" fallback, keeping CPU/disk/SMBIOS-UUID fixed.
  */
-function getMachineIdComponents() {
+function getLegacyCandidateIds() {
+  const platform = os.platform();
+  let cpu = '';
+  let disk = '';
+  let uuid = '';
+
+  if (platform === 'win32') {
+    const b = readWmiBundle();
+    cpu = b.cpu || (os.cpus().length ? os.cpus()[0].model : 'unknown-cpu');
+    disk = b.disk || 'no-disk-serial';
+    uuid = b.uuid || 'no-system-uuid';
+  } else {
+    // Non-Windows v1 collectors were already stable enough; reuse os-level data.
+    cpu = os.cpus().length ? os.cpus()[0].model : 'unknown-cpu';
+    disk = 'no-disk-serial';
+    uuid = readDarwinPlatformUuid() || readLinuxMachineId() || 'no-system-uuid';
+  }
+
+  const ids = new Set();
+  const macs = listMacCandidates();
+  const macValues = macs.size ? [...macs, 'no-mac'] : ['no-mac'];
+  for (const mac of macValues) ids.add(v1Hash(cpu, mac, disk, uuid));
+  return ids;
+}
+
+// ── Matching (used by license verification) ───────────────────────────────────
+
+/**
+ * Does `boundId` (the machineId stored in a license) belong to THIS machine?
+ * Tries the cheap canonical id first, then other v2 anchors, then legacy v1.
+ * Comparison is normalised (trim + lowercase) on both sides.
+ *
+ * @returns {{ matched: boolean, via: string|null }}
+ */
+function matchMachineId(boundId) {
+  const bound = canon(boundId);
+  if (!bound) return { matched: false, via: null };
+
+  // Primary canonical anchor first (memoised after the first read).
+  let primary = null;
+  try { primary = getMachineId(); } catch { /* fall through to other sources */ }
+  if (primary && canon(primary) === bound) return { matched: true, via: 'v2-primary' };
+
+  // Other v2 anchors (e.g. SMBIOS UUID).
+  for (const c of getV2Candidates()) {
+    if (canon(c.id) === bound) return { matched: true, via: c.kind };
+  }
+
+  // Legacy v1 ids (existing licenses).
+  for (const id of getLegacyCandidateIds()) {
+    if (canon(id) === bound) return { matched: true, via: 'v1-legacy' };
+  }
+
+  return { matched: false, via: null };
+}
+
+// ── Diagnostics (safe to log — prefixes & availability only) ───────────────────
+
+/**
+ * Returns ONLY non-sensitive data: which hardware sources are available and a
+ * short hash prefix of the canonical id. No raw serials/UUIDs/MACs are exposed.
+ */
+function getMachineDiagnostics() {
+  const platform = os.platform();
+  let canonical = null;
+  let source = null;
+  try {
+    const candidates = getV2Candidates();
+    if (candidates.length) {
+      canonical = candidates[0].id;
+      source = candidates[0].kind;
+    }
+  } catch { /* unavailable */ }
+
+  const sources = { machineGuid: false, smbiosUuid: false, platformUuid: false, macCount: 0 };
+  if (platform === 'win32') {
+    sources.machineGuid = !!readMachineGuid();
+    sources.smbiosUuid = isUsableUuid(readWmiBundle().uuid);
+  } else if (platform === 'darwin') {
+    sources.platformUuid = !!readDarwinPlatformUuid();
+  } else {
+    sources.platformUuid = !!readLinuxMachineId();
+  }
+  sources.macCount = listMacCandidates().size;
+
   return {
-    cpu: getCpuId(),
-    mac: getMacAddress(),
-    diskSerial: getDiskSerial(),
-    systemUUID: getSystemUUID(),
+    platform,
+    canonicalSource: source,
+    canonicalPrefix: canonical ? canonical.slice(0, 12) : null,
+    available: canonical != null,
+    sources,
+  };
+}
+
+/** Raw v2 + legacy components (verbose; for the CLI / manual debugging only). */
+function getMachineIdComponents() {
+  if (os.platform() === 'win32') {
+    const b = readWmiBundle();
+    return { machineGuid: readMachineGuid(), smbiosUuid: b.uuid, cpu: b.cpu, diskSerial: b.disk };
+  }
+  return {
+    platformUuid: readDarwinPlatformUuid() || readLinuxMachineId(),
+    cpu: os.cpus().length ? os.cpus()[0].model : 'unknown-cpu',
   };
 }
 
@@ -174,13 +351,23 @@ function getMachineIdComponents() {
 const isMainModule = path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
-  console.log('Machine ID Components:');
-  const parts = getMachineIdComponents();
-  for (const [k, v] of Object.entries(parts)) {
-    console.log(`  ${k}: ${v}`);
-  }
+  console.log('Machine fingerprint diagnostics:');
+  console.log(JSON.stringify(getMachineDiagnostics(), null, 2));
   console.log();
-  console.log(`Machine ID: ${getMachineId()}`);
+  try {
+    console.log(`Canonical Machine ID (v2): ${getMachineId()}`);
+  } catch (e) {
+    console.log(`Canonical Machine ID (v2): <unavailable: ${e.code || e.message}>`);
+  }
+  console.log(`Legacy (v1) candidate count: ${getLegacyCandidateIds().size}`);
 }
 
-export { getMachineId, getMachineIdComponents };
+export {
+  getMachineId,
+  matchMachineId,
+  getMachineDiagnostics,
+  getMachineIdComponents,
+  // exported for tests / advanced callers:
+  getV2Candidates,
+  getLegacyCandidateIds,
+};

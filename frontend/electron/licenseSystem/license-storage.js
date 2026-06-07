@@ -34,13 +34,52 @@ function ensureDir() {
   fs.mkdirSync(STORAGE_DIR, { recursive: true });
 }
 
+/**
+ * Atomic write: write a temp file in the same directory, flush it, then rename
+ * over the target. Rename is atomic on a single volume, so a crash or power loss
+ * mid-write can never leave a half-written (corrupt) license/state file. On
+ * Windows the rename can transiently fail if an AV/indexer holds the target, so
+ * we retry a few times.
+ */
+function writeFileAtomic(file, data) {
+  ensureDir();
+  const tmp = `${file}.tmp-${process.pid}`;
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeSync(fd, data);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  let lastErr;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      fs.renameSync(tmp, file); // replaces existing on Win (libuv MOVEFILE_REPLACE_EXISTING)
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+  throw lastErr;
+}
+
 // ── License storage ──────────────────────────────────────────────────────────
 
 function storeLicense(licenseObj) {
-  ensureDir();
   const json = JSON.stringify(licenseObj);
+
+  // Do not rewrite the lock if an identical, valid license is already stored —
+  // avoids needless churn on every (re)activation of the same license.
+  try {
+    if (fs.existsSync(LICENSE_FILE)) {
+      const cur = JSON.parse(fs.readFileSync(LICENSE_FILE, 'utf8'));
+      if (cur && cur.payload === json && cur.hmac === hmac(json)) return;
+    }
+  } catch { /* unreadable/corrupt — fall through and write a fresh, valid file */ }
+
   const envelope = JSON.stringify({ payload: json, hmac: hmac(json) });
-  fs.writeFileSync(LICENSE_FILE, envelope);
+  writeFileAtomic(LICENSE_FILE, envelope);
 }
 
 /**
@@ -51,22 +90,34 @@ function storeLicense(licenseObj) {
 function loadLicense() {
   if (!fs.existsSync(LICENSE_FILE)) return null;
 
+  const corrupt = (msg) => {
+    const e = new Error(msg);
+    e.code = 'STORAGE_CORRUPT';
+    return e;
+  };
+
   let envelope;
   try {
     envelope = JSON.parse(fs.readFileSync(LICENSE_FILE, 'utf8'));
   } catch {
-    throw new Error('License storage is corrupted');
+    throw corrupt('License storage is corrupted');
   }
 
   if (!envelope.payload || !envelope.hmac) {
-    throw new Error('License storage is corrupted');
+    throw corrupt('License storage is corrupted');
   }
 
   if (hmac(envelope.payload) !== envelope.hmac) {
-    throw new Error('License storage integrity check failed — file may be tampered');
+    const e = new Error('License storage integrity check failed — file may be tampered');
+    e.code = 'STORAGE_TAMPERED';
+    throw e;
   }
 
-  return JSON.parse(envelope.payload);
+  try {
+    return JSON.parse(envelope.payload);
+  } catch {
+    throw corrupt('License storage is corrupted');
+  }
 }
 
 function removeLicense() {
@@ -76,10 +127,9 @@ function removeLicense() {
 // ── Run-state storage (last-run timestamp for rollback detection) ────────────
 
 function saveState(state) {
-  ensureDir();
   const json = JSON.stringify(state);
   const envelope = JSON.stringify({ payload: json, hmac: hmac(json) });
-  fs.writeFileSync(STATE_FILE, envelope);
+  writeFileAtomic(STATE_FILE, envelope);
 }
 
 function loadState() {
@@ -108,11 +158,30 @@ function getLastRun() {
   return loadState().lastRun || null;
 }
 
+// ── Diagnostics (safe to log — paths & flags only, no license contents) ───────
+
+function getStorageInfo() {
+  let exists = false;
+  let readable = false;
+  let bytes = 0;
+  try {
+    exists = fs.existsSync(LICENSE_FILE);
+    if (exists) {
+      bytes = fs.statSync(LICENSE_FILE).size;
+      JSON.parse(fs.readFileSync(LICENSE_FILE, 'utf8'));
+      readable = true;
+    }
+  } catch { /* readable stays false */ }
+  return { storageDir: STORAGE_DIR, licenseFile: LICENSE_FILE, exists, readable, bytes };
+}
+
 export {
   STORAGE_DIR,
+  LICENSE_FILE,
   storeLicense,
   loadLicense,
   removeLicense,
   updateLastRun,
   getLastRun,
+  getStorageInfo,
 };

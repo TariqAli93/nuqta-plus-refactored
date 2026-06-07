@@ -3,18 +3,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { signaturePayload, verifyPayload } from './license-utils.js';
+import { signaturePayload, verifyPayload, resolveMachineMatch } from './license-utils.js';
 import { getMachineId } from './machine-id.js';
 
 // ── Error codes ──────────────────────────────────────────────────────────────
 
 const ERR = {
-  INVALID_FORMAT:     'License format is invalid or corrupted',
-  INVALID_SIGNATURE:  'Signature verification failed — license may be tampered',
-  MACHINE_MISMATCH:   'License is bound to a different machine',
-  EXPIRED:            'License has expired',
-  CLOCK_ROLLBACK:     'System clock appears to have been rolled back',
-  STORAGE_TAMPERED:   'License storage integrity check failed',
+  INVALID_FORMAT:         'License format is invalid or corrupted',
+  INVALID_SIGNATURE:      'Signature verification failed — license may be tampered',
+  MACHINE_MISMATCH:       'License is bound to a different machine',
+  EXPIRED:                'License has expired',
+  CLOCK_ROLLBACK:         'System clock appears to have been rolled back',
+  STORAGE_TAMPERED:       'License storage integrity check failed',
+  FINGERPRINT_UNAVAILABLE:'Could not read this machine\'s hardware fingerprint',
 };
 
 // ── Parse any input to a license object ──────────────────────────────────────
@@ -61,18 +62,21 @@ function parseRawLicense(raw) {
 /**
  * Verify a license object.
  *
- * @param {object}  license          - The parsed license
- * @param {string}  publicKeyPem     - PEM-encoded RSA public key
- * @param {string}  currentMachineId - SHA-256 hex of this machine
- * @param {string|null} lastRunISO   - ISO timestamp of last successful run (for rollback check)
- * @returns {{ valid: boolean, error?: string, details?: string, license?: object }}
+ * @param {object}  license        - The parsed license
+ * @param {string}  publicKeyPem   - PEM-encoded RSA public key
+ * @param {Function|string|string[]} machineBinding - how to check the machine
+ *        binding: a matcher function(boundId)→{matched,via}|boolean (production),
+ *        or a machine-id string / array of candidate ids (CLI & tests).
+ *        Comparison is normalised (casing/whitespace) for the string forms.
+ * @param {string|null} lastRunISO - ISO timestamp of last successful run (rollback check)
+ * @returns {{ valid: boolean, code?: string, error?: string, details?: string, via?: string, license?: object }}
  */
-function verifyLicense(license, publicKeyPem, currentMachineId, lastRunISO) {
+function verifyLicense(license, publicKeyPem, machineBinding, lastRunISO) {
   // 1. Structure
   const required = ['machineId', 'licenseType', 'expiry', 'issuedAt', 'signature'];
   for (const f of required) {
     if (license[f] === undefined || license[f] === null || license[f] === '') {
-      return { valid: false, error: ERR.INVALID_FORMAT, details: `Missing field: ${f}` };
+      return { valid: false, code: 'INVALID_FORMAT', error: ERR.INVALID_FORMAT, details: `Missing field: ${f}` };
     }
   }
 
@@ -85,12 +89,14 @@ function verifyLicense(license, publicKeyPem, currentMachineId, lastRunISO) {
     sigOk = false;
   }
   if (!sigOk) {
-    return { valid: false, error: ERR.INVALID_SIGNATURE };
+    return { valid: false, code: 'INVALID_SIGNATURE', error: ERR.INVALID_SIGNATURE };
   }
 
-  // 3. Machine binding
-  if (license.machineId !== currentMachineId) {
-    return { valid: false, error: ERR.MACHINE_MISMATCH };
+  // 3. Machine binding (normalised; accepts the canonical id, other stable
+  //    anchors, or a legacy v1 id so existing licenses keep working).
+  const match = resolveMachineMatch(machineBinding, license.machineId);
+  if (!match.matched) {
+    return { valid: false, code: 'MACHINE_MISMATCH', error: ERR.MACHINE_MISMATCH };
   }
 
   // 4. Expiry
@@ -99,7 +105,7 @@ function verifyLicense(license, publicKeyPem, currentMachineId, lastRunISO) {
     const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     const expiryMs = new Date(license.expiry + 'T23:59:59.999Z').getTime();
     if (todayMs > expiryMs) {
-      return { valid: false, error: ERR.EXPIRED, details: `Expired on ${license.expiry}` };
+      return { valid: false, code: 'EXPIRED', error: ERR.EXPIRED, details: `Expired on ${license.expiry}` };
     }
   }
 
@@ -108,12 +114,13 @@ function verifyLicense(license, publicKeyPem, currentMachineId, lastRunISO) {
     const lastMs = new Date(lastRunISO).getTime();
     const nowMs  = Date.now();
     if (nowMs < lastMs - 5 * 60 * 1000) {
-      return { valid: false, error: ERR.CLOCK_ROLLBACK };
+      return { valid: false, code: 'CLOCK_ROLLBACK', error: ERR.CLOCK_ROLLBACK };
     }
   }
 
   return {
     valid: true,
+    via: match.via,
     license: {
       machineId:   license.machineId,
       licenseType: license.licenseType,
