@@ -90,6 +90,8 @@
 
           <v-window-item value="backup" class="pa-0">
             <BackupManager />
+            <v-divider class="my-4" />
+            <DataBackupRestore />
           </v-window-item>
 
           <v-window-item value="license" class="pa-0">
@@ -109,6 +111,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useRoute } from 'vue-router';
 import CompanyInfoForm from '@/components/settings/CompanyInfoForm.vue';
 import BackupManager from '@/components/settings/BackupManager.vue';
+import DataBackupRestore from '@/components/settings/DataBackupRestore.vue';
 import CurrencySettings from '@/components/settings/CurrencySettings.vue';
 import LicenseStatus from '@/components/settings/LicenseStatus.vue';
 import ConnectionSettings from '@/components/settings/ConnectionSettings.vue';

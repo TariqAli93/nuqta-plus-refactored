@@ -157,7 +157,7 @@
             :disabled="!!preselectedProduct"
             class="mb-3"
           />
-          <v-row dense>
+          <v-row dense class="mb-3">
             <v-col cols="12" sm="6">
               <v-select
                 v-model="adjustForm.movementType"
@@ -189,21 +189,14 @@
                 :disabled="unitOptionsForSelected.length <= 1"
               />
             </v-col>
-            <v-col cols="12" class="text-caption text-medium-emphasis">
-              {{
-                adjustForm.unitId && conversionForSelected > 1
-                  ? `سيتم تحويل ${adjustForm.quantity || 0} × ${conversionForSelected} = ${(Number(adjustForm.quantity || 0) * conversionForSelected) || 0} ${baseUnitNameForSelected}`
-                  : 'سيتم حفظ الكمية كما هي.'
-              }}
-            </v-col>
           </v-row>
-          <v-textarea
+
+          <v-text-field
             v-model="adjustForm.reason"
-            label="سبب التعديل (إلزامي)"
-            rows="2"
-            auto-grow
+            label="سبب التعديل (اختياري)"
             variant="outlined"
             density="comfortable"
+            hide-details
           />
           <v-text-field
             v-if="isIncreaseMovement && selectedProductTracksExpiry"
@@ -212,7 +205,7 @@
             type="date"
             variant="outlined"
             density="comfortable"
-            class="mt-2"
+            hide-details
           />
           <v-text-field
             v-if="isIncreaseMovement"
@@ -347,7 +340,15 @@ const maybeOpenAdjustFromRoute = async () => {
 const adjustDialog = ref(false);
 const adjusting = ref(false);
 const preselectedProduct = ref(null);
-const adjustForm = ref({ productId: null, unitId: null, quantity: 1, movementType: 'stock_in', reason: '', expiryDate: '', costPrice: null });
+const adjustForm = ref({
+  productId: null,
+  unitId: null,
+  quantity: 1,
+  movementType: 'stock_in',
+  reason: '',
+  expiryDate: '',
+  costPrice: null,
+});
 const productUnitsCache = ref(new Map());
 
 const fetchUnitsFor = async (productId) => {
@@ -376,7 +377,7 @@ const unitOptionsForSelected = computed(() => {
     value: u.id,
     title: u.isBase
       ? `${u.name} (الأساسية)`
-      : `${u.name} = ${Number(u.conversionFactor) || 1} ${(units.find((b) => b.isBase)?.name) || ''}`.trim(),
+      : `${u.name} = ${Number(u.conversionFactor) || 1} ${units.find((b) => b.isBase)?.name || ''}`.trim(),
   }));
 });
 
@@ -394,7 +395,12 @@ const movementTypeOptions = manualInventoryMovementTypes.map((value) => ({
   value,
   title: getInventoryMovementTypeLabel(value),
 }));
-const increaseMovementTypes = new Set(['opening_balance', 'stock_in', 'adjustment_in', 'correction_in']);
+const increaseMovementTypes = new Set([
+  'opening_balance',
+  'stock_in',
+  'adjustment_in',
+  'correction_in',
+]);
 const isIncreaseMovement = computed(() => increaseMovementTypes.has(adjustForm.value.movementType));
 const selectedProductTracksExpiry = computed(() => {
   const pid = Number(adjustForm.value.productId);
@@ -421,18 +427,22 @@ const openAdjustDialog = async (row) => {
   }
 };
 
-watch(() => adjustForm.value.productId, async (productId) => {
-  if (!productId) return;
-  const units = await fetchUnitsFor(productId);
-  const baseUnit = units.find((u) => u.isBase) || units[0] || null;
-  if (!adjustForm.value.unitId) {
-    adjustForm.value.unitId = baseUnit?.id || null;
+watch(
+  () => adjustForm.value.productId,
+  async (productId) => {
+    if (!productId) return;
+    const units = await fetchUnitsFor(productId);
+    const baseUnit = units.find((u) => u.isBase) || units[0] || null;
+    if (!adjustForm.value.unitId) {
+      adjustForm.value.unitId = baseUnit?.id || null;
+    }
   }
-});
+);
 
 const submitAdjust = async () => {
-  const { productId, unitId, quantity, movementType, reason, expiryDate, costPrice } = adjustForm.value;
-  if (!productId || !quantity || !reason.trim()) {
+  const { productId, unitId, quantity, movementType, reason, expiryDate, costPrice } =
+    adjustForm.value;
+  if (!productId || !quantity) {
     notificationStore.error('أكمل بيانات التعديل قبل الحفظ');
     return;
   }
@@ -445,8 +455,15 @@ const submitAdjust = async () => {
       unitId: unitId || undefined,
       movementType,
       reason: reason.trim(),
-      expiryDate: isIncreaseMovement.value && selectedProductTracksExpiry.value && expiryDate ? expiryDate : null,
-      costPrice: isIncreaseMovement.value && !(costPrice === '' || costPrice === null || costPrice === undefined) ? costPrice : undefined,
+      expiryDate:
+        isIncreaseMovement.value && selectedProductTracksExpiry.value && expiryDate
+          ? expiryDate
+          : null,
+      costPrice:
+        isIncreaseMovement.value &&
+        !(costPrice === '' || costPrice === null || costPrice === undefined)
+          ? costPrice
+          : undefined,
     });
     adjustDialog.value = false;
     await reload();

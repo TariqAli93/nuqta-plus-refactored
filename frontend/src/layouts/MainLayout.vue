@@ -94,7 +94,7 @@
     </v-navigation-drawer>
 
     <v-app-bar app elevation="0" dark class="!fixed top-0 glass__main" color="surface">
-      <v-container fluid class="flex align-center container">
+      <v-container fluid class="flex align-center">
         <v-app-bar-nav-icon
           :aria-label="drawer ? 'إخفاء القائمة الجانبية' : 'إظهار القائمة الجانبية'"
           @click="toggleDrawer"
@@ -203,8 +203,8 @@
     </v-main>
 
     <!-- Footer -->
-    <v-footer app>
-      <v-container>
+    <v-footer app elevation="0" class="glass__main border-t">
+      <v-container fluid>
         <v-row align="center" no-gutters>
           <v-col cols="12" md="12" class="flex justify-between items-center flex-wrap gap-2">
             <div class="text-body-2"><strong>نقطة بلس</strong> - نظام إدارة المبيعات</div>

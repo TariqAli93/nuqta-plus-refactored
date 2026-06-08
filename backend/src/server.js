@@ -26,6 +26,7 @@ import userRoutes from './routes/userRoutes.js';
 import currencyRoutes from './routes/currencyRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import backupRoutes from './routes/backupRoutes.js';
+import dataBackupRoutes from './routes/dataBackupRoutes.js';
 import alertRoutes from './routes/alertRoutes.js';
 import alertWsRoutes from './routes/alertWsRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
@@ -134,6 +135,7 @@ const start = async () => {
     await fastify.register(currencyRoutes, { prefix: '/api/currencies' });
     await fastify.register(settingsRoutes, { prefix: '/api/settings' });
     await fastify.register(backupRoutes, { prefix: '/api/settings/backups' });
+    await fastify.register(dataBackupRoutes, { prefix: '/api/backup' });
     await fastify.register(alertRoutes, { prefix: '/api/alerts' });
     await fastify.register(alertWsRoutes, { prefix: '/api/alerts' });
     await fastify.register(auditRoutes, { prefix: '/api/audit' });

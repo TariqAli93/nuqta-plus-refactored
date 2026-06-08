@@ -11,8 +11,8 @@ export async function hashPassword(password) {
     throw new Error('Password must be a non-empty string');
   }
 
-  if (password.length < 8) {
-    throw new Error('Password must be at least 8 characters long');
+  if (password.length < 4) {
+    throw new Error('Password must be at least 4 characters long');
   }
 
   const salt = await bcrypt.genSalt(10);

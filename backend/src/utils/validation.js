@@ -24,21 +24,23 @@ export const userSchema = z.object({
     .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores'),
   password: z
     .string()
-    .min(8, 'Password must be at least 8 characters')
-    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
-    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
-    .regex(/[0-9]/, 'Password must contain at least one number'),
+    .min(4, 'Password must be at least 4 characters')
+    .max(100, 'Password cannot exceed 100 characters'),
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
   phone: z.string().optional(),
   role: z
-    .enum(['admin', 'global_admin', 'branch_admin', 'branch_manager', 'cashier', 'manager', 'viewer'])
+    .enum([
+      'admin',
+      'global_admin',
+      'branch_admin',
+      'branch_manager',
+      'cashier',
+      'manager',
+      'viewer',
+    ])
     .default('cashier'),
-  assignedBranchId: z
-    .union([z.number().int().positive(), z.null()])
-    .optional(),
-  assignedWarehouseId: z
-    .union([z.number().int().positive(), z.null()])
-    .optional(),
+  assignedBranchId: z.union([z.number().int().positive(), z.null()]).optional(),
+  assignedWarehouseId: z.union([z.number().int().positive(), z.null()]).optional(),
 });
 
 export const loginSchema = z.object({
@@ -76,9 +78,7 @@ export const customerSchema = z.object({
 export const productUnitInputSchema = z.object({
   id: z.number().int().positive().optional(),
   name: z.string().trim().min(1, 'اسم الوحدة مطلوب').max(40),
-  conversionFactor: z.coerce
-    .number()
-    .positive('عامل التحويل يجب أن يكون أكبر من صفر'),
+  conversionFactor: z.coerce.number().positive('عامل التحويل يجب أن يكون أكبر من صفر'),
   isBase: z.boolean().optional(),
   isDefaultSale: z.boolean().optional(),
   isDefaultPurchase: z.boolean().optional(),
@@ -164,9 +164,7 @@ export const branchSchema = z.object({
   address: z.string().optional(),
   // Default warehouse for this branch. The service layer additionally checks
   // that the warehouse belongs to this branch.
-  defaultWarehouseId: z
-    .union([z.number().int().positive(), z.null()])
-    .optional(),
+  defaultWarehouseId: z.union([z.number().int().positive(), z.null()]).optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -175,9 +173,7 @@ export const branchSchema = z.object({
 // with the live feature flag.
 export const warehouseSchema = z.object({
   name: z.string().min(2, 'Warehouse name must be at least 2 characters'),
-  branchId: z
-    .union([z.number().int().positive(), z.null()])
-    .optional(),
+  branchId: z.union([z.number().int().positive(), z.null()]).optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -189,19 +185,22 @@ export const stockAdjustmentSchema = z.object({
   // optional — when omitted we use the product's base unit (factor 1).
   quantityChange: z.number().int().positive('الكمية يجب أن تكون أكبر من صفر'),
   unitId: z.number().int().positive().nullable().optional(),
-  movementType: z.enum([
-    'opening_balance',
-    'stock_in',
-    'adjustment_in',
-    'adjustment_out',
-    'damaged',
-    'lost',
-    'correction_in',
-    'correction_out',
-    'manual_adjustment_in',
-    'manual_adjustment_out',
-  ], { errorMap: () => ({ message: 'نوع حركة المخزون غير صالح' }) }),
-  reason: z.string().min(2, 'Reason is required'),
+  movementType: z.enum(
+    [
+      'opening_balance',
+      'stock_in',
+      'adjustment_in',
+      'adjustment_out',
+      'damaged',
+      'lost',
+      'correction_in',
+      'correction_out',
+      'manual_adjustment_in',
+      'manual_adjustment_out',
+    ],
+    { errorMap: () => ({ message: 'نوع حركة المخزون غير صالح' }) }
+  ),
+  reason: z.string().nullable().optional(),
   costPrice: z.coerce.number().nonnegative('Cost price must be non-negative').optional(),
   expiryDate: z
     .string()
@@ -370,11 +369,7 @@ export const saleReturnItemSchema = z
 
 export const saleReturnSchema = z.object({
   items: z.array(saleReturnItemSchema).min(1, 'Return must include at least one item'),
-  refundAmount: z
-    .number()
-    .nonnegative('Refund amount cannot be negative')
-    .optional()
-    .default(0),
+  refundAmount: z.number().nonnegative('Refund amount cannot be negative').optional().default(0),
   refundMethod: z.enum(['cash', 'card', 'credit']).optional(),
   refundReference: z.string().trim().min(1).max(120).optional().nullable(),
   reason: z.string().trim().max(500).optional().nullable(),
@@ -382,33 +377,35 @@ export const saleReturnSchema = z.object({
 });
 
 // Payment schemas
-export const paymentSchema = z.object({
-  saleId: z.number().int().positive().optional(),
-  customerId: z.number().int().positive().optional(),
-  amount: z.number().positive('Payment amount must be positive'),
-  currency: z.enum(['USD', 'IQD']),
-  exchangeRate: z.number().positive('Exchange rate must be positive'),
-  paymentMethod: z.enum(POS_PAYMENT_METHODS),
-  paymentReference: z
-    .string()
-    .trim()
-    .min(1, 'Card reference cannot be empty')
-    .max(120, 'Card reference is too long')
-    .optional()
-    .nullable(),
-  notes: z.string().nullable().optional(),
-}).superRefine((data, ctx) => {
-  if (data.paymentMethod === PAYMENT_METHOD_CARD) {
-    const ref = typeof data.paymentReference === 'string' ? data.paymentReference.trim() : '';
-    if (!ref) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['paymentReference'],
-        message: 'Card reference number is required.',
-      });
+export const paymentSchema = z
+  .object({
+    saleId: z.number().int().positive().optional(),
+    customerId: z.number().int().positive().optional(),
+    amount: z.number().positive('Payment amount must be positive'),
+    currency: z.enum(['USD', 'IQD']),
+    exchangeRate: z.number().positive('Exchange rate must be positive'),
+    paymentMethod: z.enum(POS_PAYMENT_METHODS),
+    paymentReference: z
+      .string()
+      .trim()
+      .min(1, 'Card reference cannot be empty')
+      .max(120, 'Card reference is too long')
+      .optional()
+      .nullable(),
+    notes: z.string().nullable().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.paymentMethod === PAYMENT_METHOD_CARD) {
+      const ref = typeof data.paymentReference === 'string' ? data.paymentReference.trim() : '';
+      if (!ref) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paymentReference'],
+          message: 'Card reference number is required.',
+        });
+      }
     }
-  }
-});
+  });
 
 // Installment schemas
 export const installmentSchema = z.object({
@@ -493,8 +490,7 @@ export const installmentActionSchema = z
         });
       }
       if (data.paymentMethod === 'card') {
-        const ref =
-          typeof data.paymentReference === 'string' ? data.paymentReference.trim() : '';
+        const ref = typeof data.paymentReference === 'string' ? data.paymentReference.trim() : '';
         if (!ref) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,

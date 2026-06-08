@@ -63,9 +63,7 @@ async function lockOrCreateStockRow(tx, productId, warehouseId) {
   const [existing] = await tx
     .select()
     .from(productStock)
-    .where(
-      and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId))
-    )
+    .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
     .for('update')
     .limit(1);
 
@@ -82,9 +80,7 @@ async function lockOrCreateStockRow(tx, productId, warehouseId) {
   const [row] = await tx
     .select()
     .from(productStock)
-    .where(
-      and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId))
-    )
+    .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
     .for('update')
     .limit(1);
   return row;
@@ -174,9 +170,7 @@ export class InventoryService {
     const [row] = await db
       .select()
       .from(productStock)
-      .where(
-        and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId))
-      )
+      .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
       .limit(1);
     return row ? row.quantity : 0;
   }
@@ -213,7 +207,9 @@ export class InventoryService {
       .where(and(eq(products.isActive, true), ne(products.productType, 'service')));
 
     const threshold = (r) =>
-      r.lowStockThreshold != null && r.lowStockThreshold > 0 ? r.lowStockThreshold : r.minStock || 0;
+      r.lowStockThreshold != null && r.lowStockThreshold > 0
+        ? r.lowStockThreshold
+        : r.minStock || 0;
 
     let filtered = rows.map((r) => ({
       ...r,
@@ -302,9 +298,6 @@ export class InventoryService {
       userId = null,
     } = input;
 
-    if (!reason || !reason.trim()) {
-      throw new ValidationError('Adjustment reason is required');
-    }
     if (!Number.isInteger(quantityChange) || quantityChange <= 0) {
       throw new ValidationError('الكمية يجب أن تكون أكبر من صفر');
     }
@@ -392,7 +385,15 @@ export class InventoryService {
    * Transfer between warehouses in the same transaction.
    * Emits transfer_out + transfer_in movements linked by the same referenceId.
    */
-  async transferStock({ fromWarehouseId, toWarehouseId, productId, quantity, unitId = null, notes, userId }) {
+  async transferStock({
+    fromWarehouseId,
+    toWarehouseId,
+    productId,
+    quantity,
+    unitId = null,
+    notes,
+    userId,
+  }) {
     if (!fromWarehouseId || !toWarehouseId) {
       throw new ValidationError('Both source and destination warehouses are required');
     }
@@ -539,7 +540,12 @@ export class InventoryService {
       };
 
       if (!product) {
-        details.push({ ...base, availableQty: 0, shortageQty: info.need, reason: 'inventory_record_not_found' });
+        details.push({
+          ...base,
+          availableQty: 0,
+          shortageQty: info.need,
+          reason: 'inventory_record_not_found',
+        });
         continue;
       }
       if (product.isActive === false) {
@@ -554,11 +560,18 @@ export class InventoryService {
       const [stockRow] = await tx
         .select({ quantity: productStock.quantity })
         .from(productStock)
-        .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
+        .where(
+          and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId))
+        )
         .limit(1);
 
       if (!stockRow) {
-        details.push({ ...base, availableQty: 0, shortageQty: info.need, reason: 'inventory_record_not_found' });
+        details.push({
+          ...base,
+          availableQty: 0,
+          shortageQty: info.need,
+          reason: 'inventory_record_not_found',
+        });
         continue;
       }
 
@@ -625,7 +638,12 @@ export class InventoryService {
         const [legacy] = await tx
           .select({ quantity: productStock.quantity })
           .from(productStock)
-          .where(and(eq(productStock.productId, item.productId), eq(productStock.warehouseId, warehouseId)))
+          .where(
+            and(
+              eq(productStock.productId, item.productId),
+              eq(productStock.warehouseId, warehouseId)
+            )
+          )
           .limit(1)
           .for('update');
         if (legacy && Number(legacy.quantity) > 0) {
@@ -647,7 +665,13 @@ export class InventoryService {
           entries = await tx
             .select()
             .from(productStockEntries)
-            .where(and(eq(productStockEntries.productId, item.productId), eq(productStockEntries.warehouseId, warehouseId), sql`${productStockEntries.remainingQuantity} > 0`))
+            .where(
+              and(
+                eq(productStockEntries.productId, item.productId),
+                eq(productStockEntries.warehouseId, warehouseId),
+                sql`${productStockEntries.remainingQuantity} > 0`
+              )
+            )
             .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
             .for('update');
         }
@@ -751,12 +775,28 @@ export class InventoryService {
       .leftJoin(products, eq(productStockEntries.productId, products.id))
       .leftJoin(warehouses, eq(productStockEntries.warehouseId, warehouses.id))
       .leftJoin(branches, eq(warehouses.branchId, branches.id));
-    const today = new Date(); today.setHours(0,0,0,0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     return rows
-      .filter((r) => (!warehouseId || r.warehouseId === warehouseId) && (!productId || r.productId === productId))
+      .filter(
+        (r) =>
+          (!warehouseId || r.warehouseId === warehouseId) &&
+          (!productId || r.productId === productId)
+      )
       .map((r) => {
         const days = r.expiryDate ? Math.floor((new Date(r.expiryDate) - today) / 86400000) : null;
-        const expiryStatus = r.expiryDate == null ? 'بدون تاريخ انتهاء' : days < 0 ? 'منتهي' : days <= 7 ? 'ينتهي خلال 7 أيام' : days <= 30 ? 'ينتهي خلال 30 يوم' : days <= 60 ? 'ينتهي خلال 60 يوم' : 'صالح';
+        const expiryStatus =
+          r.expiryDate == null
+            ? 'بدون تاريخ انتهاء'
+            : days < 0
+              ? 'منتهي'
+              : days <= 7
+                ? 'ينتهي خلال 7 أيام'
+                : days <= 30
+                  ? 'ينتهي خلال 30 يوم'
+                  : days <= 60
+                    ? 'ينتهي خلال 60 يوم'
+                    : 'صالح';
         return { ...r, daysUntilExpiry: days, status: expiryStatus };
       })
       .filter((r) => !status || r.status === status);
@@ -791,7 +831,10 @@ export class InventoryService {
     }
   }
 
-  static async moveStockEntriesTx(tx, { productId, fromWarehouseId, toWarehouseId, quantity, userId }) {
+  static async moveStockEntriesTx(
+    tx,
+    { productId, fromWarehouseId, toWarehouseId, quantity, userId }
+  ) {
     let need = Number(quantity) || 0;
     const today = new Date().toISOString().slice(0, 10);
     const entries = await tx
@@ -821,7 +864,8 @@ export class InventoryService {
         RETURNING id
       `);
       const outRows = out.rows ?? out;
-      if (!outRows || outRows.length === 0) throw new ValidationError('Transfer quantity is no longer available');
+      if (!outRows || outRows.length === 0)
+        throw new ValidationError('Transfer quantity is no longer available');
       await tx.insert(productStockEntries).values({
         productId,
         warehouseId: toWarehouseId,
@@ -840,14 +884,7 @@ export class InventoryService {
   /** Return movements with optional filters and simple pagination. */
   async getStockMovements(filters = {}) {
     const db = await getDb();
-    const {
-      warehouseId,
-      warehouseIds,
-      productId,
-      movementType,
-      page = 1,
-      limit = 20,
-    } = filters;
+    const { warehouseId, warehouseIds, productId, movementType, page = 1, limit = 20 } = filters;
 
     const conds = [];
     if (warehouseId) conds.push(eq(stockMovements.warehouseId, warehouseId));

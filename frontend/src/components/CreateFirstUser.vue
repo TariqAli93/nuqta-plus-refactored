@@ -41,7 +41,7 @@
                       prepend-inner-icon="mdi-lock"
                       :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
                       :type="showPassword ? 'text' : 'password'"
-                      :rules="[rules.required, rules.minLength(8)]"
+                      :rules="[rules.required, rules.minLength(4)]"
                       @click:append-inner="showPassword = !showPassword"
                     />
                   </v-col>
@@ -240,10 +240,9 @@ onMounted(async () => {
   const response = await authStore.fetchInitialSetupInfo();
 
   if (response?._error || response?._reason) {
-    const reason =
-      response._error?.response?.status
-        ? `HTTP ${response._error.response.status}`
-        : response._error?.message || response._reason || 'سبب غير معروف';
+    const reason = response._error?.response?.status
+      ? `HTTP ${response._error.response.status}`
+      : response._error?.message || response._reason || 'سبب غير معروف';
     notification.error(
       `تعذر التحقق من حالة الإعداد الأولي (${reason}). راجع DevTools (Ctrl+Shift+I) → Console للتفاصيل.`,
       8000
