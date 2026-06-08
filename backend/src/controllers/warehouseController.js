@@ -1,7 +1,20 @@
 import warehouseService from '../services/warehouseService.js';
 import { warehouseSchema } from '../utils/validation.js';
+import { ensureDefaultWarehouse } from '../services/systemDefaultsService.js';
 
 export class WarehouseController {
+  /**
+   * Idempotently create (or return) the internal default warehouse. Lets the
+   * inventory UI self-heal an install that has no warehouse yet — branch
+   * management off and the operator never created one — without forcing them
+   * to understand branches first.
+   */
+  async ensureDefault(request, reply) {
+    const id = await ensureDefaultWarehouse();
+    const data = await warehouseService.getById(id, request.user);
+    return reply.send({ success: true, data, message: 'Default warehouse ready' });
+  }
+
   async getAll(request, reply) {
     const { branchId, activeOnly } = request.query || {};
     const data = await warehouseService.getAll(

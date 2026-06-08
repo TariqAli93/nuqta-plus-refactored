@@ -261,19 +261,30 @@ const salesHeaders = [
 
 // ---- Payments by currency ----
 const paymentsByCurrency = computed(() =>
-  Object.entries(props.kpisByCurrency || {}).map(([cur, k]) => ({
-    currency: cur,
-    totalPaid: formatNumber(k.totalPaid),
-    cashPayments: formatNumber(k.cashPayments),
-    cardPayments: formatNumber(k.cardPayments),
-    transferPayments: formatNumber(k.transferPayments),
-    installmentCollections: formatNumber(k.installmentCollections),
-  })),
+  Object.entries(props.kpisByCurrency || {}).map(([cur, k]) => {
+    const refunded = Number(k.refundedAmount || 0);
+    const net =
+      k.netCollected !== undefined
+        ? Number(k.netCollected)
+        : Number(k.totalPaid || 0) - refunded;
+    return {
+      currency: cur,
+      totalPaid: formatNumber(k.totalPaid),
+      refundedAmount: formatNumber(refunded),
+      netCollected: formatNumber(net),
+      cashPayments: formatNumber(k.cashPayments),
+      cardPayments: formatNumber(k.cardPayments),
+      transferPayments: formatNumber(k.transferPayments),
+      installmentCollections: formatNumber(k.installmentCollections),
+    };
+  }),
 );
 
 const paymentsHeaders = [
   { title: 'العملة', key: 'currency', sortable: true },
-  { title: 'الإجمالي المحصّل', key: 'totalPaid', sortable: true, align: 'end' },
+  { title: 'المبالغ المحصّلة', key: 'totalPaid', sortable: true, align: 'end' },
+  { title: 'المبالغ المرجعة', key: 'refundedAmount', sortable: true, align: 'end' },
+  { title: 'صافي التحصيل', key: 'netCollected', sortable: true, align: 'end' },
   { title: 'نقدًا', key: 'cashPayments', sortable: true, align: 'end' },
   { title: 'بطاقة', key: 'cardPayments', sortable: true, align: 'end' },
   { title: 'تحويل', key: 'transferPayments', sortable: true, align: 'end' },
@@ -348,10 +359,15 @@ const payingHeaders = [
 // ---- Multi-currency summary ----
 const multiCurrencyRows = computed(() =>
   Object.entries(props.kpisByCurrency || {}).map(([cur, k]) => {
+    const refunded = Number(k.refundedAmount || 0);
     const row = {
       currency: cur,
       sales: formatNumber(k.sales),
       collected: formatNumber(k.totalPaid),
+      refunded: formatNumber(refunded),
+      netCollected: formatNumber(
+        k.netCollected !== undefined ? Number(k.netCollected) : Number(k.totalPaid || 0) - refunded,
+      ),
       unpaid: formatNumber(k.unpaidBalances),
       overdueAmount: formatNumber(k.lateAmounts),
     };
@@ -369,7 +385,9 @@ const multiCurrencyHeaders = computed(() => {
   const base = [
     { title: 'العملة', key: 'currency', sortable: true },
     { title: 'المبيعات', key: 'sales', sortable: true, align: 'end' },
-    { title: 'المحصّل', key: 'collected', sortable: true, align: 'end' },
+    { title: 'المبالغ المحصّلة', key: 'collected', sortable: true, align: 'end' },
+    { title: 'المبالغ المرجعة', key: 'refunded', sortable: true, align: 'end' },
+    { title: 'صافي التحصيل', key: 'netCollected', sortable: true, align: 'end' },
     { title: 'الديون المتبقية', key: 'unpaid', sortable: true, align: 'end' },
     { title: 'مبالغ متأخرة', key: 'overdueAmount', sortable: true, align: 'end' },
   ];

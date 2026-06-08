@@ -9,6 +9,7 @@ import auditService from './auditService.js';
 import { resolveUserScope } from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
 import { getUserCapabilities } from './permissionService.js';
+import { ensureDefaultWarehouse } from './systemDefaultsService.js';
 
 export class AuthService {
   /**
@@ -106,6 +107,15 @@ export class AuthService {
     // Remove password from response
     const userWithoutPassword = { ...newUser };
     delete userWithoutPassword.password;
+
+    // Give the brand-new install a working inventory out of the box: an
+    // internal default branch + warehouse. Idempotent and best-effort — a
+    // failure here must never block first-user setup.
+    try {
+      await ensureDefaultWarehouse();
+    } catch (err) {
+      fastify.log?.warn?.({ err }, 'ensureDefaultWarehouse failed during first-user setup');
+    }
 
     saveDatabase();
 

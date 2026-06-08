@@ -94,7 +94,28 @@ function cardsFor(cur) {
       value: formatCurrency(k.totalPaid, cur),
       icon: 'mdi-cash-check',
       color: 'success',
-      note: 'من جميع طرق الدفع',
+      note: 'من جميع طرق الدفع (قبل الإرجاع)',
+    },
+    {
+      key: 'refunded',
+      label: 'المبالغ المرجعة',
+      value: formatCurrency(k.refundedAmount || 0, cur),
+      icon: 'mdi-cash-refund',
+      color: (k.refundedAmount || 0) > 0 ? 'error' : 'success',
+      note: 'المبالغ المعادة للعملاء عن المرتجعات والإلغاءات',
+    },
+    {
+      key: 'netCollected',
+      label: 'صافي التحصيل',
+      value: formatCurrency(
+        k.netCollected !== undefined ? k.netCollected : (k.totalPaid || 0) - (k.refundedAmount || 0),
+        cur,
+      ),
+      icon: 'mdi-cash-100',
+      color: ((k.netCollected !== undefined ? k.netCollected : (k.totalPaid || 0) - (k.refundedAmount || 0)) < 0)
+        ? 'error'
+        : 'success',
+      note: 'المحصّل − المرجع',
     },
     {
       key: 'expenses',

@@ -105,7 +105,9 @@
                   </template>
                 </v-list-item>
               </template>
-              <template #selection="{ item }"> {{ item.raw.name }} - {{ item.raw.phone }} </template>
+              <template #selection="{ item }">
+                {{ item.raw.name }} - {{ item.raw.phone }}
+              </template>
             </v-autocomplete>
           </v-col>
 
@@ -348,33 +350,6 @@
               <v-icon size="20">mdi-delete</v-icon>
             </v-btn>
           </template>
-          <!-- أزرار المبيعات العادية -->
-          <template v-else>
-            <v-btn
-              v-if="item.status !== 'cancelled'"
-              size="small"
-              variant="text"
-              color="error"
-              icon
-              :disabled="!canDelete"
-              title="إلغاء البيع"
-              @click.stop="deleteSale(item.id)"
-            >
-              <v-icon size="20">mdi-delete</v-icon>
-            </v-btn>
-            <v-btn
-              v-if="item.status === 'cancelled'"
-              size="small"
-              variant="text"
-              color="success"
-              icon
-              :disabled="!canDelete"
-              title="استعادة البيع"
-              @click.stop="restoreSale(item.id)"
-            >
-              <v-icon size="20">mdi-restore</v-icon>
-            </v-btn>
-          </template>
         </template>
       </v-data-table>
 
@@ -447,31 +422,42 @@ const customers = ref([]);
 
 // Centralized debounced/cancelable/cached search. `filters` is the reactive
 // filter state the advanced-filter controls bind to directly.
-const { query, filters, isSearching, error, onQueryChange, runNow, clear, setFilters, setPage, setPageSize, refresh } =
-  useServerSearch({
-    limit: 10,
-    initialFilters: {
-      status: null,
-      paymentType: null,
-      customer: null,
-      startDate: null,
-      endDate: null,
-      minTotal: null,
-      maxTotal: null,
-    },
-    load: (params, opts) => saleStore.fetch(params, { ...opts, silent: true }),
-    apply: (res) => {
-      saleStore.sales = res?.data || [];
-      if (res?.meta) {
-        saleStore.pagination = {
-          page: Number(res.meta.page) || 1,
-          limit: Number(res.meta.limit) || saleStore.pagination.limit,
-          total: Number(res.meta.total) || 0,
-          totalPages: Number(res.meta.totalPages) || 0,
-        };
-      }
-    },
-  });
+const {
+  query,
+  filters,
+  isSearching,
+  error,
+  onQueryChange,
+  runNow,
+  clear,
+  setFilters,
+  setPage,
+  setPageSize,
+  refresh,
+} = useServerSearch({
+  limit: 10,
+  initialFilters: {
+    status: null,
+    paymentType: null,
+    customer: null,
+    startDate: null,
+    endDate: null,
+    minTotal: null,
+    maxTotal: null,
+  },
+  load: (params, opts) => saleStore.fetch(params, { ...opts, silent: true }),
+  apply: (res) => {
+    saleStore.sales = res?.data || [];
+    if (res?.meta) {
+      saleStore.pagination = {
+        page: Number(res.meta.page) || 1,
+        limit: Number(res.meta.limit) || saleStore.pagination.limit,
+        total: Number(res.meta.total) || 0,
+        totalPages: Number(res.meta.totalPages) || 0,
+      };
+    }
+  },
+});
 
 const tableLoading = computed(() => isSearching.value || saleStore.loading);
 const initialLoading = computed(() => tableLoading.value && saleStore.sales.length === 0);
@@ -554,7 +540,8 @@ const statusOptions = computed(() => {
 
 const filterChips = computed(() => {
   const chips = [];
-  if (filters.status) chips.push({ key: 'status', label: `الحالة: ${getStatusText(filters.status)}` });
+  if (filters.status)
+    chips.push({ key: 'status', label: `الحالة: ${getStatusText(filters.status)}` });
   if (filters.paymentType)
     chips.push({ key: 'paymentType', label: `الدفع: ${getPaymentTypeText(filters.paymentType)}` });
   if (filters.customer) {

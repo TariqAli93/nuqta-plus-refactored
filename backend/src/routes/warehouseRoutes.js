@@ -30,6 +30,20 @@ export default async function warehouseRoutes(fastify) {
     schema: { description: 'Get warehouse by id', tags: ['inventory'], security: [{ bearerAuth: [] }] },
   });
 
+  // Idempotent self-heal: ensure a default warehouse exists (used when branch
+  // management is off and none was ever created). Declared before `/:id` write
+  // routes; GET `/:id` won't shadow a POST, but keeping literal paths grouped
+  // makes the routing intent obvious.
+  fastify.post('/ensure-default', {
+    onRequest: [fastify.authenticate, fastify.authorize('inventory:manage')],
+    handler: warehouseController.ensureDefault,
+    schema: {
+      description: 'Ensure a default warehouse exists',
+      tags: ['inventory'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
   fastify.post('/', {
     onRequest: [fastify.authenticate, fastify.authorize('inventory:manage')],
     handler: warehouseController.create,

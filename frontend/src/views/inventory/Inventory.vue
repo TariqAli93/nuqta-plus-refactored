@@ -36,6 +36,29 @@
       </v-btn>
     </PageHeader>
 
+    <!-- No warehouse exists yet — make the path forward obvious instead of
+         showing an empty table and forcing the user into branch settings. -->
+    <v-alert
+      v-if="inventoryStore.needsWarehouseSetup"
+      type="info"
+      variant="tonal"
+      class="page-section"
+      icon="mdi-warehouse"
+    >
+      <div class="d-flex flex-wrap align-center justify-space-between gap-3">
+        <span> لا يوجد مخزن. سيتم إنشاء مخزن افتراضي أو يرجى إنشاء مخزن للبدء. </span>
+        <v-btn
+          v-if="canManageWarehouses"
+          color="primary"
+          :loading="creatingDefaultWarehouse"
+          prepend-icon="mdi-plus"
+          @click="createDefaultWarehouse"
+        >
+          إنشاء مخزن افتراضي
+        </v-btn>
+      </div>
+    </v-alert>
+
     <v-card class="page-section filter-toolbar pa-3">
       <v-row dense>
         <v-col cols="12" md="8">
@@ -262,6 +285,21 @@ const canRequestTransfer = computed(
     authStore.can?.('canTransferStock') === true
 );
 
+const canManageWarehouses = computed(() => authStore.hasPermission?.('inventory:manage') === true);
+
+const creatingDefaultWarehouse = ref(false);
+const createDefaultWarehouse = async () => {
+  creatingDefaultWarehouse.value = true;
+  try {
+    await inventoryStore.ensureDefaultWarehouse();
+    await reload();
+  } catch {
+    /* notification already handled */
+  } finally {
+    creatingDefaultWarehouse.value = false;
+  }
+};
+
 const search = ref('');
 const lowStockOnly = ref(false);
 
@@ -414,7 +452,7 @@ const openAdjustDialog = async (row) => {
     productId: row ? row.productId : null,
     unitId: null,
     quantity: 1,
-    movementType: 'stock_in',
+    movementType: 'opening_balance',
     reason: '',
     expiryDate: '',
     costPrice: null,

@@ -39,6 +39,9 @@ export const useInventoryStore = defineStore('inventory', {
     // The UI surfaces this as a non-blocking admin warning.
     missingDefaultWarehouse: false,
     initialized: false,
+    // Set the first time warehouses are fetched so `needsWarehouseSetup`
+    // doesn't flash before the list has actually loaded.
+    warehousesLoaded: false,
   }),
 
   getters: {
@@ -63,6 +66,14 @@ export const useInventoryStore = defineStore('inventory', {
       );
     },
     lowStockCount: (state) => state.lowStock.length,
+    /**
+     * True once the store has loaded and found no warehouse at all. The
+     * inventory screen surfaces a clear "create a default warehouse" prompt
+     * instead of silently showing an empty table.
+     */
+    needsWarehouseSetup(state) {
+      return state.warehousesLoaded && state.warehouses.length === 0;
+    },
   },
 
   actions: {
@@ -103,6 +114,7 @@ export const useInventoryStore = defineStore('inventory', {
       if (branchOn && branchId) params.branchId = branchId;
       const response = await api.get('/warehouses', { params });
       this.warehouses = response?.data || [];
+      this.warehousesLoaded = true;
       return this.warehouses;
     },
 
@@ -238,6 +250,7 @@ export const useInventoryStore = defineStore('inventory', {
       this.lowStock = [];
       this.missingDefaultWarehouse = false;
       this.initialized = false;
+      this.warehousesLoaded = false;
       writeLS(LS_BRANCH, null);
       writeLS(LS_WAREHOUSE, null);
     },
@@ -284,6 +297,26 @@ export const useInventoryStore = defineStore('inventory', {
         return response.data;
       } catch (error) {
         notificationStore.error(error?.message || 'فشل تحديث الفرع');
+        throw error;
+      }
+    },
+
+    /**
+     * Ask the backend to create (or return) the internal default warehouse,
+     * then refresh local state and re-resolve the active warehouse. Used by the
+     * inventory screen when no warehouse exists yet so the operator can start
+     * with one click — no need to understand branches.
+     */
+    async ensureDefaultWarehouse() {
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await api.post('/warehouses/ensure-default');
+        await this.fetchWarehouses();
+        await this.resolveActiveWarehouse();
+        notificationStore.success('تم تجهيز المخزن الافتراضي');
+        return response.data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'تعذّر إنشاء المخزن الافتراضي');
         throw error;
       }
     },

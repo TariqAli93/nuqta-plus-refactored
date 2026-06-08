@@ -36,15 +36,19 @@ function buildExcelXml(report) {
   const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const rows = Object.entries(report.kpisByCurrency || {})
     .map(
-      ([cur, v]) => `
-    <Row><Cell><Data ss:Type="String">${esc(cur)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.sales || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.totalPaid || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.unpaidBalances || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.netProfit || 0)}</Data></Cell></Row>`
+      ([cur, v]) => {
+        const refunded = Number(v.refundedAmount || 0);
+        const net = v.netCollected !== undefined ? Number(v.netCollected) : Number(v.totalPaid || 0) - refunded;
+        return `
+    <Row><Cell><Data ss:Type="String">${esc(cur)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.sales || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.totalPaid || 0)}</Data></Cell><Cell><Data ss:Type="Number">${refunded}</Data></Cell><Cell><Data ss:Type="Number">${net}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.unpaidBalances || 0)}</Data></Cell><Cell><Data ss:Type="Number">${Number(v.netProfit || 0)}</Data></Cell></Row>`;
+      }
     )
     .join('');
 
   return `<?xml version="1.0"?>
   <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
     <Worksheet ss:Name="الملخص"><Table>
-      <Row><Cell><Data ss:Type="String">العملة</Data></Cell><Cell><Data ss:Type="String">إجمالي المبيعات</Data></Cell><Cell><Data ss:Type="String">المدفوع</Data></Cell><Cell><Data ss:Type="String">المتبقي</Data></Cell><Cell><Data ss:Type="String">صافي الربح</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">العملة</Data></Cell><Cell><Data ss:Type="String">إجمالي المبيعات</Data></Cell><Cell><Data ss:Type="String">المبالغ المحصّلة</Data></Cell><Cell><Data ss:Type="String">المبالغ المرجعة</Data></Cell><Cell><Data ss:Type="String">صافي التحصيل</Data></Cell><Cell><Data ss:Type="String">المتبقي</Data></Cell><Cell><Data ss:Type="String">صافي الربح</Data></Cell></Row>
       ${rows}
     </Table></Worksheet>
     <Worksheet ss:Name="المبيعات"><Table>
@@ -65,9 +69,13 @@ function buildSimplePdf(report) {
     `الفلاتر: ${JSON.stringify(report.meta.filters)}`,
     '',
     'ملخص المؤشرات',
-    ...Object.entries(report.kpisByCurrency || {}).flatMap(([cur, v]) => [
-      `${cur}: المبيعات=${Number(v.sales || 0)} | المدفوع=${Number(v.totalPaid || 0)} | المتبقي=${Number(v.unpaidBalances || 0)} | صافي الربح=${Number(v.netProfit || 0)}`,
-    ]),
+    ...Object.entries(report.kpisByCurrency || {}).flatMap(([cur, v]) => {
+      const refunded = Number(v.refundedAmount || 0);
+      const net = v.netCollected !== undefined ? Number(v.netCollected) : Number(v.totalPaid || 0) - refunded;
+      return [
+        `${cur}: المبيعات=${Number(v.sales || 0)} | المحصّل=${Number(v.totalPaid || 0)} | المرجع=${refunded} | صافي التحصيل=${net} | المتبقي=${Number(v.unpaidBalances || 0)} | صافي الربح=${Number(v.netProfit || 0)}`,
+      ];
+    }),
   ];
 
   const stream = ['BT /F1 10 Tf 40 780 Td'];

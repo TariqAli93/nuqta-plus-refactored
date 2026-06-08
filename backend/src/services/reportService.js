@@ -16,6 +16,7 @@ import {
 } from '../models/index.js';
 import { and, eq, gte, lte, sql, inArray, desc } from 'drizzle-orm';
 import { branchFilterFor } from './scopeService.js';
+import { netAfterReturn } from './reportMath.js';
 
 
 function toNum(v) {
@@ -93,6 +94,23 @@ export class ReportService {
       .leftJoin(sales, eq(saleReturns.saleId, sales.id))
       .where(and(...saleConds))
       .groupBy(sales.currency);
+
+    // Refunded cash/card/transfer handed back to customers via returns or full
+    // cancellations. `sale_returns.refund_amount` is the actual money returned
+    // (debt-only "credit" refunds carry refund_amount = 0), and `refund_method`
+    // tells us which tender it came out of — so we can show refunded + net
+    // totals next to collected, per method. Attributed to the originating
+    // sale's currency/branch/period (same basis as returnRows above).
+    const refundRows = await db
+      .select({
+        currency: sales.currency,
+        refundMethod: saleReturns.refundMethod,
+        refunded: sql`COALESCE(SUM(${saleReturns.refundAmount}::numeric),0)`,
+      })
+      .from(saleReturns)
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .where(and(...saleConds))
+      .groupBy(sales.currency, saleReturns.refundMethod);
 
     const paymentDate = sql`${payments.paymentDate}::date::text`;
     const paymentConds = [
@@ -318,6 +336,20 @@ export class ReportService {
         transferPayments: toNum(r.transferPayments), installmentCollections: toNum(r.installmentCollections),
       });
     }
+    // Aggregate refunds per currency (and per method) so the report can show
+    // collected vs refunded vs net. A fully-returned period nets to zero.
+    for (const r of refundRows) {
+      const key = r.currency;
+      summaryByCurrency[key] ??= {};
+      const s = summaryByCurrency[key];
+      const amt = toNum(r.refunded);
+      if (amt === 0) continue;
+      s.refundedAmount = (s.refundedAmount || 0) + amt;
+      const method = (r.refundMethod || '').toLowerCase();
+      if (method === 'cash') s.cashRefunds = (s.cashRefunds || 0) + amt;
+      else if (method === 'card') s.cardRefunds = (s.cardRefunds || 0) + amt;
+      else if (method === 'transfer') s.transferRefunds = (s.transferRefunds || 0) + amt;
+    }
     for (const r of installmentRows) {
       const key = r.currency;
       summaryByCurrency[key] ??= {};
@@ -350,6 +382,18 @@ export class ReportService {
       s.grossProfit = cogs === null ? null : revenue - cogs;
       s.expenses = expenseTotal;
       s.netProfit = cogs === null ? null : revenue - cogs - expenseTotal;
+
+      // Collected vs refunded vs net (overall + per payment method). Net stays
+      // a true difference (can dip below zero only when a refund's matching
+      // collection landed in a different period).
+      s.refundedAmount = toNum(s.refundedAmount);
+      s.cashRefunds = toNum(s.cashRefunds);
+      s.cardRefunds = toNum(s.cardRefunds);
+      s.transferRefunds = toNum(s.transferRefunds);
+      s.netCollected = toNum(s.totalPaid) - s.refundedAmount;
+      s.cashNet = toNum(s.cashPayments) - s.cashRefunds;
+      s.cardNet = toNum(s.cardPayments) - s.cardRefunds;
+      s.transferNet = toNum(s.transferPayments) - s.transferRefunds;
     }
     // Cover currencies that have expenses but no sales in the same period.
     for (const [cur, total] of Object.entries(expensesByCurrencyMap)) {
@@ -539,24 +583,91 @@ export class ReportService {
       cogsByDayRows.map((r) => [`${r.day}|${r.currency}`, toNum(r.cogs)])
     );
 
-    const totalsRows = revenueByCurrency.map((r) => ({
-      currency: r.currency,
-      revenue: toNum(r.revenue),
-      cogs: cogsByCurrencyMap[r.currency] || 0,
-    }));
-    const branchRows = revenueByBranch.map((r) => ({
-      branchId: r.branchId,
-      branchName: r.branchName,
-      currency: r.currency,
-      revenue: toNum(r.revenue),
-      cogs: cogsByBranchMap.get(`${r.branchId || 'null'}|${r.currency}`) || 0,
-    }));
-    const periodRows = revenueByDay.map((r) => ({
-      day: r.day,
-      currency: r.currency,
-      revenue: toNum(r.revenue),
-      cogs: cogsByDayMap.get(`${r.day}|${r.currency}`) || 0,
-    }));
+    // ── Returns: net out returned value (revenue) and returned COGS ──────────
+    // A return keeps sales.total + sale_items intact and records the refunded
+    // portion in sale_returns / sale_return_items, so every revenue/COGS figure
+    // above is GROSS. Subtract the returned portions here so revenue, COGS,
+    // gross and net profit all reflect the *net* sale. Returns are attributed to
+    // their original sale's currency/branch/day — the same basis the dashboard
+    // uses — so a full return nets the sale back to zero within its own period.
+    const retRevByCurrencyRows = await db
+      .select({ currency: sales.currency, v: sql`COALESCE(SUM(${saleReturns.returnedValue}::numeric),0)` })
+      .from(saleReturns)
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .where(saleWhere)
+      .groupBy(sales.currency);
+    const retRevByBranchRows = await db
+      .select({ branchId: sales.branchId, currency: sales.currency, v: sql`COALESCE(SUM(${saleReturns.returnedValue}::numeric),0)` })
+      .from(saleReturns)
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .where(saleWhere)
+      .groupBy(sales.branchId, sales.currency);
+    const retRevByDayRows = await db
+      .select({ day: salesDate, currency: sales.currency, v: sql`COALESCE(SUM(${saleReturns.returnedValue}::numeric),0)` })
+      .from(saleReturns)
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .where(saleWhere)
+      .groupBy(salesDate, sales.currency);
+
+    const retCogsByCurrencyRows = await db
+      .select({ currency: sales.currency, c: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)` })
+      .from(saleReturnItems)
+      .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(products, eq(saleReturnItems.productId, products.id))
+      .where(saleWhere)
+      .groupBy(sales.currency);
+    const retCogsByBranchRows = await db
+      .select({ branchId: sales.branchId, currency: sales.currency, c: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)` })
+      .from(saleReturnItems)
+      .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(products, eq(saleReturnItems.productId, products.id))
+      .where(saleWhere)
+      .groupBy(sales.branchId, sales.currency);
+    const retCogsByDayRows = await db
+      .select({ day: salesDate, currency: sales.currency, c: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)` })
+      .from(saleReturnItems)
+      .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
+      .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(products, eq(saleReturnItems.productId, products.id))
+      .where(saleWhere)
+      .groupBy(salesDate, sales.currency);
+
+    const retRevByCurrencyMap = Object.fromEntries(retRevByCurrencyRows.map((r) => [r.currency || 'USD', toNum(r.v)]));
+    const retRevByBranchMap = new Map(retRevByBranchRows.map((r) => [`${r.branchId || 'null'}|${r.currency}`, toNum(r.v)]));
+    const retRevByDayMap = new Map(retRevByDayRows.map((r) => [`${r.day}|${r.currency}`, toNum(r.v)]));
+    const retCogsByCurrencyMap = Object.fromEntries(retCogsByCurrencyRows.map((r) => [r.currency || 'USD', toNum(r.c)]));
+    const retCogsByBranchMap = new Map(retCogsByBranchRows.map((r) => [`${r.branchId || 'null'}|${r.currency}`, toNum(r.c)]));
+    const retCogsByDayMap = new Map(retCogsByDayRows.map((r) => [`${r.day}|${r.currency}`, toNum(r.c)]));
+
+    const totalsRows = revenueByCurrency.map((r) => {
+      const cur = r.currency || 'USD';
+      return {
+        currency: r.currency,
+        revenue: netAfterReturn(toNum(r.revenue), retRevByCurrencyMap[cur] || 0),
+        cogs: netAfterReturn(cogsByCurrencyMap[r.currency] || 0, retCogsByCurrencyMap[cur] || 0),
+      };
+    });
+    const branchRows = revenueByBranch.map((r) => {
+      const key = `${r.branchId || 'null'}|${r.currency}`;
+      return {
+        branchId: r.branchId,
+        branchName: r.branchName,
+        currency: r.currency,
+        revenue: netAfterReturn(toNum(r.revenue), retRevByBranchMap.get(key) || 0),
+        cogs: netAfterReturn(cogsByBranchMap.get(key) || 0, retCogsByBranchMap.get(key) || 0),
+      };
+    });
+    const periodRows = revenueByDay.map((r) => {
+      const key = `${r.day}|${r.currency}`;
+      return {
+        day: r.day,
+        currency: r.currency,
+        revenue: netAfterReturn(toNum(r.revenue), retRevByDayMap.get(key) || 0),
+        cogs: netAfterReturn(cogsByDayMap.get(key) || 0, retCogsByDayMap.get(key) || 0),
+      };
+    });
 
     // ── Expenses for the same window ────────────────────────────────────────
     const expenseConds = [];

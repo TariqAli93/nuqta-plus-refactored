@@ -14,6 +14,7 @@ import {
   branchFilterFor,
 } from './scopeService.js';
 import warehouseService, { TRANSFER_ERRORS } from './warehouseService.js';
+import { ensureDefaultBranch } from './systemDefaultsService.js';
 import { InventoryService } from './inventoryService.js';
 import featureFlagsService from './featureFlagsService.js';
 import alertBus from '../events/alertBus.js';
@@ -58,8 +59,11 @@ export class WarehouseTransferService {
     // Services have no stock — they can never be transferred between warehouses.
     await InventoryService.assertProductIsInventory(db, productId);
 
-    // Transfer inherits the source branch — that's the branch whose admin will approve.
-    const branchId = fromWh.branchId;
+    // Transfer inherits the source branch — that's the branch whose admin will
+    // approve. When branch management is off the warehouse has no branch, but
+    // warehouse_transfers.branch_id is NOT NULL, so fall back to the system
+    // default branch (transfers then operate purely warehouse-to-warehouse).
+    const branchId = fromWh.branchId || (await ensureDefaultBranch());
 
     const [row] = await db
       .insert(warehouseTransfers)

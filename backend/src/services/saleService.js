@@ -23,7 +23,7 @@ import {
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { generateDraftInvoicePlaceholder, calculateSaleTotals } from '../utils/helpers.js';
-import { eq, desc, and, or, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
+import { eq, desc, and, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
 import { buildSearch, ncol, RANK } from '../utils/searchBuilder.js';
 import { normalizeIraqPhone } from '../utils/phone.js';
 import settingsService from './settingsService.js';
@@ -35,6 +35,8 @@ import { InventoryService } from './inventoryService.js';
 import { resolveUnitSnapshot, listProductUnits } from './productUnitService.js';
 import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
+import { ensureDefaultBranch, ensureDefaultWarehouse } from './systemDefaultsService.js';
+import { netAfterReturn, returnedItemCost } from './reportMath.js';
 import cashSessionService from './cashSessionService.js';
 import { PAYMENT_METHOD_CASH } from '../constants/sales.js';
 
@@ -327,7 +329,10 @@ async function resolveBranchWarehouse({ branchId, warehouseId, actingUser }) {
     if (branchId && branchId !== wh.branchId) {
       throw new ValidationError('Warehouse does not belong to the specified branch');
     }
-    return { branchId: wh.branchId, warehouseId: wh.id };
+    // A warehouse created while multi-branch is off has no branchId, but invoice
+    // numbering needs a NOT-NULL branch — fall back to the system default branch.
+    const effectiveBranchId = wh.branchId || (await ensureDefaultBranch());
+    return { branchId: effectiveBranchId, warehouseId: wh.id };
   }
 
   // Prefer a warehouse inside the user's assigned branch when the caller is
@@ -351,19 +356,29 @@ async function resolveBranchWarehouse({ branchId, warehouseId, actingUser }) {
     }
   }
 
-  // Legacy fallback: first active warehouse anywhere
+  // Legacy / single-warehouse fallback: first active warehouse anywhere.
   const [fallback] = await db
     .select({ id: warehouses.id, branchId: warehouses.branchId })
     .from(warehouses)
     .where(eq(warehouses.isActive, true))
     .orderBy(warehouses.id)
     .limit(1);
-  if (!fallback) {
-    throw new ValidationError(
-      'No active warehouse configured — create a branch/warehouse before recording sales'
-    );
+  if (fallback) {
+    const effectiveBranchId = fallback.branchId || (await ensureDefaultBranch());
+    return { branchId: effectiveBranchId, warehouseId: fallback.id };
   }
-  return { branchId: fallback.branchId, warehouseId: fallback.id };
+
+  // Nothing exists yet (e.g. branch management off and the operator never made
+  // a warehouse). Create the internal default warehouse + branch on demand so
+  // selling never dead-ends with "create a branch/warehouse first".
+  const defaultWarehouseId = await ensureDefaultWarehouse();
+  const [created] = await db
+    .select({ id: warehouses.id, branchId: warehouses.branchId })
+    .from(warehouses)
+    .where(eq(warehouses.id, defaultWarehouseId))
+    .limit(1);
+  const effectiveBranchId = created?.branchId || (await ensureDefaultBranch());
+  return { branchId: effectiveBranchId, warehouseId: defaultWarehouseId };
 }
 
 export class SaleService {
@@ -1164,7 +1179,11 @@ export class SaleService {
     // Use sql cast for date comparison with timestamps
     const createdDate = sql`${sales.createdAt}::date::text`;
     const conds = [
-      or(eq(sales.status, 'completed'), eq(sales.status, 'pending')),
+      // Include returned / partially-returned sales — they are still real
+      // transactions; the returned portion is netted out below. Excluding them
+      // (as the old `completed|pending` filter did) made a returned sale vanish
+      // from the report entirely instead of being correctly reduced.
+      inArray(sales.status, ['completed', 'pending', 'partially_returned', 'returned']),
       ...(start ? [gte(createdDate, start)] : []),
       ...(end ? [lte(createdDate, end)] : []),
     ];
@@ -1261,8 +1280,60 @@ export class SaleService {
       if (byCur[c]) byCur[c].totalProfit += profit;
     }
 
+    // ── Net out returns ──────────────────────────────────────────────────────
+    // A returned / partially-returned sale keeps its original total + line items
+    // (so everything summed above is GROSS). Subtract the authoritative returned
+    // value (capped/rounded at return time) from sales & revenue, and the
+    // returned gross margin (returned value − returned cost) from profit. The
+    // returned cost reuses the same per-unit snapshot the forward profit uses so
+    // a full return nets the line's profit back to zero.
+    let returnItems = [];
+    let returnValueRows = [];
+    if (saleIds.length) {
+      returnItems = await db
+        .select({
+          quantity: saleReturnItems.quantity,
+          baseQuantity: saleReturnItems.baseQuantity,
+          unitConversionFactor: saleReturnItems.unitConversionFactor,
+          unitCostPrice: saleItems.unitCostPrice,
+          productCost: products.costPrice,
+          currency: sales.currency,
+        })
+        .from(saleReturnItems)
+        .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
+        .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+        .leftJoin(saleItems, eq(saleReturnItems.saleItemId, saleItems.id))
+        .leftJoin(products, eq(saleReturnItems.productId, products.id))
+        .where(inArray(saleReturns.saleId, saleIds));
+
+      returnValueRows = await db
+        .select({
+          currency: sales.currency,
+          returnedValue: sql`COALESCE(SUM(${saleReturns.returnedValue}::numeric),0)`,
+        })
+        .from(saleReturns)
+        .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+        .where(inArray(saleReturns.saleId, saleIds))
+        .groupBy(sales.currency);
+    }
+
+    const returnedCostByCur = {};
+    for (const ri of returnItems) {
+      const c = ri.currency || 'USD';
+      returnedCostByCur[c] = (returnedCostByCur[c] || 0) + returnedItemCost(ri);
+    }
+    const returnedValueByCur = Object.fromEntries(
+      returnValueRows.map((r) => [r.currency || 'USD', n(r.returnedValue)])
+    );
+
     for (const c in byCur) {
       const o = byCur[c];
+      const retVal = returnedValueByCur[c] || 0;
+      const retCost = returnedCostByCur[c] || 0;
+      o.totalSales = netAfterReturn(o.totalSales, retVal);
+      o.totalRevenue = netAfterReturn(o.totalRevenue, retVal);
+      // Drop the returned gross margin from profit (= retVal − retCost).
+      o.totalProfit += retCost - retVal;
       o.totalProfit = o.totalProfit - o.totalDiscount + o.totalInterest;
     }
 
@@ -2298,30 +2369,66 @@ export class SaleService {
     const db = await getDb();
     const { limit = 5, startDate, endDate } = filters;
 
-    const conditions = [eq(sales.status, 'completed')];
+    // Include returned / partially-returned sales — the returned quantities are
+    // subtracted below so a returned item no longer inflates product sales.
+    const conditions = [
+      inArray(sales.status, ['completed', 'partially_returned', 'returned']),
+    ];
     if (startDate) conditions.push(gte(sales.createdAt, new Date(startDate)));
     if (endDate) conditions.push(lte(sales.createdAt, new Date(endDate)));
 
-    const result = await db
+    // Gross per-product totals. No SQL LIMIT here: returns are netted out in JS
+    // first, then we sort + slice, so a heavily-returned product can't keep a
+    // slot it no longer deserves.
+    const grossRows = await db
       .select({
         productId: saleItems.productId,
         productName: sql`min(${products.name})`.as('productName'),
-        totalQuantity: sql`CAST(sum(${saleItems.quantity}) AS integer)`.as('totalQuantity'),
-        totalRevenue: sql`CAST(sum(${saleItems.quantity} * ${saleItems.unitPrice}::numeric) AS numeric)`.as('totalRevenue'),
+        totalQuantity: sql`CAST(COALESCE(sum(${saleItems.quantity}),0) AS integer)`.as('totalQuantity'),
+        totalRevenue: sql`CAST(COALESCE(sum(${saleItems.quantity} * ${saleItems.unitPrice}::numeric),0) AS numeric)`.as('totalRevenue'),
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
       .innerJoin(products, eq(saleItems.productId, products.id))
       .where(and(...conditions))
-      .groupBy(saleItems.productId)
-      .orderBy(sql`sum(${saleItems.quantity}) DESC`)
-      .limit(limit);
+      .groupBy(saleItems.productId);
 
-    return result.map((row) => ({
-      productId: row.productId,
-      productName: row.productName,
-      totalQuantity: Number(row.totalQuantity) || 0,
-      totalRevenue: Number(row.totalRevenue) || 0,
-    }));
+    // Returned quantities/revenue per product, matched to the parent sale's
+    // date window so the netting lines up with the gross figures above.
+    const returnConds = [];
+    if (startDate) returnConds.push(gte(sales.createdAt, new Date(startDate)));
+    if (endDate) returnConds.push(lte(sales.createdAt, new Date(endDate)));
+    const returnRows = await db
+      .select({
+        productId: saleReturnItems.productId,
+        returnedQuantity: sql`COALESCE(sum(${saleReturnItems.quantity}),0)`.as('returnedQuantity'),
+        returnedRevenue: sql`COALESCE(sum(${saleReturnItems.subtotal}::numeric),0)`.as('returnedRevenue'),
+      })
+      .from(saleReturnItems)
+      .innerJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
+      .innerJoin(sales, eq(saleReturns.saleId, sales.id))
+      .where(returnConds.length ? and(...returnConds) : undefined)
+      .groupBy(saleReturnItems.productId);
+
+    const returnsByProduct = new Map(
+      returnRows.map((r) => [
+        r.productId,
+        { qty: Number(r.returnedQuantity) || 0, revenue: Number(r.returnedRevenue) || 0 },
+      ])
+    );
+
+    return grossRows
+      .map((row) => {
+        const ret = returnsByProduct.get(row.productId) || { qty: 0, revenue: 0 };
+        return {
+          productId: row.productId,
+          productName: row.productName,
+          totalQuantity: Math.max(0, (Number(row.totalQuantity) || 0) - ret.qty),
+          totalRevenue: Math.max(0, (Number(row.totalRevenue) || 0) - ret.revenue),
+        };
+      })
+      .filter((r) => r.totalQuantity > 0)
+      .sort((a, b) => b.totalQuantity - a.totalQuantity)
+      .slice(0, limit);
   }
 }

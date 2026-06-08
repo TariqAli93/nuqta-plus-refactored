@@ -61,7 +61,9 @@ function dashboardSections(data, options) {
   const summaryColumns = [
     { key: 'currency', header: 'العملة', type: 'text' },
     { key: 'sales', header: 'إجمالي المبيعات', type: 'number' },
-    { key: 'collected', header: 'المحصّل', type: 'number' },
+    { key: 'collected', header: 'المبالغ المحصّلة', type: 'number' },
+    { key: 'refunded', header: 'المبالغ المرجعة', type: 'number' },
+    { key: 'netCollected', header: 'صافي التحصيل', type: 'number' },
     { key: 'unpaid', header: 'الديون المتبقية', type: 'number' },
     { key: 'overdueAmount', header: 'مبالغ متأخرة', type: 'number' },
   ];
@@ -72,15 +74,21 @@ function dashboardSections(data, options) {
     id: 'summary',
     title: 'الملخص متعدد العملات',
     columns: summaryColumns,
-    rows: kpis.map(([cur, k]) => ({
-      currency: text(cur),
-      sales: toNumber(k.sales),
-      collected: toNumber(k.totalPaid),
-      unpaid: toNumber(k.unpaidBalances),
-      overdueAmount: toNumber(k.lateAmounts),
-      netProfit:
-        k.netProfit === null || k.netProfit === undefined ? NULLABLE : toNumber(k.netProfit),
-    })),
+    rows: kpis.map(([cur, k]) => {
+      const refunded = toNumber(k.refundedAmount);
+      return {
+        currency: text(cur),
+        sales: toNumber(k.sales),
+        collected: toNumber(k.totalPaid),
+        refunded,
+        netCollected:
+          k.netCollected !== undefined ? toNumber(k.netCollected) : toNumber(k.totalPaid) - refunded,
+        unpaid: toNumber(k.unpaidBalances),
+        overdueAmount: toNumber(k.lateAmounts),
+        netProfit:
+          k.netProfit === null || k.netProfit === undefined ? NULLABLE : toNumber(k.netProfit),
+      };
+    }),
   });
 
   // --- Sales by currency ---------------------------------------------------
@@ -113,20 +121,28 @@ function dashboardSections(data, options) {
     title: 'الدفعات حسب العملة',
     columns: [
       { key: 'currency', header: 'العملة', type: 'text' },
-      { key: 'totalPaid', header: 'الإجمالي المحصّل', type: 'number' },
+      { key: 'totalPaid', header: 'المبالغ المحصّلة', type: 'number' },
+      { key: 'refundedAmount', header: 'المبالغ المرجعة', type: 'number' },
+      { key: 'netCollected', header: 'صافي التحصيل', type: 'number' },
       { key: 'cashPayments', header: 'نقدًا', type: 'number' },
       { key: 'cardPayments', header: 'بطاقة', type: 'number' },
       { key: 'transferPayments', header: 'تحويل', type: 'number' },
       { key: 'installmentCollections', header: 'تحصيل أقساط', type: 'number' },
     ],
-    rows: kpis.map(([cur, k]) => ({
-      currency: text(cur),
-      totalPaid: toNumber(k.totalPaid),
-      cashPayments: toNumber(k.cashPayments),
-      cardPayments: toNumber(k.cardPayments),
-      transferPayments: toNumber(k.transferPayments),
-      installmentCollections: toNumber(k.installmentCollections),
-    })),
+    rows: kpis.map(([cur, k]) => {
+      const refunded = toNumber(k.refundedAmount);
+      return {
+        currency: text(cur),
+        totalPaid: toNumber(k.totalPaid),
+        refundedAmount: refunded,
+        netCollected:
+          k.netCollected !== undefined ? toNumber(k.netCollected) : toNumber(k.totalPaid) - refunded,
+        cashPayments: toNumber(k.cashPayments),
+        cardPayments: toNumber(k.cardPayments),
+        transferPayments: toNumber(k.transferPayments),
+        installmentCollections: toNumber(k.installmentCollections),
+      };
+    }),
   });
 
   // --- Installments by currency -------------------------------------------
