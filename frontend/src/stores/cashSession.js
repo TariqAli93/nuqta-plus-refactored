@@ -3,6 +3,31 @@ import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
 
 /**
+ * Backend error codes (from accountingPeriodService) → clear Arabic messages,
+ * so a 422 from the shift/period guards is never shown raw. The backend already
+ * sends a localized `message`, but mapping by stable `code` keeps the wording
+ * consistent and lets the frontend pre-checks reuse the exact same strings.
+ */
+export const SHIFT_ERROR_MESSAGES = Object.freeze({
+  ACCOUNTING_PERIOD_DISABLED: 'نظام القيد المحاسبي غير مفعل. يجب تفعيله قبل فتح الوردية.',
+  NO_OPEN_ACCOUNTING_PERIOD: 'لا يوجد قيد محاسبي مفتوح. يجب فتح قيد محاسبي لإتمام عمليات البيع.',
+  // Backend also emits ACCOUNTING_PERIOD_REQUIRED for "no open period" — alias it.
+  ACCOUNTING_PERIOD_REQUIRED: 'لا يوجد قيد محاسبي مفتوح. يجب فتح قيد محاسبي لإتمام عمليات البيع.',
+  NO_OPEN_ACCOUNTING_PERIOD_FOR_BRANCH: 'لا يوجد قيد محاسبي مفتوح لهذا الفرع.',
+  ACCOUNTING_PERIOD_CLOSED: 'القيد المحاسبي مغلق. افتح قيداً جديداً لإتمام عمليات البيع.',
+  SHIFT_CLOSED: 'الوردية مغلقة. افتح وردية جديدة لإتمام البيع.',
+  SHIFT_REQUIRED: 'لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح — افتح وردية أولاً.',
+  NO_EFFECTIVE_BRANCH: 'لا يوجد فرع افتراضي للنظام. يرجى إعداد فرع افتراضي أولاً.',
+});
+
+/** Map an axios error to a localized message: code map → backend message → fallback. */
+export function resolveShiftErrorMessage(err, fallback) {
+  const code = err?.response?.data?.code;
+  if (code && SHIFT_ERROR_MESSAGES[code]) return SHIFT_ERROR_MESSAGES[code];
+  return err?.response?.data?.message || fallback;
+}
+
+/**
  * Pinia store for cash sessions / shift closing.
  *
  * `current` mirrors the open session for the acting user (or null). The POS
@@ -30,7 +55,7 @@ export const useCashSessionStore = defineStore('cashSession', {
         const response = await api.get('/cash-sessions/current');
         this.current = response?.data || null;
         return this.current;
-      } catch (err) {
+      } catch {
         // Don't toast — the POS screen handles the "no open session" state.
         this.current = null;
         return null;
@@ -54,8 +79,9 @@ export const useCashSessionStore = defineStore('cashSession', {
         notify.success('تم فتح الوردية');
         return this.current;
       } catch (err) {
-        const msg = err?.response?.data?.message || 'فشل فتح الوردية';
-        notify.error(msg);
+        // Map backend 422 codes (ACCOUNTING_PERIOD_DISABLED, etc.) to clear
+        // Arabic — never surface a raw 422.
+        notify.error(resolveShiftErrorMessage(err, 'فشل فتح الوردية'));
         throw err;
       } finally {
         this.loading = false;
@@ -75,8 +101,7 @@ export const useCashSessionStore = defineStore('cashSession', {
         notify.success('تم إغلاق الوردية');
         return closed;
       } catch (err) {
-        const msg = err?.response?.data?.message || 'فشل إغلاق الوردية';
-        notify.error(msg);
+        notify.error(resolveShiftErrorMessage(err, 'فشل إغلاق الوردية'));
         throw err;
       } finally {
         this.loading = false;

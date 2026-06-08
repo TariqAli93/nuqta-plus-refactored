@@ -4,6 +4,7 @@ import { expenses, branches, users } from '../models/index.js';
 import * as schema from '../models/index.js';
 import { and, eq, gte, lte, sql, desc } from 'drizzle-orm';
 import { branchFilterFor, enforceBranchScope, isGlobalAdmin } from './scopeService.js';
+import accountingPeriodService from './accountingPeriodService.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 function n(v) {
@@ -74,11 +75,24 @@ export class ExpensesService {
         ? input.expenseDate
         : new Date().toISOString().slice(0, 10);
 
+    // Attach to the open accounting period + the user's open shift (both
+    // required when the feature is on; no-ops when off).
+    const accountingPeriodId = await accountingPeriodService.resolvePeriodIdForWrite(
+      user,
+      branchId,
+      { require: true }
+    );
+    const cashSessionId = await accountingPeriodService.requireOpenShift(user, accountingPeriodId, {
+      message: 'لا يمكن تسجيل المصروف — لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح',
+    });
+
     return await withTransaction(async (tx) => {
       const [row] = await tx
         .insert(expenses)
         .values({
           branchId,
+          accountingPeriodId,
+          cashSessionId,
           category: String(input.category).trim(),
           amount: String(amount),
           currency: input.currency || 'USD',
@@ -170,7 +184,9 @@ export class ExpensesService {
   }
 
   async update(id, input, actingUser = null) {
-    await this.getById(id, actingUser); // scope check + existence
+    const existing = await this.getById(id, actingUser); // scope check + existence
+    await accountingPeriodService.assertWritable(existing.accountingPeriodId || null);
+    await accountingPeriodService.assertShiftWritable(existing.cashSessionId || null);
     const db = await getDb();
     const patch = {};
     if (input.category !== undefined) patch.category = String(input.category).trim();
@@ -197,7 +213,9 @@ export class ExpensesService {
   }
 
   async delete(id, actingUser = null) {
-    await this.getById(id, actingUser); // scope check
+    const existing = await this.getById(id, actingUser); // scope check
+    await accountingPeriodService.assertWritable(existing.accountingPeriodId || null);
+    await accountingPeriodService.assertShiftWritable(existing.cashSessionId || null);
     const db = await getDb();
     await db.delete(expenses).where(eq(expenses.id, Number(id)));
     return { success: true, message: 'Expense deleted' };

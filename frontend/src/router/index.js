@@ -41,6 +41,7 @@ import FeatureFlags from '@/views/settings/FeatureFlags.vue';
 import SetupWizard from '@/views/settings/SetupWizard.vue';
 import Collections from '@/views/collections/Collections.vue';
 import Expenses from '@/views/expenses/Expenses.vue';
+import AccountingPeriods from '@/views/accounting/AccountingPeriods.vue';
 
 const routes = [
   {
@@ -164,6 +165,11 @@ const routes = [
         name: 'Expenses',
         component: Expenses,
         meta: { requiresWrite: true },
+      },
+      {
+        path: 'accounting-periods',
+        name: 'AccountingPeriods',
+        component: AccountingPeriods,
       },
       {
         path: 'notifications',

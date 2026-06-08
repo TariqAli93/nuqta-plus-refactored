@@ -37,6 +37,7 @@ import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './sc
 import featureFlagsService from './featureFlagsService.js';
 import { ensureDefaultBranch, ensureDefaultWarehouse } from './systemDefaultsService.js';
 import { netAfterReturn, returnedItemCost } from './reportMath.js';
+import accountingPeriodService from './accountingPeriodService.js';
 import cashSessionService from './cashSessionService.js';
 import { PAYMENT_METHOD_CASH } from '../constants/sales.js';
 
@@ -488,11 +489,18 @@ export class SaleService {
     // acting user's branch/warehouse scope (defensive).
     await enforceWarehouseScope(actingUser, warehouseId);
 
+    // Attach to the open accounting period (required when the feature is on).
+    const accountingPeriodId = await accountingPeriodService.resolvePeriodIdForWrite(
+      actingUser,
+      branchId,
+      { require: true }
+    );
+
     // ── Cash session enforcement ────────────────────────────────────────────
-    // POS cash sales must run inside an open cash session for the acting user
-    // and branch. Installment sales (and POS card sales) do not need one — a
-    // POS card sale takes no physical cash so the drawer is unaffected, and
-    // installment sales come from the NewSale flow which has no shift drawer.
+    // When the accounting-period feature is ON, EVERY sale must run inside an
+    // open shift bound to the open period (strict cash-box model) — regardless
+    // of payment type or source. When OFF, the legacy rule applies: only POS
+    // cash sales need an open shift.
     let cashSessionId = null;
     const incomingPaymentMethod = saleData.paymentMethod || PAYMENT_METHOD_CASH;
     const isPosCashSale =
@@ -501,7 +509,11 @@ export class SaleService {
       incomingPaymentMethod === PAYMENT_METHOD_CASH &&
       Number(paidAmount) > 0;
 
-    if (isPosCashSale) {
+    if (await accountingPeriodService.isEnabled()) {
+      cashSessionId = await accountingPeriodService.requireOpenShift(actingUser, accountingPeriodId, {
+        message: 'لا يمكن إتمام البيع — لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح',
+      });
+    } else if (isPosCashSale) {
       const session = await cashSessionService.findOpenSession(userId, branchId);
       if (!session) {
         throw new ValidationError(
@@ -527,6 +539,7 @@ export class SaleService {
           branchId,
           warehouseId,
           cashSessionId,
+          accountingPeriodId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
           tax: String(totals.tax),
@@ -979,8 +992,27 @@ export class SaleService {
     };
   }
 
+  /**
+   * Block a sale mutation when its accounting period OR its shift is closed.
+   * Reads the period/shift ids straight from the row (getById omits them) and
+   * delegates to the central writability guards. No-op when the sale isn't
+   * attached to a period/shift (legacy rows / feature off).
+   */
+  async assertSaleWritable(saleId) {
+    const db = await getDb();
+    const [row] = await db
+      .select({ accountingPeriodId: sales.accountingPeriodId, cashSessionId: sales.cashSessionId })
+      .from(sales)
+      .where(eq(sales.id, saleId))
+      .limit(1);
+    await accountingPeriodService.assertAccountingPeriodWritable(row?.accountingPeriodId || null);
+    await accountingPeriodService.assertShiftWritable(row?.cashSessionId || null);
+  }
+
   async addPayment(saleId, paymentData, userId) {
     const sale = await this.getById(saleId);
+    // Recording a payment mutates the sale — blocked once its period/shift closes.
+    await this.assertSaleWritable(saleId);
 
     if (sale.status === 'cancelled') {
       throw new ValidationError('Cannot add payment to cancelled sale');
@@ -1111,6 +1143,20 @@ export class SaleService {
     if (sale.status === 'cancelled') {
       throw new ValidationError('Sale is already cancelled');
     }
+
+    // Cancelling mutates the sale — blocked once its accounting period OR its
+    // shift is closed.
+    const db = await getDb();
+    const [salePeriodRow] = await db
+      .select({
+        accountingPeriodId: sales.accountingPeriodId,
+        cashSessionId: sales.cashSessionId,
+      })
+      .from(sales)
+      .where(eq(sales.id, id))
+      .limit(1);
+    await accountingPeriodService.assertWritable(salePeriodRow?.accountingPeriodId || null);
+    await accountingPeriodService.assertShiftWritable(salePeriodRow?.cashSessionId || null);
 
     const result = await withTransaction(async (tx) => {
       // Per-warehouse stock restore via inventoryService (records sale_cancel
@@ -1397,6 +1443,8 @@ export class SaleService {
     }
 
     const sale = await this.getById(saleId);
+    // Removing a payment mutates the sale — blocked once its period/shift closes.
+    await this.assertSaleWritable(saleId);
     const paymentAmount = n(payment.amount);
 
     await withTransaction(async (tx) => {
@@ -1436,6 +1484,9 @@ export class SaleService {
       throw new NotFoundError('Sale');
     }
 
+    // Deleting a sale is destructive — blocked once its period/shift closes.
+    await this.assertSaleWritable(saleId);
+
     await withTransaction(async (tx) => {
       await tx.delete(payments).where(eq(payments.saleId, saleId));
       await tx.delete(installments).where(eq(installments.saleId, saleId));
@@ -1457,6 +1508,9 @@ export class SaleService {
     if (sale.status !== 'cancelled') {
       throw new ValidationError('Only cancelled sales can be restored');
     }
+
+    // Un-cancelling mutates the sale — blocked once its period/shift closes.
+    await this.assertSaleWritable(saleId);
 
     const result = await withTransaction(async (tx) => {
       if (sale.warehouseId) {
@@ -1575,6 +1629,21 @@ export class SaleService {
   async createReturn(saleId, returnData, actingUser) {
     const userId = actingUser?.id || null;
     const sale = await this.getById(saleId);
+
+    // A return mutates the original sale and must be recorded in the same
+    // accounting period — blocked once that period OR its shift is closed.
+    const db = await getDb();
+    const [salePeriodRow] = await db
+      .select({
+        accountingPeriodId: sales.accountingPeriodId,
+        cashSessionId: sales.cashSessionId,
+      })
+      .from(sales)
+      .where(eq(sales.id, sale.id))
+      .limit(1);
+    const salePeriodId = salePeriodRow?.accountingPeriodId || null;
+    await accountingPeriodService.assertWritable(salePeriodId);
+    await accountingPeriodService.assertShiftWritable(salePeriodRow?.cashSessionId || null);
 
     if (sale.status === 'cancelled') {
       throw new ValidationError('Cannot return items from a cancelled sale');
@@ -1828,6 +1897,10 @@ export class SaleService {
           customerId: sale.customerId || null,
           branchId: sale.branchId || null,
           warehouseId: sale.warehouseId || null,
+          accountingPeriodId: salePeriodId,
+          // Bind the return to the same shift as the originating sale so it is
+          // counted in that shift's closing totals and locked when it closes.
+          cashSessionId: salePeriodRow?.cashSessionId || null,
           returnedValue: String(returnedValue),
           refundAmount: String(refundAmount),
           debtReduction: String(debtReduction),
@@ -2182,8 +2255,15 @@ export class SaleService {
       actingUser,
     });
 
-    // Mirror the cash-session enforcement from create() so completing a POS
-    // cash draft requires an open shift.
+    // Completing a draft finalizes it into the open accounting period.
+    const accountingPeriodId = await accountingPeriodService.resolvePeriodIdForWrite(
+      actingUser,
+      branchId,
+      { require: true }
+    );
+
+    // Mirror the cash-session enforcement from create(): strict shift requirement
+    // when the accounting-period feature is ON, otherwise the legacy POS-cash rule.
     let cashSessionId = null;
     const draftPaymentMethod = saleData.paymentMethod || 'cash';
     const draftSaleSource = saleData.saleSource || draft.saleSource || null;
@@ -2193,7 +2273,11 @@ export class SaleService {
       draftPaymentType === 'cash' &&
       draftPaymentMethod === PAYMENT_METHOD_CASH &&
       Number(paidAmount) > 0;
-    if (draftIsCashSale) {
+    if (await accountingPeriodService.isEnabled()) {
+      cashSessionId = await accountingPeriodService.requireOpenShift(actingUser, accountingPeriodId, {
+        message: 'لا يمكن إتمام البيع — لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح',
+      });
+    } else if (draftIsCashSale) {
       const session = await cashSessionService.findOpenSession(userId, branchId);
       if (!session) {
         throw new ValidationError(
@@ -2223,6 +2307,7 @@ export class SaleService {
           branchId,
           warehouseId,
           cashSessionId,
+          accountingPeriodId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
           tax: String(totals.tax),

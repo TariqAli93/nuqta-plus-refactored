@@ -185,6 +185,12 @@ export function useNavigationMenu() {
             to: '/expenses',
             permission: 'expenses:read',
           },
+          {
+            title: 'القيود المحاسبية',
+            icon: 'mdi-book-clock-outline',
+            to: '/accounting-periods',
+            permission: 'accounting_periods:read',
+          },
         ],
       },
     },

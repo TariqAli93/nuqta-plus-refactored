@@ -15,6 +15,28 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { eq, and, ne, desc, sql, inArray } from 'drizzle-orm';
 import alertBus from '../events/alertBus.js';
 import { resolveUnitSnapshot } from './productUnitService.js';
+import accountingPeriodService from './accountingPeriodService.js';
+
+/**
+ * Best-effort: resolve the open accounting period for a warehouse's branch so
+ * manual stock movements (adjustments/transfers) carry the period link. Never
+ * throws — stock ops are not hard-gated on a period.
+ */
+async function resolveWarehousePeriodId(warehouseId) {
+  try {
+    const db = await getDb();
+    const [wh] = await db
+      .select({ branchId: warehouses.branchId })
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId))
+      .limit(1);
+    return await accountingPeriodService.resolvePeriodIdForWrite(null, wh?.branchId || null, {
+      require: false,
+    });
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Simple multi-branch / multi-warehouse inventory service.
@@ -106,6 +128,8 @@ async function applyStockChangeTx(
     unitId = null,
     unitName = null,
     unitQuantity = null,
+    // Optional accounting period link (manual adjustments/transfers stamp it).
+    accountingPeriodId = null,
   }
 ) {
   if (!productId || !warehouseId) {
@@ -147,6 +171,7 @@ async function applyStockChangeTx(
     unitId: unitId || null,
     unitName: unitName || null,
     unitQuantity: unitQuantity == null ? null : String(unitQuantity),
+    accountingPeriodId: accountingPeriodId || null,
     notes: notes || null,
     createdBy: userId || null,
   });
@@ -319,6 +344,8 @@ export class InventoryService {
       throw new ValidationError('نوع حركة المخزون غير صالح');
     }
 
+    const accountingPeriodId = await resolveWarehousePeriodId(warehouseId);
+
     const result = await withTransaction(async (tx) => {
       // Services have no stock — reject any adjustment against one.
       await InventoryService.assertProductIsInventory(tx, productId);
@@ -343,6 +370,7 @@ export class InventoryService {
         unitId: unit.id,
         unitName: unit.name,
         unitQuantity: quantityChange,
+        accountingPeriodId,
       });
 
       if (signedBase > 0) {
@@ -404,6 +432,8 @@ export class InventoryService {
       throw new ValidationError('الكمية يجب أن تكون أكبر من صفر');
     }
 
+    const accountingPeriodId = await resolveWarehousePeriodId(fromWarehouseId);
+
     return withTransaction(async (tx) => {
       // Services have no stock — reject any transfer against one.
       await InventoryService.assertProductIsInventory(tx, productId);
@@ -433,6 +463,7 @@ export class InventoryService {
         unitId: unit.id,
         unitName: unit.name,
         unitQuantity: quantity,
+        accountingPeriodId,
       });
       const incoming = await applyStockChangeTx(tx, {
         productId,
@@ -446,6 +477,7 @@ export class InventoryService {
         unitId: unit.id,
         unitName: unit.name,
         unitQuantity: quantity,
+        accountingPeriodId,
       });
       await InventoryService.moveStockEntriesTx(tx, {
         productId,

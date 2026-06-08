@@ -1,8 +1,9 @@
 import { getDb } from '../db.js';
 import { warehouses, branches } from '../models/index.js';
 import { eq, and } from 'drizzle-orm';
-import { AuthorizationError } from '../utils/errors.js';
+import { AuthorizationError, ValidationError } from '../utils/errors.js';
 import featureFlagsService from './featureFlagsService.js';
+import { ensureDefaultBranch, getDefaultBranchId } from './systemDefaultsService.js';
 
 /**
  * Branch-aware auth scope helpers.
@@ -170,6 +171,59 @@ export async function resolveUserScope(user) {
 }
 
 /**
+ * THE central resolver for "which branch does a financial operation belong to".
+ * Accounting periods, cash sessions/shifts and (indirectly) sales all go
+ * through this so a period and the shift under it ALWAYS share one branch id.
+ *
+ *   multiBranch ON:
+ *     - global admin → requestedBranchId (or their assigned branch); throws if
+ *       neither is set, and validates a branch-bound user can't target another.
+ *     - branch-bound  → their assigned branch; a mismatched requestedBranchId is
+ *       rejected.
+ *   multiBranch OFF:
+ *     - Disabling branches only HIDES branch selection from the user; the
+ *       internal branch context is preserved. We IGNORE requestedBranchId and
+ *       use the system default branch. `ensure:true` creates it on demand (the
+ *       open-period / open-shift path); read/lookup callers pass `ensure:false`
+ *       and get null when none exists yet (so a report just reads "no period").
+ *
+ * Throws `NO_EFFECTIVE_BRANCH` (422) only on the ensure path when a default
+ * branch can't be resolved/created.
+ */
+export async function resolveEffectiveBranchId({ user = null, requestedBranchId = null, ensure = false } = {}) {
+  const flags = await featureFlagsService.getFeatureFlags();
+  const branchScoped = flags.multiBranch !== false;
+
+  if (branchScoped) {
+    if (isGlobalAdmin(user)) {
+      const bid = requestedBranchId
+        ? Number(requestedBranchId)
+        : (user?.assignedBranchId ? Number(user.assignedBranchId) : null);
+      if (!bid) throw new ValidationError('يجب اختيار الفرع عند تفعيل نظام الفروع');
+      return bid;
+    }
+    const bid = user?.assignedBranchId ? Number(user.assignedBranchId) : null;
+    if (!bid) throw new AuthorizationError('المستخدم غير مرتبط بأي فرع');
+    if (requestedBranchId && Number(requestedBranchId) !== bid) {
+      throw new AuthorizationError('لا يمكنك تنفيذ العملية على فرع آخر');
+    }
+    return bid;
+  }
+
+  // multiBranch OFF — internal default branch, ignoring any requestedBranchId.
+  let id = await getDefaultBranchId();
+  if (!id && ensure) id = await ensureDefaultBranch();
+  if (!id) {
+    if (!ensure) return null;
+    const err = new ValidationError('لا يوجد فرع افتراضي للنظام. يرجى إعداد فرع افتراضي أولاً.');
+    err.code = 'NO_EFFECTIVE_BRANCH';
+    err.statusCode = 422;
+    throw err;
+  }
+  return id;
+}
+
+/**
  * Throw if the given user cannot access a resource in the given branch.
  * Global admins and resources without a branchId pass through.
  *
@@ -258,6 +312,7 @@ export default {
   isBranchAdmin,
   isBranchManager,
   resolveUserScope,
+  resolveEffectiveBranchId,
   enforceBranchScope,
   enforceWarehouseScope,
   getAllowedWarehouseIds,

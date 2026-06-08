@@ -68,6 +68,22 @@ export async function ensureDefaultBranch(executor = null) {
 }
 
 /**
+ * Find the system default branch id WITHOUT creating one — the oldest branch
+ * (lowest id), matching `ensureDefaultBranch`'s selection. Returns null when no
+ * branch exists yet. Use this on read/lookup paths (e.g. resolving the active
+ * accounting period) where a side-effecting create would be wrong.
+ */
+export async function getDefaultBranchId(executor = null) {
+  const db = executor || (await getDb());
+  const [row] = await db
+    .select({ id: branches.id })
+    .from(branches)
+    .orderBy(asc(branches.id))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+/**
  * Ensure at least one ACTIVE warehouse exists; return its id. Idempotent:
  *   - if any active warehouse already exists, returns the oldest (lowest id);
  *   - otherwise creates the internal default warehouse, attached to the
@@ -130,6 +146,7 @@ export default {
   DEFAULT_WAREHOUSE_NAME,
   pickEffectiveId,
   ensureDefaultBranch,
+  getDefaultBranchId,
   ensureDefaultWarehouse,
   getEffectiveBranchId,
   getEffectiveWarehouseId,

@@ -2,6 +2,28 @@
   <div class="pos" :class="{ 'is-mobile': isMobile, 'cart-open': cartOpen }">
     <!-- ═══════════════════ Products zone ═══════════════════ -->
     <section class="pos__products" aria-label="المنتجات">
+      <!-- Accounting-period gate (القيد المحاسبي): selling needs a usable open
+           period. Without one, every sell action is blocked and this banner
+           points to المالية → القيود المحاسبية → فتح قيد جديد. -->
+      <!-- <v-alert
+        v-if="!hasActivePeriod"
+        type="warning"
+        variant="tonal"
+        prominent
+        border="start"
+        class="pos__period-banner ma-2"
+      >
+        <div class="d-flex align-center justify-space-between gap-3 flex-wrap">
+          <div>
+            <div class="text-subtitle-2 font-weight-bold">{{ periodDialogTitle }}</div>
+            <div class="text-body-2">{{ shiftBlockReason }}</div>
+          </div>
+          <v-btn color="primary" variant="flat" size="small" :to="shiftBlockAction.to">
+            {{ shiftBlockAction.label }}
+          </v-btn>
+        </div>
+      </v-alert> -->
+
       <header class="products__toolbar">
         <!-- Shift status / open / close shift bar -->
         <div class="shift-bar">
@@ -33,11 +55,11 @@
           <template v-else>
             <v-chip
               size="small"
-              color="warning"
+              :color="canOpenShift ? 'warning' : 'error'"
               variant="flat"
               prepend-icon="mdi-alert-circle-outline"
             >
-              لا توجد وردية مفتوحة
+              {{ canOpenShift ? 'لا توجد وردية مفتوحة' : shiftBlockReason }}
             </v-chip>
             <v-spacer />
             <v-btn
@@ -45,7 +67,8 @@
               color="primary"
               variant="elevated"
               :loading="shiftLoading"
-              @click="openShiftDialog = true"
+              :title="canOpenShift ? '' : shiftBlockReason"
+              @click="onOpenShiftClick"
             >
               <v-icon start size="16">mdi-cash-register</v-icon>
               فتح وردية
@@ -601,7 +624,7 @@
                   variant="outlined"
                   size="large"
                   class="pay__draft-btn"
-                  :disabled="draftsDisabled || items.length === 0 || submitting"
+                  :disabled="draftsDisabled || items.length === 0 || submitting || !hasActivePeriod"
                   @click="onHold"
                 >
                   <v-icon start size="18">mdi-content-save-outline</v-icon>
@@ -615,7 +638,7 @@
             color="primary"
             class="pay__checkout"
             :loading="submitting"
-            :disabled="!canSubmit"
+            :disabled="!canSubmit || !hasActivePeriod"
             @click="checkout"
           >
             <v-icon start size="18">mdi-check-circle-outline</v-icon>
@@ -822,6 +845,37 @@
       @confirm="onCloseShiftConfirm"
       @cancel="closeShiftDialog = false"
     />
+
+    <!-- Blocking dialog (spec §6): shown when a period-gated action is attempted
+         without a usable open period. Routes to المالية → القيود المحاسبية. -->
+    <v-dialog v-model="mustOpenPeriodDialog" max-width="460">
+      <v-card class="rounded-lg">
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="warning">mdi-book-alert-outline</v-icon>
+          <span>{{ periodDialogTitle }}</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <p class="text-body-1 mb-2">
+            لا يمكن فتح وردية أو إتمام عمليات البيع قبل فتح قيد محاسبي.
+          </p>
+          <p class="text-body-2 text-medium-emphasis mb-0">{{ shiftBlockReason }}</p>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions class="pa-3">
+          <v-spacer />
+          <v-btn variant="text" @click="mustOpenPeriodDialog = false">إغلاق</v-btn>
+          <v-btn
+            color="primary"
+            variant="elevated"
+            prepend-icon="mdi-book-plus-outline"
+            @click="goToPeriodFix"
+          >
+            {{ shiftBlockAction.label }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -837,7 +891,9 @@ import {
   useNotificationStore,
   useSaleStore,
 } from '@/stores';
-import { useCashSessionStore } from '@/stores/cashSession';
+import { useCashSessionStore, SHIFT_ERROR_MESSAGES } from '@/stores/cashSession';
+import { useAccountingPeriodStore } from '@/stores/accountingPeriod';
+import { useAuthStore } from '@/stores/auth';
 import { usePosCart } from '@/composables/usePosCart';
 import { useFeatureGate } from '@/composables/useFeatureGate';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
@@ -855,6 +911,8 @@ const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
 const saleStore = useSaleStore();
 const cashSessionStore = useCashSessionStore();
+const accountingPeriodStore = useAccountingPeriodStore();
+const authStore = useAuthStore();
 
 // Capability-driven UI: the "save as draft" button is only meaningful when
 // the draftInvoices module is enabled AND the user has the capability.
@@ -881,8 +939,96 @@ const shiftLoading = ref(false);
 const currentSession = computed(() => cashSessionStore.current);
 const hasOpenSession = computed(() => cashSessionStore.hasOpenSession);
 
+// A shift can ONLY open when the accounting-period (القيد المحاسبي) system is
+// enabled AND an open period exists for the active branch — the backend rejects
+// otherwise. We mirror that here so the cashier gets a clear Arabic message and
+// we never fire a POST that's guaranteed to 422.
+const accountingPeriodsEnabled = computed(
+  () => authStore.hasFeature?.('accountingPeriods') === true
+);
+const multiBranchEnabled = computed(() => authStore.hasFeature?.('multiBranch') === true);
+const currentBranchId = computed(
+  () => inventoryStore.selectedBranchId || authStore.assignedBranchId || null
+);
+const activeAccountingPeriod = computed(() => accountingPeriodStore.current);
+
+// In branch mode the open period must belong to the selected branch; in single
+// mode any open (global) period suffices.
+const hasOpenPeriodForBranch = computed(() => {
+  const p = activeAccountingPeriod.value;
+  if (!p) return false;
+  if (multiBranchEnabled.value) {
+    return Number(p.branchId) === Number(currentBranchId.value);
+  }
+  return true;
+});
+
+// "POS may proceed (period-wise)." The accounting-period requirement is GATED
+// by the feature flag (matches the backend):
+//   - feature OFF → legacy POS: no period needed, nothing is blocked.
+//   - feature ON  → a usable OPEN period for this scope is required to open a
+//     shift or sell (the period is the root container).
+const hasActivePeriod = computed(
+  () => !accountingPeriodsEnabled.value || hasOpenPeriodForBranch.value
+);
+const canOpenShift = computed(() => hasActivePeriod.value);
+
+// The specific Arabic reason a shift can't be opened ('' when it can).
+const shiftBlockReason = computed(() => {
+  if (!accountingPeriodsEnabled.value) return SHIFT_ERROR_MESSAGES.ACCOUNTING_PERIOD_DISABLED;
+  if (!activeAccountingPeriod.value) return SHIFT_ERROR_MESSAGES.NO_OPEN_ACCOUNTING_PERIOD;
+  if (
+    multiBranchEnabled.value &&
+    Number(activeAccountingPeriod.value.branchId) !== Number(currentBranchId.value)
+  ) {
+    return SHIFT_ERROR_MESSAGES.NO_OPEN_ACCOUNTING_PERIOD_FOR_BRANCH;
+  }
+  return '';
+});
+
+// Where the banner / dialog call-to-action points: enable the system (settings)
+// vs open a new period (المالية → القيود المحاسبية → فتح قيد جديد).
+const shiftBlockAction = computed(() =>
+  !accountingPeriodsEnabled.value
+    ? { label: 'الانتقال إلى الإعدادات', to: { name: 'Settings' } }
+    : { label: 'فتح قيد جديد', to: { name: 'AccountingPeriods' } }
+);
+const periodDialogTitle = computed(() =>
+  !accountingPeriodsEnabled.value ? 'نظام القيد المحاسبي غير مفعل' : 'يجب فتح قيد محاسبي'
+);
+
+// The blocking dialog (spec §6). Opened whenever a period-gated action is
+// attempted without a usable open period; its action navigates to the fix.
+const mustOpenPeriodDialog = ref(false);
+const ensureActivePeriodOrWarn = () => {
+  if (hasActivePeriod.value) return true;
+  mustOpenPeriodDialog.value = true;
+  return false;
+};
+const goToPeriodFix = () => {
+  mustOpenPeriodDialog.value = false;
+  router.push(shiftBlockAction.value.to);
+};
+
 const refreshCurrentSession = async () => {
   await cashSessionStore.fetchCurrent();
+};
+
+const refreshCurrentAccountingPeriod = async () => {
+  if (!accountingPeriodsEnabled.value) {
+    accountingPeriodStore.current = null; // drop stale state when the system is off
+    return;
+  }
+  await accountingPeriodStore.fetchCurrent(currentBranchId.value || undefined).catch(() => {});
+};
+
+const onOpenShiftClick = async () => {
+  // Refresh the active period right before opening — it may have changed.
+  await refreshCurrentAccountingPeriod();
+  // No usable open period (disabled / none / wrong branch) → show the blocking
+  // dialog and never open the shift dialog or fire the (guaranteed-422) POST.
+  if (!ensureActivePeriodOrWarn()) return;
+  openShiftDialog.value = true;
 };
 
 const onOpenShiftConfirm = async ({ openingCash, currency: cur, notes }) => {
@@ -1365,6 +1511,9 @@ const saveLineEdit = () => {
 
 const checkout = async () => {
   if (!canSubmit.value) return;
+  // No usable open accounting period → block the sale (backend rejects too) and
+  // point the cashier at opening a period. This is the root container check.
+  if (!ensureActivePeriodOrWarn()) return;
   // Cash POS sales require an open shift. Card sales bypass this check —
   // the drawer doesn't move on a card transaction.
   const isCashSale = payment.method === 'cash' && Number(payment.paidAmount) > 0;
@@ -1403,6 +1552,8 @@ const checkout = async () => {
 };
 
 const onHold = async () => {
+  // Holding an invoice is a write inside the period — gate it the same way.
+  if (!ensureActivePeriodOrWarn()) return;
   try {
     // Resuming an existing draft? Drop the old row first so we don't fork it
     // into two competing drafts when the cashier saves again.
@@ -1668,9 +1819,12 @@ onMounted(async () => {
   await hydrateFromDraft();
 
   // Cash session: load the user's open shift; if there isn't one, surface
-  // the Open Shift dialog before the cashier tries to ring up a sale.
-  await refreshCurrentSession();
-  if (!hasOpenSession.value) {
+  // the Open Shift dialog before the cashier tries to ring up a sale — but
+  // only when a shift can actually be opened (an open accounting period exists,
+  // or the period feature is off). Otherwise the shift bar shows the
+  // "open an accounting period first" prompt instead.
+  await Promise.all([refreshCurrentSession(), refreshCurrentAccountingPeriod()]);
+  if (!hasOpenSession.value && canOpenShift.value) {
     openShiftDialog.value = true;
   }
 

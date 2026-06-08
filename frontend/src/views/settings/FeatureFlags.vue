@@ -129,6 +129,20 @@ const groups = [
     ],
   },
   {
+    title: 'المحاسبة',
+    icon: 'mdi-book-clock-outline',
+    color: 'info',
+    items: [
+      {
+        key: 'accountingPeriods',
+        title: 'القيد المحاسبي',
+        description:
+          'فترات مالية تُفتح وتُغلق. عند التفعيل: يلزم فتح قيد ووردية قبل البيع، وتُجمَّد التقارير عند الإغلاق. عند الإيقاف: يعمل البيع كالمعتاد بدون قيد.',
+        icon: 'mdi-book-clock-outline',
+      },
+    ],
+  },
+  {
     title: 'التنبيهات والمتابعة',
     icon: 'mdi-bell',
     color: 'warning',

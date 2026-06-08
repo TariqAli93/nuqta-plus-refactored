@@ -64,6 +64,10 @@ export const DEFAULT_FLAGS = Object.freeze({
   multiBranch: false,
   multiWarehouse: false,
   warehouseTransfers: false,
+  // Accounting periods (القيد المحاسبي). OFF by default: when off, financial
+  // operations behave exactly as before (period stamping is best-effort/null).
+  // When on, a shift/sale/expense/return requires an open period for its scope.
+  accountingPeriods: false,
   // Keep operational features on so alerts keep working out of the box
   alerts: true,
   liveOperations: true,

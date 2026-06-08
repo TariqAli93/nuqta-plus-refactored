@@ -17,12 +17,31 @@ import {
 import { and, eq, gte, lte, sql, inArray, desc } from 'drizzle-orm';
 import { branchFilterFor } from './scopeService.js';
 import { netAfterReturn } from './reportMath.js';
+import accountingPeriodService from './accountingPeriodService.js';
 
 
 function toNum(v) {
   if (v === null || v === undefined) return 0;
   return Number(v);
 }
+
+// COGS must use the ORIGINAL cost captured at sale time (sale_items.unit_cost_price),
+// NOT the product's current cost — so changing a product's cost later never
+// rewrites historical profit, and a returned item removes exactly the original
+// cost it was sold at. Falls back to the product base cost × base quantity only
+// for legacy rows that predate the per-unit cost snapshot. Mirrors the basis
+// used by getSalesReport (reportMath) and the accounting-period snapshot.
+const SOLD_COGS = sql`COALESCE(SUM(
+  CASE WHEN ${saleItems.unitCostPrice} IS NOT NULL
+       THEN ${saleItems.unitCostPrice}::numeric * ${saleItems.quantity}
+       ELSE COALESCE(${products.costPrice}::numeric, 0) * COALESCE(NULLIF(${saleItems.baseQuantity}, 0), ${saleItems.quantity})
+  END), 0)`;
+
+const RETURNED_COGS = sql`COALESCE(SUM(
+  CASE WHEN ${saleItems.unitCostPrice} IS NOT NULL
+       THEN ${saleItems.unitCostPrice}::numeric * ${saleReturnItems.quantity}
+       ELSE COALESCE(${products.costPrice}::numeric, 0) * COALESCE(NULLIF(${saleReturnItems.baseQuantity}, 0), ${saleReturnItems.quantity})
+  END), 0)`;
 
 function ymd(date) {
   if (!date) return null;
@@ -44,7 +63,7 @@ function applyBranchScope(filters, actingUser) {
   return Number(allowed[0]);
 }
 
-function withConditions(base = [], { branchId, currency, from, to }, dateColumn) {
+function withConditions(base = [], { branchId, currency, from, to, accountingPeriodId }, dateColumn) {
   const out = [...base];
   if (branchId !== null && branchId !== undefined) {
     if (branchId === -1) out.push(sql`1=0`);
@@ -53,20 +72,67 @@ function withConditions(base = [], { branchId, currency, from, to }, dateColumn)
   if (currency && currency !== 'ALL') out.push(eq(sales.currency, currency));
   if (from) out.push(gte(dateColumn, from));
   if (to) out.push(lte(dateColumn, to));
+  // Optional accounting-period scoping (القيد المحاسبي).
+  if (accountingPeriodId) out.push(eq(sales.accountingPeriodId, accountingPeriodId));
   return out;
 }
 
 export class ReportService {
+  /**
+   * Decide which accounting period a LIVE report should be scoped to.
+   *
+   *  - Explicit `accountingPeriodId` in the filters → honored (e.g. an admin
+   *    rebuilding a specific period).
+   *  - Feature OFF → no scoping; reports behave as before (date-range only).
+   *  - Feature ON, concrete scope, an open period exists → scope to it. This is
+   *    what makes "current reports" follow the open period and read zero once it
+   *    closes until a new one opens.
+   *  - Feature ON, concrete scope, NO open period → `accountingPeriodId = -1`
+   *    (a sentinel no row carries) so every aggregate returns zero, plus
+   *    `noOpenPeriod = true` so the UI can show "no open accounting period".
+   *  - Feature ON, branch mode, no specific branch in view (global admin across
+   *    all branches) → unscoped: there is no single active period to pick.
+   *
+   * Returns `{ accountingPeriodId, noOpenPeriod }`.
+   */
+  async resolveReportPeriod(filters, branchId) {
+    if (filters.accountingPeriodId) {
+      return { accountingPeriodId: Number(filters.accountingPeriodId), noOpenPeriod: false };
+    }
+    if (!(await accountingPeriodService.isEnabled())) {
+      return { accountingPeriodId: null, noOpenPeriod: false };
+    }
+    // No allowed branch for this user → nothing to show.
+    if (branchId === -1) {
+      return { accountingPeriodId: -1, noOpenPeriod: true };
+    }
+    const branchScoped = await accountingPeriodService.isBranchScoped();
+    if (branchScoped && (branchId === null || branchId === undefined)) {
+      // Branch mode, all-branches view — no single active period; stay unscoped.
+      return { accountingPeriodId: null, noOpenPeriod: false };
+    }
+    const active = await accountingPeriodService.getActiveAccountingPeriod({ branchId });
+    if (active) return { accountingPeriodId: active.id, noOpenPeriod: false };
+    return { accountingPeriodId: -1, noOpenPeriod: true };
+  }
+
   async getDashboard(filters = {}, actingUser = null) {
     const db = await getDb();
     const { from, to } = makeRange(filters);
-    const branchId = applyBranchScope(filters, actingUser);
+    // Branch filtering is feature-flag aware: when multiBranch is OFF, branches
+    // are hidden and ALL data lives under the system default branch, so we must
+    // NOT filter by a (possibly legacy) assignedBranchId — that would mismatch
+    // the default-branch period scope and wrongly return zero. (branchFilterFor
+    // is synchronous and flag-unaware; see scopeService note.)
+    const branchScoped = await accountingPeriodService.isBranchScoped();
+    const branchId = branchScoped ? applyBranchScope(filters, actingUser) : null;
     const currency = filters.currency || 'ALL';
+    const { accountingPeriodId, noOpenPeriod } = await this.resolveReportPeriod(filters, branchId);
 
     const salesDate = sql`${sales.createdAt}::date::text`;
     const saleConds = withConditions([
       sql`${sales.status} <> 'draft'`,
-    ], { branchId, currency, from, to }, salesDate);
+    ], { branchId, currency, from, to, accountingPeriodId }, salesDate);
 
     const salesSummaryRows = await db
       .select({
@@ -122,6 +188,7 @@ export class ReportService {
       if (branchId === -1) paymentConds.push(sql`1=0`);
       else paymentConds.push(eq(sales.branchId, branchId));
     }
+    if (accountingPeriodId) paymentConds.push(eq(sales.accountingPeriodId, accountingPeriodId));
 
     const paymentRows = await db
       .select({
@@ -146,6 +213,10 @@ export class ReportService {
       if (branchId === -1) installmentConds.push(sql`1=0`);
       else installmentConds.push(eq(sales.branchId, branchId));
     }
+    // Scope installments (and the delay stats below, which reuse these conds)
+    // to the active period too, so the dashboard zeroes out after close — the
+    // -1 sentinel matches no sale. Installments join sales for the period id.
+    if (accountingPeriodId) installmentConds.push(eq(sales.accountingPeriodId, accountingPeriodId));
     const today = new Date().toISOString().slice(0, 10);
     const installmentRows = await db
       .select({
@@ -244,22 +315,23 @@ export class ReportService {
     const cogsRows = await db
       .select({
         currency: sales.currency,
-        cogs: sql`COALESCE(SUM(CASE WHEN ${sales.status} <> 'cancelled' THEN ${saleItems.quantity} * ${products.costPrice}::numeric ELSE 0 END),0)`,
+        cogs: SOLD_COGS,
       })
       .from(saleItems)
       .leftJoin(sales, eq(saleItems.saleId, sales.id))
       .leftJoin(products, eq(saleItems.productId, products.id))
-      .where(and(...saleConds))
+      .where(and(...saleConds, sql`${sales.status} <> 'cancelled'`))
       .groupBy(sales.currency);
 
     const returnedCogsRows = await db
       .select({
         currency: sales.currency,
-        returnedCogs: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)`,
+        returnedCogs: RETURNED_COGS,
       })
       .from(saleReturnItems)
       .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
       .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(saleItems, eq(saleReturnItems.saleItemId, saleItems.id))
       .leftJoin(products, eq(saleReturnItems.productId, products.id))
       .where(and(...saleConds))
       .groupBy(sales.currency);
@@ -273,6 +345,7 @@ export class ReportService {
       if (branchId === -1) expenseConds.push(sql`1=0`);
       else expenseConds.push(eq(expenses.branchId, branchId));
     }
+    if (accountingPeriodId) expenseConds.push(eq(expenses.accountingPeriodId, accountingPeriodId));
     const expenseWhere = expenseConds.length ? and(...expenseConds) : undefined;
 
     const expenseByCurrency = await db
@@ -417,6 +490,11 @@ export class ReportService {
         filters: { dateFrom: from, dateTo: to, currency, requestedBranchId: filters.branchId || null, effectiveBranchId: branchId },
         generatedAt: new Date().toISOString(),
         conversionAvailable: false,
+        // Active-period scoping (القيد المحاسبي). When the feature is on, live
+        // reports follow the open period; `noOpenPeriod` tells the UI to show
+        // "no open accounting period" and that the zero figures are expected.
+        accountingPeriodId: accountingPeriodId && accountingPeriodId > 0 ? accountingPeriodId : null,
+        noOpenPeriod: noOpenPeriod === true,
         notes: [
           'Currency conversion unavailable: totals are grouped by currency only.',
         ],
@@ -472,7 +550,7 @@ export class ReportService {
         topDebtCustomers: debtRows,
         topPayingCustomers: topPaying,
       },
-      trends: await this.getTrends({ from, to, branchId, currency }),
+      trends: await this.getTrends({ from, to, branchId, currency, accountingPeriodId }),
     };
   }
 
@@ -492,13 +570,17 @@ export class ReportService {
   async getProfitReport(filters = {}, actingUser = null) {
     const db = await getDb();
     const { from, to } = makeRange(filters);
-    const branchId = applyBranchScope(filters, actingUser);
+    // Feature-flag-aware branch scoping (see getDashboard): off-mode → no branch
+    // filter so the default-branch period scope isn't mismatched to zero.
+    const branchScoped = await accountingPeriodService.isBranchScoped();
+    const branchId = branchScoped ? applyBranchScope(filters, actingUser) : null;
     const currency = filters.currency || 'ALL';
+    const { accountingPeriodId, noOpenPeriod } = await this.resolveReportPeriod(filters, branchId);
 
     const salesDate = sql`${sales.createdAt}::date::text`;
     const saleConds = withConditions(
       [sql`${sales.status} <> 'cancelled'`, sql`${sales.status} <> 'draft'`],
-      { branchId, currency, from, to },
+      { branchId, currency, from, to, accountingPeriodId },
       salesDate
     );
     const saleWhere = saleConds.length ? and(...saleConds) : undefined;
@@ -540,7 +622,7 @@ export class ReportService {
     const cogsByCurrencyRows = await db
       .select({
         currency: sales.currency,
-        cogs: sql`COALESCE(SUM(${saleItems.quantity} * ${products.costPrice}::numeric),0)`,
+        cogs: SOLD_COGS,
       })
       .from(saleItems)
       .leftJoin(sales, eq(saleItems.saleId, sales.id))
@@ -552,7 +634,7 @@ export class ReportService {
       .select({
         branchId: sales.branchId,
         currency: sales.currency,
-        cogs: sql`COALESCE(SUM(${saleItems.quantity} * ${products.costPrice}::numeric),0)`,
+        cogs: SOLD_COGS,
       })
       .from(saleItems)
       .leftJoin(sales, eq(saleItems.saleId, sales.id))
@@ -564,7 +646,7 @@ export class ReportService {
       .select({
         day: salesDate,
         currency: sales.currency,
-        cogs: sql`COALESCE(SUM(${saleItems.quantity} * ${products.costPrice}::numeric),0)`,
+        cogs: SOLD_COGS,
       })
       .from(saleItems)
       .leftJoin(sales, eq(saleItems.saleId, sales.id))
@@ -610,26 +692,29 @@ export class ReportService {
       .groupBy(salesDate, sales.currency);
 
     const retCogsByCurrencyRows = await db
-      .select({ currency: sales.currency, c: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)` })
+      .select({ currency: sales.currency, c: RETURNED_COGS })
       .from(saleReturnItems)
       .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
       .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(saleItems, eq(saleReturnItems.saleItemId, saleItems.id))
       .leftJoin(products, eq(saleReturnItems.productId, products.id))
       .where(saleWhere)
       .groupBy(sales.currency);
     const retCogsByBranchRows = await db
-      .select({ branchId: sales.branchId, currency: sales.currency, c: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)` })
+      .select({ branchId: sales.branchId, currency: sales.currency, c: RETURNED_COGS })
       .from(saleReturnItems)
       .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
       .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(saleItems, eq(saleReturnItems.saleItemId, saleItems.id))
       .leftJoin(products, eq(saleReturnItems.productId, products.id))
       .where(saleWhere)
       .groupBy(sales.branchId, sales.currency);
     const retCogsByDayRows = await db
-      .select({ day: salesDate, currency: sales.currency, c: sql`COALESCE(SUM(${saleReturnItems.quantity} * ${products.costPrice}::numeric),0)` })
+      .select({ day: salesDate, currency: sales.currency, c: RETURNED_COGS })
       .from(saleReturnItems)
       .leftJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
       .leftJoin(sales, eq(saleReturns.saleId, sales.id))
+      .leftJoin(saleItems, eq(saleReturnItems.saleItemId, saleItems.id))
       .leftJoin(products, eq(saleReturnItems.productId, products.id))
       .where(saleWhere)
       .groupBy(salesDate, sales.currency);
@@ -678,6 +763,7 @@ export class ReportService {
       if (branchId === -1) expenseConds.push(sql`1=0`);
       else expenseConds.push(eq(expenses.branchId, branchId));
     }
+    if (accountingPeriodId) expenseConds.push(eq(expenses.accountingPeriodId, accountingPeriodId));
     const expenseWhere = expenseConds.length ? and(...expenseConds) : undefined;
 
     const expByCurrency = await db
@@ -783,11 +869,13 @@ export class ReportService {
           effectiveBranchId: branchId,
         },
         generatedAt: new Date().toISOString(),
+        accountingPeriodId: accountingPeriodId && accountingPeriodId > 0 ? accountingPeriodId : null,
+        noOpenPeriod: noOpenPeriod === true,
       },
     };
   }
 
-  async getTrends({ from, to, branchId, currency }) {
+  async getTrends({ from, to, branchId, currency, accountingPeriodId = null }) {
     const db = await getDb();
     const conds = [sql`${sales.status} <> 'cancelled'`];
     if (from) conds.push(gte(sql`${sales.createdAt}::date::text`, from));
@@ -797,6 +885,8 @@ export class ReportService {
       else conds.push(eq(sales.branchId, branchId));
     }
     if (currency && currency !== 'ALL') conds.push(eq(sales.currency, currency));
+    // Live trends follow the active period too (sentinel -1 → empty charts).
+    if (accountingPeriodId) conds.push(eq(sales.accountingPeriodId, accountingPeriodId));
 
     const salesOverTime = await db
       .select({ day: sql`${sales.createdAt}::date::text`, currency: sales.currency, total: sql`COALESCE(SUM(${sales.total}::numeric),0)` })
@@ -821,7 +911,8 @@ export class ReportService {
         ...(from ? [gte(installments.dueDate, from)] : []),
         ...(to ? [lte(installments.dueDate, to)] : []),
         ...(currency && currency !== 'ALL' ? [eq(installments.currency, currency)] : []),
-        ...(branchId !== null && branchId !== undefined ? [branchId === -1 ? sql`1=0` : eq(sales.branchId, branchId)] : [])
+        ...(branchId !== null && branchId !== undefined ? [branchId === -1 ? sql`1=0` : eq(sales.branchId, branchId)] : []),
+        ...(accountingPeriodId ? [eq(sales.accountingPeriodId, accountingPeriodId)] : [])
       ))
       .groupBy(installments.dueDate, installments.currency)
       .orderBy(installments.dueDate);

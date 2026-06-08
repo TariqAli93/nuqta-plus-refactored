@@ -15,6 +15,34 @@
       "when": 1780696823908,
       "tag": "0001_add_product_type",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780900000000,
+      "tag": "0002_accounting_periods",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780900100000,
+      "tag": "0003_expense_cash_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780900200000,
+      "tag": "0004_accounting_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780900300000,
+      "tag": "0005_accounting_period_default_branch",
+      "breakpoints": true
     }
   ]
 }

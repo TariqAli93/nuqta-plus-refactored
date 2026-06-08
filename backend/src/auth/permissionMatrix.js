@@ -53,6 +53,13 @@ const PERMISSION_MATRIX = {
   'cash_sessions:close': CASHIER,
   'cash_sessions:read': ALL,
 
+  // ── Accounting periods (القيد المحاسبي) ──────────────────────────────────
+  // Global admins manage any period; branch admins manage their own branch's
+  // (scope enforced in the service). Cashiers do not open/close by default.
+  'accounting_periods:open': BRANCH_ADMIN,
+  'accounting_periods:close': BRANCH_ADMIN,
+  'accounting_periods:read': MANAGER,
+
   // ── Products ─────────────────────────────────────────────────────────────
   'products:create': MANAGER,
   'products:read': ALL,

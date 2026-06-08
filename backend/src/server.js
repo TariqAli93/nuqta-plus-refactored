@@ -40,6 +40,7 @@ import featureFlagsRoutes from './routes/featureFlagsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import cashSessionRoutes from './routes/cashSessionRoutes.js';
+import accountingPeriodRoutes from './routes/accountingPeriodRoutes.js';
 import installmentRoutes from './routes/installmentRoutes.js';
 import collectionsRoutes from './routes/collectionsRoutes.js';
 import expensesRoutes from './routes/expensesRoutes.js';
@@ -149,6 +150,7 @@ const start = async () => {
     await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
     await fastify.register(reportRoutes, { prefix: '/api/reports' });
     await fastify.register(cashSessionRoutes, { prefix: '/api/cash-sessions' });
+    await fastify.register(accountingPeriodRoutes, { prefix: '/api/accounting-periods' });
     await fastify.register(installmentRoutes, { prefix: '/api/installments' });
     await fastify.register(collectionsRoutes, { prefix: '/api/collections' });
     await fastify.register(expensesRoutes, { prefix: '/api/expenses' });

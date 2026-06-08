@@ -31,6 +31,76 @@
       @clear="clearFilters"
     />
 
+    <!-- Accounting-period scoping (القيد المحاسبي). When the feature is on, the
+         live report follows the open period; if none is open it reads zero. -->
+    <v-alert
+      v-if="accountingPeriodsEnabled && report?.meta?.noOpenPeriod"
+      type="info"
+      variant="tonal"
+      density="comfortable"
+      border="start"
+      class="mb-4"
+    >
+      <div class="text-subtitle-2 font-weight-bold mb-1">لا يوجد قيد محاسبي مفتوح</div>
+      <div class="text-body-2">
+        التقارير الحالية تعرض صفراً حتى يتم فتح قيد محاسبي جديد. افتح قيداً محاسبياً لبدء فترة مالية جديدة،
+        أو اطّلع على لقطة أحد القيود المغلقة بالأسفل.
+      </div>
+    </v-alert>
+
+    <!-- Closed-period snapshot viewer — reads the FROZEN snapshot, never live. -->
+    <v-card
+      v-if="accountingPeriodsEnabled && closedPeriods.length"
+      class="page-section mb-4"
+      variant="tonal"
+    >
+      <v-card-text class="d-flex flex-wrap align-center gap-3">
+        <v-icon color="primary">mdi-book-lock-outline</v-icon>
+        <span class="text-subtitle-2">عرض تقرير قيد محاسبي مغلق (لقطة مجمّدة)</span>
+        <v-select
+          v-model="selectedClosedPeriodId"
+          :items="closedPeriodOptions"
+          item-title="title"
+          item-value="value"
+          label="اختر قيداً مغلقاً"
+          variant="outlined"
+          density="compact"
+          hide-details
+          clearable
+          style="max-width: 320px"
+          @update:model-value="loadClosedSnapshot"
+        />
+      </v-card-text>
+      <template v-if="closedSnapshot">
+        <v-divider />
+        <v-card-text>
+          <div class="text-caption text-medium-emphasis mb-2">
+            هذه لقطة مجمّدة وقت الإغلاق — لا تتغير حتى لو تغيّرت الأسعار أو المنتجات لاحقاً.
+          </div>
+          <div
+            v-for="(t, cur) in (closedSnapshot.byCurrency || {})"
+            :key="cur"
+            class="snapshot-block"
+          >
+            <div class="snapshot-cur">{{ cur }}</div>
+            <div class="snapshot-grid">
+              <div><span>صافي المبيعات</span><b>{{ formatCurrency(t.netSalesAfterReturns ?? t.netSales, cur) }}</b></div>
+              <div><span>المرتجعات</span><b>{{ formatCurrency(t.returnedValue, cur) }}</b></div>
+              <div><span>تكلفة البضاعة المباعة</span><b>{{ formatCurrency(t.cogsNet, cur) }}</b></div>
+              <div><span>المصاريف</span><b>{{ formatCurrency(t.expenses, cur) }}</b></div>
+              <div><span>إجمالي الربح</span><b>{{ formatCurrency(t.grossProfit, cur) }}</b></div>
+              <div>
+                <span>صافي الربح / الخسارة</span>
+                <b :class="t.netProfit < 0 ? 'text-error' : 'text-success'">
+                  {{ formatCurrency(t.netProfit, cur) }}
+                </b>
+              </div>
+            </div>
+          </div>
+        </v-card-text>
+      </template>
+    </v-card>
+
     <v-alert
       v-if="report?.meta?.notes?.length"
       type="warning"
@@ -131,6 +201,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useReportStore } from '@/stores/report';
 import { useInventoryStore } from '@/stores/inventory';
 import { useSettingsStore } from '@/stores/settings';
+import { useAccountingPeriodStore } from '@/stores/accountingPeriod';
+import { formatCurrency } from '@/utils/formatters';
 import EmptyState from '@/components/EmptyState.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import ReportHeader from '@/components/reports/ReportHeader.vue';
@@ -144,12 +216,48 @@ const authStore = useAuthStore();
 const reportStore = useReportStore();
 const inventoryStore = useInventoryStore();
 const settingsStore = useSettingsStore();
+const accountingPeriodStore = useAccountingPeriodStore();
 
 const loading = computed(() => reportStore.loading);
 const report = computed(() => reportStore.data);
 const aging = computed(() => reportStore.aging);
 const agingLoading = ref(false);
 const error = ref('');
+
+// ── Accounting periods (القيد المحاسبي) ─────────────────────────────────────
+const accountingPeriodsEnabled = computed(
+  () => authStore.hasFeature?.('accountingPeriods') === true,
+);
+const closedPeriods = computed(() => accountingPeriodStore.closedPeriods || []);
+const closedPeriodOptions = computed(() =>
+  closedPeriods.value.map((p) => ({
+    value: p.id,
+    title: `قيد #${p.id} — ${typeLabelMap[p.type] || p.type}${p.branchName ? ' — ' + p.branchName : ''} (${fmtShort(p.closedAt)})`,
+  })),
+);
+const selectedClosedPeriodId = ref(null);
+const closedSnapshot = ref(null);
+
+const typeLabelMap = { daily: 'يومي', weekly: 'أسبوعي', monthly: 'شهري', yearly: 'سنوي' };
+function fmtShort(d) {
+  if (!d) return '';
+  try {
+    return new Date(d).toLocaleDateString('ar', { dateStyle: 'medium' });
+  } catch {
+    return String(d);
+  }
+}
+
+async function loadClosedSnapshot(id) {
+  if (!id) {
+    closedSnapshot.value = null;
+    return;
+  }
+  // Read the frozen snapshot from the period detail (totals_json) — never the
+  // live report endpoint, so closed-period figures stay fixed.
+  const detail = await accountingPeriodStore.fetchById(id).catch(() => null);
+  closedSnapshot.value = detail?.totals || detail?.totalsJson || null;
+}
 
 const defaultFilters = () => ({
   branchId: null,
@@ -256,6 +364,9 @@ onMounted(async () => {
   await Promise.allSettled([
     settingsStore.fetchCurrencySettings(),
     showBranchFilter.value ? inventoryStore.fetchBranches() : Promise.resolve(),
+    accountingPeriodsEnabled.value
+      ? accountingPeriodStore.fetchAll({ status: 'closed' })
+      : Promise.resolve(),
   ]);
   const cached = localStorage.getItem('reports.filters');
   if (cached) {
@@ -273,6 +384,24 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
+.snapshot-block { margin-bottom: 0.75rem; }
+.snapshot-cur {
+  font-weight: 700;
+  color: rgb(var(--v-theme-primary));
+  margin-bottom: 0.25rem;
+}
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem 1.5rem;
+  div {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dashed rgba(var(--v-theme-on-surface), 0.08);
+    padding: 0.2rem 0;
+  }
+}
+
 @media print {
   .reports-page :deep(.v-tabs),
   .reports-page :deep(.export-actions),

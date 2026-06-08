@@ -8,28 +8,9 @@ import {
 } from '../models/index.js';
 import { eq, and, desc, gte, lte, sql } from 'drizzle-orm';
 import { NotFoundError, ValidationError, AuthorizationError } from '../utils/errors.js';
-import { isGlobalAdmin, branchFilterFor } from './scopeService.js';
+import { isGlobalAdmin, branchFilterFor, resolveEffectiveBranchId } from './scopeService.js';
 import auditService from './auditService.js';
-
-/**
- * Pick a sensible default branch for a session when the caller didn't pass
- * one. Branch-bound users always use their assigned branch; global admins
- * fall back to the first active branch in the system so the session row is
- * never branchId=NULL when at least one branch exists.
- */
-async function resolveSessionBranchId({ requestedBranchId, user }) {
-  if (requestedBranchId) return Number(requestedBranchId);
-  if (user?.assignedBranchId) return Number(user.assignedBranchId);
-  if (!isGlobalAdmin(user)) return null;
-  const db = await getDb();
-  const [first] = await db
-    .select({ id: branches.id })
-    .from(branches)
-    .where(eq(branches.isActive, true))
-    .orderBy(branches.id)
-    .limit(1);
-  return first?.id || null;
-}
+import accountingPeriodService from './accountingPeriodService.js';
 
 /** Parse PG numeric (string) → JS number. */
 const n = (v) => (v === null || v === undefined ? 0 : Number(v));
@@ -66,13 +47,15 @@ export class CashSessionService {
       throw new ValidationError('Opening cash cannot be negative');
     }
 
-    // Branch-bound users always operate on their assigned branch — they cannot
-    // open a session in someone else's branch. Global admins use whatever
-    // branch the request supplied (or the first active branch) so the session
-    // row carries a real branch_id instead of NULL.
-    const effectiveBranchId = isGlobalAdmin(user)
-      ? await resolveSessionBranchId({ requestedBranchId: branchId, user })
-      : user.assignedBranchId || null;
+    // Resolve the branch through the SAME central helper the accounting period
+    // uses, so a shift's branch_id ALWAYS matches the branch_id of the period it
+    // binds to. When branches are off this returns the system default branch
+    // (never null); when on it validates the user's branch permission.
+    const effectiveBranchId = await resolveEffectiveBranchId({
+      user,
+      requestedBranchId: branchId,
+      ensure: true,
+    });
 
     const db = await getDb();
     const existing = await this.findOpenSession(user.id, effectiveBranchId);
@@ -80,17 +63,33 @@ export class CashSessionService {
       throw new ValidationError('User already has an open cash session for this branch');
     }
 
+    // Accounting-period requirement is GATED by the `accountingPeriods` feature
+    // flag (matches featureFlagsService: OFF = behave as before).
+    //   - ON  → a shift can only open inside an OPEN period for this scope;
+    //           resolvePeriodForNewShift rejects (no/closed period) and the
+    //           returned period id is bound to the shift + linked.
+    //   - OFF → legacy POS: the shift opens with accounting_period_id = null and
+    //           is not linked to any period.
+    let periodId = null;
+    if (await accountingPeriodService.isEnabled()) {
+      const period = await accountingPeriodService.resolvePeriodForNewShift(user, effectiveBranchId);
+      periodId = period.id;
+    }
+
     const [row] = await db
       .insert(cashSessions)
       .values({
         userId: user.id,
         branchId: effectiveBranchId,
+        accountingPeriodId: periodId,
         openingCash: String(opening),
         currency,
         status: 'open',
         notes,
       })
       .returning();
+
+    if (periodId) await accountingPeriodService.linkShift(periodId, row.id);
 
     await auditService.log({
       userId: user.id,

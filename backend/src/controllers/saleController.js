@@ -109,6 +109,12 @@ export class SaleController {
   }
 
   async removeSale(request, reply) {
+    // Authorize against the sale's branch BEFORE deleting — mirrors restoreSale.
+    // A branch-restricted user must not delete a sale from another branch.
+    // (Closed accounting-period / closed-shift protection is enforced inside
+    // saleService.removeSale via assertSaleWritable.)
+    const existing = await saleService.getById(request.params.id);
+    enforceBranchScope(request.user, existing.branchId);
     const sale = await saleService.removeSale(request.params.id);
     return reply.send({
       success: true,

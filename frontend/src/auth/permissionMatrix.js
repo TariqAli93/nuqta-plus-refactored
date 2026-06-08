@@ -101,6 +101,11 @@ const PERMISSION_MATRIX = {
   'expenses:delete': BRANCH_MANAGER,
   'view:expenses': MANAGER,
 
+  // Accounting periods (القيد المحاسبي) — mirrors backend matrix.
+  'accounting_periods:open': BRANCH_ADMIN,
+  'accounting_periods:close': BRANCH_ADMIN,
+  'accounting_periods:read': MANAGER,
+
   // Reports — profit-sensitive aggregates
   'reports:read_profit': MANAGER,
 

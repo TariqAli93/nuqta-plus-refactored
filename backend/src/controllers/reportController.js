@@ -8,6 +8,9 @@ const querySchema = z.object({
   currency: z.string().optional().default('ALL'),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
+  // Scope a report to a single accounting period (القيد المحاسبي). When set,
+  // figures are restricted to rows stamped with this period id.
+  accountingPeriodId: z.coerce.number().int().positive().optional(),
   reportType: z.string().optional().default('dashboard'),
 });
 

@@ -214,6 +214,7 @@ export const stockMovements = pgTable(
     warehouseId: integer('warehouse_id')
       .notNull()
       .references(() => warehouses.id),
+    accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
     // 'sale' | 'sale_cancel' | 'sale_return' | 'transfer_in' | 'transfer_out'
     //  | 'manual_adjustment_in' | 'manual_adjustment_out' | 'opening_balance'
     movementType: text('movement_type').notNull(),
@@ -271,6 +272,84 @@ export const warehouseTransfers = pgTable(
   })
 );
 
+// ── Accounting Periods (القيد المحاسبي) ───────────────────────────────────
+// A financial operating window opened once and closed once. Everything that
+// happens between open and close belongs to the period. On close a frozen
+// snapshot of the results is stored in `totalsJson` so later edits to the
+// underlying rows never change a closed period's reported figures.
+//
+// Scope: when multi-branch is OFF there is a single `global` period for the
+// whole system; when ON, one independent period per branch. Exactly one OPEN
+// period per scope is enforced by a partial unique index (see migration 0002).
+// Periods are never deleted and a closed period is immutable.
+export const accountingPeriods = pgTable(
+  'accounting_periods',
+  {
+    id: serial('id').primaryKey(),
+    type: text('type').notNull().default('monthly'), // 'daily'|'weekly'|'monthly'|'yearly'
+    scopeType: text('scope_type').notNull().default('global'), // 'global'|'branch'
+    branchId: integer('branch_id').references(() => branches.id),
+    status: text('status').notNull().default('open'), // 'open'|'closed'
+    openedAt: timestamp('opened_at').defaultNow(),
+    closedAt: timestamp('closed_at'),
+    openedByUserId: integer('opened_by_user_id').references(() => users.id),
+    closedByUserId: integer('closed_by_user_id').references(() => users.id),
+    notes: text('notes'),
+    // Frozen results captured at close time (sales/returns/cogs/expenses/P&L
+    // per currency). Source of truth for reviewing a closed period.
+    totalsJson: jsonb('totals_json'),
+    // Back-reference to the immutable snapshot row written at close (the same
+    // payload as totals_json, stored append-only in its own table).
+    snapshotId: integer('snapshot_id'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index('accounting_periods_status_idx').on(t.status),
+    branchIdx: index('accounting_periods_branch_idx').on(t.branchId),
+  })
+);
+
+// Immutable per-period report snapshot, frozen at close. Closed-period reports
+// read from here and never recompute from the (mutable) sales/expenses tables,
+// so historical reports stay fixed even after prices/products/settings change.
+export const accountingPeriodReportSnapshots = pgTable(
+  'accounting_period_report_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    accountingPeriodId: integer('accounting_period_id')
+      .notNull()
+      .references(() => accountingPeriods.id, { onDelete: 'cascade' }),
+    branchId: integer('branch_id').references(() => branches.id),
+    snapshotJson: jsonb('snapshot_json').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+    createdByUserId: integer('created_by_user_id').references(() => users.id),
+  },
+  (t) => ({
+    periodIdx: uniqueIndex('acc_period_snapshot_period_unique').on(t.accountingPeriodId),
+  })
+);
+
+// Link table: which cash-session shifts belong to a period (a period has many
+// shifts). `shiftId` is unique so a shift can only live in one period.
+export const accountingPeriodShifts = pgTable(
+  'accounting_period_shifts',
+  {
+    id: serial('id').primaryKey(),
+    accountingPeriodId: integer('accounting_period_id')
+      .notNull()
+      .references(() => accountingPeriods.id, { onDelete: 'cascade' }),
+    shiftId: integer('shift_id')
+      .notNull()
+      .references(() => cashSessions.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    shiftIdx: uniqueIndex('accounting_period_shifts_shift_unique').on(t.shiftId),
+    periodIdx: index('accounting_period_shifts_period_idx').on(t.accountingPeriodId),
+  })
+);
+
 // ── Cash Sessions ─────────────────────────────────────────────────────────
 // Tracks per-cashier cash drawer accountability for POS shifts. A user can
 // have only one open session per branch at a time. Cash POS sales are blocked
@@ -285,6 +364,7 @@ export const cashSessions = pgTable(
       .notNull()
       .references(() => users.id),
     branchId: integer('branch_id').references(() => branches.id),
+    accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
     openingCash: numeric('opening_cash', { precision: 18, scale: 4 }).notNull().default('0'),
     closingCash: numeric('closing_cash', { precision: 18, scale: 4 }),
     expectedCash: numeric('expected_cash', { precision: 18, scale: 4 }),
@@ -292,6 +372,9 @@ export const cashSessions = pgTable(
     currency: text('currency').notNull().default('USD'),
     status: text('status').notNull().default('open'), // 'open' | 'closed'
     notes: text('notes'),
+    // Frozen per-shift closing totals (sales/returns/expenses/payments/expected
+    // cash/opening+closing balance), captured when the shift closes.
+    totalsJson: jsonb('totals_json'),
     openedAt: timestamp('opened_at').defaultNow(),
     closedAt: timestamp('closed_at'),
   },
@@ -313,6 +396,7 @@ export const sales = pgTable('sales', {
   branchId: integer('branch_id').references(() => branches.id),
   warehouseId: integer('warehouse_id').references(() => warehouses.id),
   cashSessionId: integer('cash_session_id').references(() => cashSessions.id),
+  accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
   discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),
   tax: numeric('tax', { precision: 18, scale: 4 }).default('0'),
@@ -473,6 +557,10 @@ export const saleReturns = pgTable(
     customerId: integer('customer_id').references(() => customers.id),
     branchId: integer('branch_id').references(() => branches.id),
     warehouseId: integer('warehouse_id').references(() => warehouses.id),
+    accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
+    // The shift the original sale was recorded in — so the return is locked
+    // when that shift closes and is counted in the shift's closing totals.
+    cashSessionId: integer('cash_session_id').references(() => cashSessions.id, { onDelete: 'set null' }),
     // Total monetary value of the returned items (net of per-item discount)
     returnedValue: numeric('returned_value', { precision: 18, scale: 4 }).notNull(),
     // Cash actually refunded to the customer (<= sale.paidAmount).
@@ -791,6 +879,10 @@ export const expenses = pgTable(
   {
     id: serial('id').primaryKey(),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
+    // Shift the expense was recorded in — locks the expense when the shift or
+    // period closes (set null on shift hard-delete to preserve the expense).
+    cashSessionId: integer('cash_session_id').references(() => cashSessions.id, { onDelete: 'set null' }),
     category: text('category').notNull(),
     amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
     currency: text('currency').notNull().default('USD'),
