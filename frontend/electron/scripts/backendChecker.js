@@ -292,6 +292,21 @@ async function reconcileServiceVersion(backendManager, logger, reportedVersion) 
 export async function ensureBackendRunning(backendManager, logger) {
   logger.info(`Checking backend on ${BACKEND_HOST}:${BACKEND_PORT}...`);
 
+  // Startup service diagnostics (req #10): record "service installed" and
+  // "service state" up front so the logs always carry all four checks
+  // (installed → running → /health → /version). /health and /version are
+  // logged below by waitUntilHealthy / verifyVersion.
+  if (isServiceMode) {
+    try {
+      const svcState = await queryServiceState();
+      logger.info(
+        `[startup] service NuqtaPlusBackend: installed=${svcState !== 'not-installed'} state=${svcState}`
+      );
+    } catch (err) {
+      logger.warn(`[startup] could not query service state: ${err.message}`);
+    }
+  }
+
   // (a) Already healthy — validate ownership via /version and we're done.
   if (await checkHealth()) {
     logger.info('Backend already running — verifying ownership');

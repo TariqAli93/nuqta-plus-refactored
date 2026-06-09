@@ -26,11 +26,10 @@ import {
 } from '../scripts/backendUpdater.js';
 import {
   ensureDownloadRoot,
-  trustedRoots,
   sanitizePath,
 } from '../scripts/security.js';
-import { setupAutoUpdater, checkForUpdates, startDownload } from '../scripts/autoUpdater.js';
-import { autoUpdater } from 'electron-updater';
+import { setupAutoUpdater, checkForUpdates, startDownload, installUpdate } from '../scripts/autoUpdater.js';
+import { getServiceDiagnostics, repairService } from '../scripts/serviceController.js';
 import { createLockFile } from '../scripts/firstRun.js';
 import { generateReceiptHtml } from '../scripts/receiptBuilder.js';
 
@@ -45,7 +44,6 @@ const isDev = !app.isPackaged;
  */
 const APP_MODE = process.env.NUQTA_APP_MODE || 'server';
 const isServerMode = APP_MODE === 'server';
-const isClientMode = APP_MODE === 'client';
 
 let mainWindow = null;
 let splashWindow = null;
@@ -332,9 +330,12 @@ function createWindow() {
     }
   });
 
-  // IPC: Install update
+  // IPC: Install update — only on explicit "Restart and Install" (req #6).
+  // Routes through autoUpdater.installUpdate() so it runs silent + auto-elevate
+  // (one UAC prompt), letting the NSIS customInstall repair/start the backend
+  // service elevated before the app relaunches.
   ipcMain.handle('update:install', () => {
-    autoUpdater.quitAndInstall();
+    installUpdate();
   });
 
   ipcMain.handle('getPrinters', async () => {
@@ -830,8 +831,21 @@ async function startNormalApp() {
   createWindow();
 
   if (isServerMode) {
-    // Server mode: spawn and manage the local backend
-    const result = await ensureBackendRunning(backendManager, logger);
+    // Server mode: the backend is hosted by the NuqtaPlusBackend Windows
+    // Service. ensureBackendRunning verifies service-installed/running/health/
+    // version (req #10) and starts the service if it is merely stopped.
+    let result = await ensureBackendRunning(backendManager, logger);
+
+    // Self-heal (req #11): if the backend is in error because the Windows
+    // Service is genuinely MISSING (e.g. removed by an older buggy update),
+    // offer a one-click elevated repair instead of stranding the customer.
+    // Packaged builds only — in dev the backend is a child process, not a
+    // service, so there is nothing to repair.
+    if (result.status === 'error' && !isDev) {
+      const healed = await attemptServiceSelfHeal(result);
+      if (healed) result = healed;
+    }
+
     backendStatus = result.status;
     broadcastBackendStatus({ reason: 'startup', version: result.version, error: result.error });
 
@@ -850,6 +864,112 @@ async function startNormalApp() {
 
   backendReady = true;
   tryToShowMainWindowAfterSplash();
+}
+
+/**
+ * Startup self-heal for the backend Windows Service (server mode only, req #11).
+ *
+ * Fires ONLY when ensureBackendRunning failed AND the service is genuinely NOT
+ * INSTALLED — the precise state an older buggy update could leave behind. A
+ * transient starting/stopping window, a foreign process on the port, or a
+ * version mismatch are NOT treated as "missing" (avoids false-positive repair
+ * prompts during the delayed-auto-start boot window); those are surfaced as
+ * errors by ensureBackendRunning itself.
+ *
+ * On a missing service: show an Arabic repair dialog and, on confirmation, run
+ * the self-elevating repair script, then re-verify. On decline/failure we show
+ * an actionable error dialog (exact manual command + log path) and never
+ * continue silently.
+ *
+ * @returns {Promise<object|null>} the new ensureBackendRunning result if a
+ *          repair was attempted, or null if no repair happened.
+ */
+async function attemptServiceSelfHeal(prevResult) {
+  let diag;
+  try {
+    diag = await getServiceDiagnostics();
+  } catch (err) {
+    logger.error(`[selfheal] diagnostics failed: ${err.message}`);
+    return null;
+  }
+
+  logger.error(
+    `[startup] backend not ready: ${prevResult.error} | ` +
+      `service installed=${diag.installed} state=${diag.state}`
+  );
+
+  // Only the genuinely-missing case is auto-repairable here.
+  if (diag.installed && diag.state !== 'not-installed') {
+    return null;
+  }
+
+  const { response } = await dialog.showMessageBox(mainWindow || null, {
+    type: 'warning',
+    buttons: ['إصلاح الآن', 'لاحقاً'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    title: 'خدمة الخادم غير مثبتة',
+    message: 'خدمة الخادم (NuqtaPlusBackend) غير موجودة على هذا الجهاز.',
+    detail:
+      'يتعذّر تشغيل التطبيق بدون خدمة الخادم. هل تريد إصلاحها الآن؟ ' +
+      'ستظهر نافذة طلب صلاحيات المدير (UAC).',
+  });
+
+  if (response !== 0) {
+    logger.warn('[selfheal] user postponed service repair');
+    showRepairFailedDialog('تم تأجيل الإصلاح من قبل المستخدم.');
+    return null;
+  }
+
+  logger.warn('[selfheal] running elevated service repair…');
+  let repair;
+  try {
+    repair = await repairService();
+  } catch (err) {
+    logger.error(`[selfheal] repairService threw: ${err.message}`);
+    showRepairFailedDialog(err.message);
+    return null;
+  }
+
+  if (repair.code === 1223) {
+    logger.warn('[selfheal] UAC declined by user');
+    showRepairFailedDialog('تم إلغاء طلب صلاحيات المدير (UAC).');
+    return null;
+  }
+  if (!repair.ok) {
+    logger.error(`[selfheal] repair failed (exit ${repair.code})`);
+    showRepairFailedDialog(`فشل الإصلاح (رمز الخروج ${repair.code}).`);
+    return null;
+  }
+
+  logger.info('[selfheal] repair succeeded — re-verifying backend');
+  backendManager.resetRestartPolicy();
+  const after = await ensureBackendRunning(backendManager, logger);
+  if (after.status !== 'ready') {
+    showRepairFailedDialog(after.error || 'ما زالت الخدمة غير صحّية بعد الإصلاح.');
+  }
+  return after;
+}
+
+/** Actionable failure dialog: exact manual repair command + log location. */
+function showRepairFailedDialog(detail) {
+  try {
+    dialog.showMessageBoxSync(mainWindow || null, {
+      type: 'error',
+      buttons: ['حسناً'],
+      noLink: true,
+      title: 'تعذّر إصلاح خدمة الخادم',
+      message: 'لم يتم تشغيل خدمة الخادم (NuqtaPlusBackend).',
+      detail:
+        `${detail}\n\n` +
+        'للإصلاح اليدوي، شغّل الملف التالي بصلاحيات المدير:\n' +
+        '  resources\\backend\\service\\install-service.cmd\n\n' +
+        'سجلات التشخيص: %ProgramData%\\NuqtaPlus\\logs',
+    });
+  } catch (err) {
+    logger.error(`[selfheal] showRepairFailedDialog failed: ${err.message}`);
+  }
 }
 
 // --- IPC: تفعيل الترخيص ---

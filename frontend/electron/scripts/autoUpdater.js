@@ -3,8 +3,16 @@ import { autoUpdater } from 'electron-updater';
 import { app } from 'electron';
 import logger from './logger.js';
 
+// Never download in the background — the user explicitly starts the download
+// from the "Update now" button (req #7).
 autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = true;
+
+// NEVER install silently when the app quits. A downloaded update is applied
+// ONLY when the user clicks "Restart and Install" (installUpdate). Installing
+// on quit ran the perMachine NSIS installer at an uncontrolled moment, which
+// is part of why the backend service used to disappear after updates
+// (reqs #5, #7).
+autoUpdater.autoInstallOnAppQuit = false;
 
 /**
  * Security posture for frontend auto-updates:
@@ -19,7 +27,7 @@ autoUpdater.autoInstallOnAppQuit = true;
  *     NSIS installer's Authenticode signature against the publisher name
  *     configured in build.nsis.publisherName / build.win.publisherName. An
  *     unsigned or wrong-publisher installer is rejected automatically.
- *     Ship only code-signed installers — see the "Code signing" note below.
+ *     Ship only code-signed installers.
  */
 autoUpdater.allowDowngrade = false;
 autoUpdater.allowPrerelease = false;
@@ -52,92 +60,134 @@ function assertHttpsFeed() {
 }
 
 let mainWindow = null;
+let listenersBound = false;
+
+/**
+ * Whether the in-flight check was user-initiated. Only manual checks surface
+ * "checking" / "no update" / "check error" feedback in the UI; the
+ * available → progress → ready → error stream always reaches the renderer
+ * regardless, so the SILENT startup check still pops the update dialog
+ * (reqs #1, #8).
+ */
+let manualCheck = false;
+
+function send(channel, payload = {}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send(channel, payload);
+    } catch (err) {
+      logger.warn(`[updater] failed to post ${channel}: ${err.message}`);
+    }
+  }
+}
 
 function setupAutoUpdater(window) {
   mainWindow = window;
-
-  // التجهيز
   setupListeners();
   assertHttpsFeed();
 
-  // أول فحص بعد التشغيل
-  setTimeout(() => checkForUpdates(), app.isPackaged ? 60000 : 5000);
+  // Silent background check shortly after launch (req #1).
+  setTimeout(() => checkForUpdates(false), app.isPackaged ? 60000 : 5000);
 }
 
-/* 🔥 الفحص اليدوي + إرسال حالة checking */
-function checkForUpdates(manual = false) {
-  if (manual && mainWindow) {
-    mainWindow.webContents.send('update-checking', { manual: true });
-  }
-
-  autoUpdater
-    .checkForUpdates()
-    .then((result) => {
-      if (!result || !result.updateInfo) {
-        if (manual) {
-          mainWindow.webContents.send('update-not-available', { manual: true });
-        }
-        return;
-      }
-
-      const { version, releaseNotes } = result.updateInfo;
-
-      if (manual) {
-        mainWindow.webContents.send('update-available', {
-          manual: true,
-          version,
-          releaseNotes,
-        });
-      }
-    })
-    .catch((err) => {
-      if (manual) {
-        mainWindow.webContents.send('update-error', {
-          manual: true,
-          error: err.message,
-        });
-      }
-    });
-}
-
-/* 🔥 جميع الأحداث الحقيقية */
+/* All real electron-updater events. The available/progress/ready/error stream
+ * is always forwarded; checking/not-available are gated to manual checks. */
 function setupListeners() {
-  // لا يوجد تحديث
-  autoUpdater.on('update-not-available', () => {
-    mainWindow?.webContents.send('update-not-available');
+  if (listenersBound) return;
+  listenersBound = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    logger.info('[updater] checking for update…');
+    if (manualCheck) send('update-checking', { manual: true });
   });
 
-  // يوجد تحديث
   autoUpdater.on('update-available', (info) => {
-    mainWindow?.webContents.send('update-available', {
-      version: info.version,
-      releaseNotes: info.releaseNotes || '',
+    logger.info(`[updater] update AVAILABLE: v${info?.version}`);
+    send('update-available', {
+      version: info?.version,
+      releaseNotes: info?.releaseNotes || '',
+      manual: manualCheck,
+    });
+    manualCheck = false;
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    logger.info(`[updater] no update available (current v${app.getVersion()})`);
+    if (manualCheck) send('update-not-available', { manual: true });
+    manualCheck = false;
+  });
+
+  autoUpdater.on('download-progress', (p) => {
+    const percent = Math.round(p?.percent || 0);
+    logger.info(`[updater] download progress ${percent}% (${p?.transferred}/${p?.total})`);
+    send('update-progress', {
+      percent,
+      transferred: p?.transferred || 0,
+      total: p?.total || 0,
     });
   });
 
-  // بدأ التحميل (نحن نرسل الحدث يدوياً عند downloadUpdate)
-  autoUpdater.on('download-progress', (prog) => {
-    mainWindow?.webContents.send('update-progress', {
-      percent: Math.round(prog.percent),
-      transferred: prog.transferred,
-      total: prog.total,
-    });
-  });
-
-  autoUpdater.on('update-downloaded', () => {
-    mainWindow?.webContents.send('update-ready');
+  autoUpdater.on('update-downloaded', (info) => {
+    logger.info(
+      `[updater] update DOWNLOADED: v${info?.version} — waiting for user to click "Restart and Install"`
+    );
+    send('update-ready', { version: info?.version });
   });
 
   autoUpdater.on('error', (err) => {
-    mainWindow?.webContents.send('update-error', {
-      error: err.message || String(err),
-    });
+    const msg = err?.message || String(err);
+    logger.error(`[updater] error: ${msg}`);
+    send('update-error', { error: msg, manual: manualCheck });
+    manualCheck = false;
   });
 }
 
-function startDownload() {
-  mainWindow?.webContents.send('update-downloading');
-  autoUpdater.downloadUpdate();
+/* 🔥 Check for updates. manual=true when the user pressed "Check for updates". */
+function checkForUpdates(manual = false) {
+  manualCheck = manual;
+  logger.info(`[updater] checkForUpdates (manual=${manual})`);
+
+  if (!app.isPackaged) {
+    logger.info('[updater] not packaged — skipping update check');
+    if (manual) send('update-not-available', { manual: true });
+    manualCheck = false;
+    return;
+  }
+
+  autoUpdater.checkForUpdates().catch((err) => {
+    const msg = err?.message || String(err);
+    logger.error(`[updater] checkForUpdates failed: ${msg}`);
+    if (manual) send('update-error', { manual: true, error: msg });
+    manualCheck = false;
+  });
 }
 
-export { setupAutoUpdater, checkForUpdates, startDownload };
+/* User clicked "Update now" → start the download (req #6 step 1). */
+function startDownload() {
+  logger.info('[updater] startDownload (user requested)');
+  send('update-downloading', {});
+  autoUpdater.downloadUpdate().catch((err) => {
+    const msg = err?.message || String(err);
+    logger.error(`[updater] downloadUpdate failed: ${msg}`);
+    send('update-error', { error: msg });
+  });
+}
+
+/* User clicked "Restart and Install" → apply the update now (req #6). */
+function installUpdate() {
+  logger.info('[updater] install trigger — quitAndInstall(silent=true, forceRunAfter=true)');
+  // Defer so the IPC reply flushes before the app quits. Silent + forceRunAfter:
+  // the perMachine NSIS installer auto-elevates (one UAC prompt), runs
+  // customInstall elevated to repair/start the backend service, and relaunches.
+  setTimeout(() => {
+    try {
+      autoUpdater.quitAndInstall(true, true);
+    } catch (err) {
+      const msg = err?.message || String(err);
+      logger.error(`[updater] quitAndInstall failed: ${msg}`);
+      send('update-error', { error: msg });
+    }
+  }, 0);
+}
+
+export { setupAutoUpdater, checkForUpdates, startDownload, installUpdate };

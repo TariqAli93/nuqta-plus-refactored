@@ -72,6 +72,8 @@ const REQUIRED_AFTER_COPY = [
   'service/status-service.cmd',
   'service/verify-version.ps1',
   'service/free-port.ps1',
+  'service/stop-wait.ps1',
+  'service/repair-service.ps1',
 ];
 
 exports.default = async function afterPack(context) {

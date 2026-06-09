@@ -54,7 +54,7 @@ export const SERVER_INFO_ENDPOINT = `${BACKEND_BASE_URL}/server-info`;
  * and verified by `scripts/verify-versions.js` before each build. Do not edit
  * by hand — bump via `pnpm run bump-version <x.y.z>` instead.
  */
-export const EXPECTED_BACKEND_VERSION = '1.0.18';
+export const EXPECTED_BACKEND_VERSION = '1.0.22';
 
 /**
  * Version compatibility policy.

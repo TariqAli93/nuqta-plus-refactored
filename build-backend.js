@@ -291,6 +291,8 @@ function bundleServiceHost() {
     'status-service.cmd',
     'verify-version.ps1',
     'free-port.ps1',
+    'stop-wait.ps1',
+    'repair-service.ps1',
   ]) {
     const abs = path.join(SERVICE_SCRIPTS_DIST, required);
     if (!fs.existsSync(abs)) fail(`Missing service script: service/${required}`);

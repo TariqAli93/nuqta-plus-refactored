@@ -24,7 +24,7 @@ import logger from './logger.js';
 import { baselineBackendDir } from './versionManager.js';
 import {
   assertExecutable,
-  trustedRoots,
+  assertPathWithin,
   sanitizePath,
   SecurityError,
 } from './security.js';
@@ -83,6 +83,24 @@ export async function queryServiceState() {
     case 'PAUSED': return 'paused';
     default: return 'unknown';
   }
+}
+
+/**
+ * One-shot diagnostics snapshot used by the startup self-heal (main.js).
+ * Returns { installed, state } so the caller can distinguish a genuinely
+ * MISSING service (needs an elevated repair) from a transient
+ * starting/stopping window (just needs more time / a plain start).
+ */
+export async function getServiceDiagnostics() {
+  let installed = false;
+  let state = 'unknown';
+  try {
+    state = await queryServiceState();
+    installed = state !== 'not-installed';
+  } catch (err) {
+    logger.warn(`[svc] getServiceDiagnostics failed: ${err.message}`);
+  }
+  return { installed, state };
 }
 
 /**
@@ -151,6 +169,41 @@ export async function uninstallService() {
   }
 }
 
+/**
+ * Self-healing repair entry point. Runs the shipped, self-elevating
+ * repair-service.ps1 (which re-launches install-service.cmd via UAC and
+ * propagates the real exit code). The Electron app is non-elevated, so the
+ * elevation happens inside PowerShell — see backend/service/repair-service.ps1.
+ *
+ * Returns { ok, code, output }:
+ *   ok === true  → service installed and started
+ *   code === 1223 → user declined the UAC prompt (cancelled)
+ *   other        → install-service.cmd failed (see its exit codes)
+ *
+ * Requires Administrator only transiently (the UAC prompt); the calling
+ * process stays non-elevated. The repair script path is validated against the
+ * trusted baseline backend root so no caller input can redirect it.
+ */
+export async function repairService({ timeoutMs = 180_000 } = {}) {
+  const baseline = baselineBackendDir();
+  const candidate = path.join(baseline, 'service', 'repair-service.ps1');
+  const script = assertPathWithin(candidate, [baseline], 'repair-service.ps1');
+  if (!fs.existsSync(script)) {
+    throw new Error(`repair script not found: ${sanitizePath(script)}`);
+  }
+  const ps = powershellPath();
+  logger.warn(`[svc] repairService: launching elevated repair via ${sanitizePath(script)}`);
+  const { code, stdout } = await runProcess(
+    ps,
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script],
+    { timeoutMs }
+  );
+  const trimmed = (stdout || '').trim();
+  if (trimmed) logger.info(`[svc] repairService output: ${trimmed}`);
+  logger.info(`[svc] repairService exit code=${code}`);
+  return { ok: code === 0, code, output: trimmed };
+}
+
 // ─── internals ──────────────────────────────────────────────────────────────
 
 async function waitForState(target, timeoutMs) {
@@ -188,6 +241,20 @@ function scExePath() {
   return assertExecutable(candidate, [sysRoot], 'sc.exe');
 }
 
+/**
+ * Resolve the absolute path to powershell.exe under %SystemRoot% and validate
+ * it lives there. Used only by repairService to launch the self-elevating
+ * repair script. Defends against PATH hijacking.
+ */
+function powershellPath() {
+  const sysRoot = process.env.SystemRoot || process.env.SYSTEMROOT;
+  if (!sysRoot) {
+    throw new SecurityError('SystemRoot env var is not set — cannot locate powershell.exe');
+  }
+  const candidate = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  return assertExecutable(candidate, [sysRoot], 'powershell.exe');
+}
+
 function runScExe(args) {
   const exe = scExePath();
   return runProcess(exe, args);
@@ -198,7 +265,7 @@ function runWinswExe(args) {
   return runProcess(exe, args);
 }
 
-function runProcess(exe, args) {
+function runProcess(exe, args, opts = {}) {
   return new Promise((resolve) => {
     if (!Array.isArray(args) || args.some((a) => typeof a !== 'string')) {
       return resolve({ code: -1, stdout: 'invalid arguments to runProcess' });
@@ -210,7 +277,7 @@ function runProcess(exe, args) {
     const child = execFile(
       exe,
       args,
-      { windowsHide: true, maxBuffer: 1024 * 1024 },
+      { windowsHide: true, maxBuffer: 1024 * 1024, timeout: opts.timeoutMs || 0 },
       (err, out, errOut) => {
         stdout = `${out || ''}${errOut || ''}`;
         if (err) {
